@@ -168,6 +168,26 @@ describe("S11 actor graph prototype", () => {
     await expect(f.user.query(api.catalogGraph.workspaceMetadata, { workspaceId: ids.workspaceId })).rejects.toThrow();
   });
 
+  it("lists current agents while the summary backfill has not finished, leaving stale summaries out", async () => {
+    const f = await fixture();
+    const ids = await f.t.run(async ctx => {
+      const current = await f.artifact(ctx, "Current agent", 2, { blueprintKey: "agent", ownerAccountId: f.ids.readerId });
+      const stale = await f.artifact(ctx, "Stale agent", 3, { blueprintKey: "agent", ownerAccountId: f.ids.readerId });
+      const summary = await ctx.db.query("spectraArtifactSummaries").withIndex("by_artifact", q => q.eq("artifactId", stale)).unique();
+      await ctx.db.patch(summary!._id, { readModelVersion: 1 });
+      for (const marker of await ctx.db.query("spectraReadModelMigrations").collect()) await ctx.db.delete(marker._id);
+      return { current };
+    });
+    const result = await traverse(cursor => f.user.run(async ctx => {
+      const observer = observeDatabase(ctx.db);
+      const result = await agentGraphPage({ ...ctx, db: observer.db }, { cursor });
+      return { result, ...observer.snapshot(), responseBytes: serializedBytes(result) };
+    }));
+    expect(result.found.map(row => row._id)).toEqual([ids.current]);
+    const page = await f.user.query(api.catalogGraph.listAgents, {});
+    expect(page).toMatchObject({ catchingUp: true });
+  });
+
   it("compares the real workspace caller read with compact traversal in a bounded invitation-history fixture", async () => {
     const f = await fixture();
     const workspaceId = await f.t.run(async ctx => {

@@ -1,6 +1,8 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
+import { createContext, useContext, useEffect, useLayoutEffect, useState } from "react";
+import { isPublicPath, setDocumentDark, setPublicDocument } from "@/lib/document-theme";
 
 type Theme = "light" | "dark";
 
@@ -59,12 +61,14 @@ function persistThemePreference(nextTheme: Theme) {
 }
 
 function applyThemeToDocument(theme: Theme) {
-  const root = document.documentElement;
-  root.classList.toggle("dark", theme === "dark");
+  setDocumentDark(theme === "dark");
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setThemeState] = useState<Theme>("light");
+  const pathname = usePathname();
+  const publicPage = isPublicPath(pathname);
+  useLayoutEffect(() => setPublicDocument(publicPage), [publicPage]);
 
   useEffect(() => {
     const next = resolveInitialTheme();

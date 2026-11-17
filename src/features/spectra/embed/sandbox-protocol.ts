@@ -744,7 +744,7 @@ export function buildSpectraSandboxDocument({
     if (link && link.href) { event.preventDefault(); post({ type: 'spectra:interaction', name: 'link.open', detail: { href: String(link.getAttribute('href') || '').slice(0, 500) } }); }
   });
   // The body's own height, not the document's: the document is at least as tall as the frame, so a frame measured by it could never shrink to its artifact.
-  const reportLayout = () => post({ type: 'spectra:resize', height: Math.max(48, Math.min(budgets.maxHeight, Math.ceil(document.body.scrollHeight) || 48)) });
+  const reportLayout = () => post({ type: 'spectra:resize', height: Math.max(48, Math.min(budgets.maxHeight, Math.ceil(Math.max(document.documentElement.getBoundingClientRect().height, document.body ? document.body.scrollHeight : 0)) || 48)) });
   const accessibleName = (element) => {
     const direct = element.getAttribute('aria-label') || element.getAttribute('title') || '';
     if (direct.trim()) return direct.trim();
@@ -802,7 +802,7 @@ export function buildSpectraSandboxDocument({
     scheduleReport();
   });
   observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true });
-  new ResizeObserver(reportLayout).observe(document.documentElement);
+  const layoutObserver = new ResizeObserver(reportLayout); layoutObserver.observe(document.documentElement); const observeBody = () => { if (document.body) layoutObserver.observe(document.body); }; if (document.body) observeBody(); else document.addEventListener('DOMContentLoaded', observeBody, { once: true });
   const startupTimer = setTimeout(() => { if (!ready) post({ type: 'spectra:error', code: 'startup_timeout', message: 'The embedded experience did not finish starting in time.' }); }, budgets.startupTimeoutMs);
   window.__spectraReady = () => { if (ready) return; ready = true; clearTimeout(startupTimer); scheduleReport(); post({ type: 'spectra:ready', sdkVersion: version }); };
 })();`;

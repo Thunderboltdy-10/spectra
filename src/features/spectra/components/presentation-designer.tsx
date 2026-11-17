@@ -72,16 +72,24 @@ export function PresentationDesigner({
       </section>
       <section aria-labelledby="designer-deck">
         <h4 id="designer-deck">Every slide</h4>
-        <p className="presentation-designer-note">
-          One look across the deck: the first slide as its cover, pictures beside their words. Undo puts every slide back.
-        </p>
-        <div className="presentation-designer-families">
-          {DECK_FAMILIES.map((family) => (
-            <button key={family.id} type="button" disabled={readOnly} onClick={() => onApplyDeck(family.id)}>
-              {family.name}
-            </button>
-          ))}
-        </div>
+        {/* A strictly linked deck keeps its file's layout on every slide, so
+            a deck-wide look would change nothing; say so instead. */}
+        {deck.nativeBinding?.profile === "strict-native" ? (
+          <p className="presentation-designer-note">Every slide keeps the layout from its PowerPoint file.</p>
+        ) : (
+          <>
+            <p className="presentation-designer-note">
+              One look across the deck: the first slide as its cover, pictures beside their words. Undo puts every slide back.
+            </p>
+            <div className="presentation-designer-families">
+              {DECK_FAMILIES.map((family) => (
+                <button key={family.id} type="button" disabled={readOnly} onClick={() => onApplyDeck(family.id)}>
+                  {family.name}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
       </section>
     </div>
   );

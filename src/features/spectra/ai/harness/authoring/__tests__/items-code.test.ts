@@ -152,3 +152,13 @@ describe("code authoring", () => {
     );
   });
 });
+
+describe("flattened code sources", () => {
+  it("restores line breaks a model wrote as escapes", async () => {
+    const { unescapeFlattenedSource } = await import("../../../../code/model");
+    const flat = 'const a = 1;\nconst b = 2;\nfunction add() {\n  return a + b;\n}\nconsole.log("sum", add());';
+    expect(unescapeFlattenedSource(flat).split("\n")).toHaveLength(6);
+    const real = 'const greeting = "hello\nworld"; console.log(greeting.toUpperCase(), greeting.length, 42);';
+    expect(unescapeFlattenedSource(real)).toBe(real);
+  });
+});

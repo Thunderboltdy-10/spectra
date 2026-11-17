@@ -83,6 +83,12 @@ function findClose(source: string, from: number, close: string) {
   return -1;
 }
 
+const CITATION = /^\[\[cite:([^:\]|]+)(?::([^\]|]+))?(?:\|([^\]]+))?\]\]/;
+
+function citationId() {
+  return `cite-${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36).slice(-4)}`;
+}
+
 export function parseInline(source: string, marks: PmMark[] = []): PmNode[] {
   const out: PmNode[] = [];
   let buffer = "";
@@ -129,6 +135,23 @@ export function parseInline(source: string, marks: PmMark[] = []): PmNode[] {
       }
     }
     if (char === "[") {
+      // A citation the model wrote as it does in chat, [[cite:SOURCE(:WHERE)|Label]],
+      // becomes a real citation node instead of raw text with an id in it.
+      const cite = CITATION.exec(rest);
+      if (cite) {
+        flush();
+        out.push({
+          type: "spectraCitation",
+          attrs: {
+            id: citationId(),
+            sourceId: cite[1]!.trim(),
+            evidenceSpanId: cite[2]?.trim() || null,
+            label: cite[3]?.trim() || "Source",
+          },
+        });
+        index += cite[0].length;
+        continue;
+      }
       const link = /^\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/.exec(rest);
       if (link) {
         flush();
@@ -492,7 +515,10 @@ export function serializeInline(nodes: PmNode[] | undefined): string {
     } else if (node.type === "hardBreak") out += "  \n";
     else if (node.type === "inlineEquation" || node.type === "equation")
       out += `$${String(node.attrs?.latex ?? "")}$`;
-    else if (node.content) out += serializeInline(node.content);
+    else if (node.type === "spectraCitation") {
+      const where = typeof node.attrs?.evidenceSpanId === "string" && node.attrs.evidenceSpanId ? `:${node.attrs.evidenceSpanId}` : "";
+      out += `[[cite:${String(node.attrs?.sourceId ?? "")}${where}|${String(node.attrs?.label ?? "Source")}]]`;
+    } else if (node.content) out += serializeInline(node.content);
     else if (typeof node.attrs?.label === "string") out += node.attrs.label;
     else if (typeof node.attrs?.alt === "string") out += node.attrs.alt;
   }
@@ -541,6 +567,9 @@ const MARKDOWN_NODES = new Set([
 
 /** True when a node (and everything in it) has a Markdown form. */
 export function expressibleInMarkdown(node: PmNode): boolean {
+  // A citation Spectra made round-trips as [[cite:…]]; one imported from Word
+  // carries its native field and stays kept as it is.
+  if (node.type === "spectraCitation") return !node.attrs?.native && typeof node.attrs?.sourceId === "string" && Boolean(node.attrs.sourceId);
   if (!MARKDOWN_NODES.has(node.type)) return false;
   return (node.content ?? []).every(expressibleInMarkdown);
 }

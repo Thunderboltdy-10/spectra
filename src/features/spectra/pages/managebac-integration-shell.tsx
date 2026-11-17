@@ -545,11 +545,15 @@ export function PeriodMapPanel({
   const [draft, setDraft] = useState(() => nextPeriod(periodMaps));
   const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   return (
-    <div className="grid gap-x-10 gap-y-7 xl:grid-cols-[minmax(0,1fr)_320px]">
-      <section className="min-w-0">
-        <header className="mb-4">
-          <div className="flex items-center gap-2"><Clock3 size={14} className="text-[var(--accent-mint)]" /><h2 className="text-body font-semibold">Verified school periods</h2></div>
-          <p className="mt-1 max-w-2xl text-micro leading-5 text-[var(--text-tertiary)]">Set the school’s lesson times. Saving a period updates the matching lessons in everyone’s Calendar.</p>
+    <section className="min-w-0">
+        <header className="mb-4 flex items-start justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2"><Clock3 size={14} className="text-[var(--accent-mint)]" /><h2 className="text-body font-semibold">Verified school periods</h2></div>
+            <p className="mt-1 max-w-2xl text-micro leading-5 text-[var(--text-tertiary)]">Set the school’s lesson times. Saving a period updates the matching lessons in everyone’s Calendar.</p>
+          </div>
+          <button type="button" onClick={() => { if (!editorOpen) setDraft(nextPeriod(periodMaps)); setEditorOpen((open) => !open); }} className="grid size-8 shrink-0 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" aria-expanded={editorOpen} aria-label={editorOpen ? "Close period editor" : "Add period"} title={editorOpen ? "Close period editor" : "Add period"}>
+            {editorOpen ? <X size={14} /> : <Plus size={14} />}
+          </button>
         </header>
         {periodMaps.length ? (
           <div className="space-y-1">
@@ -563,20 +567,9 @@ export function PeriodMapPanel({
             ))}
           </div>
         ) : <EmptyState icon={Clock3} title="No verified period map" detail="Events without exact timestamps remain partial until an administrator verifies their period schedule." />}
-      </section>
-
-      <section className="xl:pt-0.5">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h2 className="text-body font-semibold">Period editor</h2>
-            <p className="mt-1 text-micro leading-5 text-[var(--text-tertiary)]">The next period follows the previous one. Adjust the times for breaks.</p>
-          </div>
-          <button type="button" onClick={() => { if (!editorOpen) setDraft(nextPeriod(periodMaps)); setEditorOpen((open) => !open); }} className="grid size-8 shrink-0 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" aria-expanded={editorOpen} aria-label={editorOpen ? "Close period editor" : "Add period"} title={editorOpen ? "Close period editor" : "Add period"}>
-            {editorOpen ? <X size={14} /> : <Plus size={14} />}
-          </button>
-        </div>
       {editorOpen ? <form
-        className="mt-5"
+        aria-label="New period"
+        className="mt-4 rounded-xl border border-[var(--border-subtle)] p-4"
         onSubmit={(event) => {
           event.preventDefault();
           if (!draft.start || !draft.end || minutesFromTime(draft.end) <= minutesFromTime(draft.start)) {
@@ -596,7 +589,7 @@ export function PeriodMapPanel({
           });
         }}
       >
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <label className="text-micro font-medium text-[var(--text-secondary)]">Period ID<input required inputMode="numeric" value={draft.periodKey} onChange={(event) => setDraft((current) => ({ ...current, periodKey: event.target.value, label: current.label === `Period ${current.periodKey}` ? `Period ${event.target.value}` : current.label }))} className="mt-1 h-9 w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 text-micro outline-none focus:border-[var(--accent-mint)]" placeholder="1" /></label>
           <label className="text-micro font-medium text-[var(--text-secondary)]">Label<input required value={draft.label} onChange={(event) => setDraft((current) => ({ ...current, label: event.target.value }))} className="mt-1 h-9 w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 text-micro outline-none focus:border-[var(--accent-mint)]" placeholder="Period 1" /></label>
           <div className="text-micro font-medium text-[var(--text-secondary)]">Start<TimeField label="Start" stepMinutes={5} className="mt-1 w-full" value={draft.start} onChange={(time) => setDraft((current) => ({ ...current, start: time }))} /></div>
@@ -604,10 +597,10 @@ export function PeriodMapPanel({
         </div>
         <label className="mt-3 block text-micro font-medium text-[var(--text-secondary)]">IANA timezone<input required value={draft.timezone} onChange={(event) => setDraft((current) => ({ ...current, timezone: event.target.value }))} className="mt-1 h-9 w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 text-micro" placeholder="Europe/Madrid" /></label>
         <fieldset className="mt-3"><legend className="text-micro font-medium text-[var(--text-secondary)]">Weekdays</legend><div className="mt-1.5 flex flex-wrap gap-1">{weekdays.map((label, value) => <button key={label} type="button" aria-pressed={draft.weekdays.includes(value)} onClick={() => setDraft((current) => ({ ...current, weekdays: current.weekdays.includes(value) ? current.weekdays.filter((day) => day !== value) : [...current.weekdays, value].sort() }))} className={cn("h-7 rounded-md border px-2 text-micro font-semibold", draft.weekdays.includes(value) ? "border-[var(--accent-mint)] bg-[color-mix(in_oklab,var(--accent-mint)_8%,var(--bg-primary))] text-[var(--accent-mint)]" : "border-[var(--border-default)] text-[var(--text-tertiary)]")}>{label}</button>)}</div></fieldset>
-        <button type="submit" disabled={Boolean(busy)} className="mt-4 inline-flex h-9 w-full items-center justify-center gap-2 rounded-md bg-[var(--accent-mint)] text-micro font-semibold text-white disabled:opacity-45"><Save size={13} />Verify period</button>
+        <button type="submit" disabled={Boolean(busy)} className="mt-4 inline-flex h-9 w-full max-w-60 items-center justify-center gap-2 rounded-md bg-[var(--accent-mint)] text-micro font-semibold text-white disabled:opacity-45"><Save size={13} />Verify period</button>
+        <p className="mt-3 text-micro leading-5 text-[var(--text-tertiary)]">The next period follows the previous one. Adjust the times for breaks.</p>
       </form> : null}
-      </section>
-    </div>
+    </section>
   );
 }
 
@@ -622,13 +615,16 @@ export function ManageBacIntegrationShell({ embedded = false }: { embedded?: boo
   const [tab, setTab] = useState<Tab>("overview");
   // School links straight to what needs a decision (?tab=conflicts).
   useEffect(() => {
-    const asked = new URLSearchParams(window.location.search).get("tab");
-    if (!embedded && (asked === "conflicts" || asked === "history")) setTab(asked);
+    const params = new URLSearchParams(window.location.search);
+    const asked = embedded ? params.get("section") : params.get("tab");
+    if (asked === "conflicts" || (!embedded && asked === "history")) setTab(asked);
   }, [embedded]);
   const [detailsTab, setDetailsTab] = useState<"details" | "activity">(
     "details",
   );
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Details open on request, like the other commands; closing lets them go (no folded rail).
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [manifestOpen, setManifestOpen] = useState(false);
   const [disconnectOpen, setDisconnectOpen] = useState(false);
   const [manifestText, setManifestText] = useState("");
@@ -825,6 +821,7 @@ export function ManageBacIntegrationShell({ embedded = false }: { embedded?: boo
         } satisfies BarCommand]
       : []),
     { id: "refresh", icon: "retry", label: "Refresh connection data", labelPolicy: "never", onSelect: () => void refresh() },
+    { id: "details", icon: "info", label: detailsOpen ? "Hide details" : "Details", labelPolicy: "never", active: detailsOpen, onSelect: () => setDetailsOpen((open) => !open) },
     ...(overview?.admin
       ? [{ id: "settings", icon: "settings", label: "ManageBac settings", labelPolicy: "never", onSelect: () => setSettingsOpen(true) } satisfies BarCommand]
       : []),
@@ -986,6 +983,9 @@ export function ManageBacIntegrationShell({ embedded = false }: { embedded?: boo
                             {busy === "recheck" ? "Checking…" : "Check the connection again"}
                           </Button>
                         ) : null}
+                        {embedded && data?.conflicts.length ? (
+                          <Button variant="ghost" size="sm" onClick={() => setTab("conflicts")}>Review {data.conflicts.length} {data.conflicts.length === 1 ? "change" : "changes"}</Button>
+                        ) : null}
                         {!embedded ? <>
                           <Button variant="ghost" size="sm" onClick={() => setTab("history")}>Sync history</Button>
                           <Button variant="ghost" size="sm" onClick={() => setTab("conflicts")}>Review conflicts</Button>
@@ -1056,7 +1056,13 @@ export function ManageBacIntegrationShell({ embedded = false }: { embedded?: boo
                 onResolveIdentity={() => void runAction("identity", () => resolveSpectraManageBacIdentity())}
               />
             ) : tab === "conflicts" ? (
-              data?.conflicts.length ? (
+              <>
+              {embedded ? (
+                <Button variant="ghost" size="sm" className="-ml-2 mb-3" onClick={() => setTab("overview")}>
+                  Back to ManageBac
+                </Button>
+              ) : null}
+              {data?.conflicts.length ? (
                 <ConflictList
                   conflicts={data.conflicts}
                   busy={busy}
@@ -1070,7 +1076,8 @@ export function ManageBacIntegrationShell({ embedded = false }: { embedded?: boo
                   title="Nothing to review"
                   detail="Safe updates from ManageBac apply on their own. Changes that would touch your own edits wait here first."
                 />
-              )
+              )}
+              </>
             ) : (
               <ProvenancePanel
                 records={records}
@@ -1093,8 +1100,9 @@ export function ManageBacIntegrationShell({ embedded = false }: { embedded?: boo
         </Body>
       </Main>
 
-      <SidePanel
+      {detailsOpen ? <SidePanel
         id="managebac.details"
+        onClose={() => setDetailsOpen(false)}
         title="Details"
         icon="info"
         stageMin={640}
@@ -1199,7 +1207,7 @@ export function ManageBacIntegrationShell({ embedded = false }: { embedded?: boo
             </RightCard>
           </div>
         )}
-      </SidePanel>
+      </SidePanel> : null}
 
       {settingsOpen ? (
         <SettingsDialog

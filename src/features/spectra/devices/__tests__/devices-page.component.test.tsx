@@ -18,11 +18,13 @@ const h = vi.hoisted(() => ({
   runLocalDeviceAction: vi.fn(),
   unpairBridge: vi.fn(),
   pairing: null as unknown as Pairing,
+  backlog: undefined as unknown,
 }));
 
 vi.mock("convex/react", () => ({
   useConvex: () => ({ query: vi.fn(async () => []) }),
   useConvexAuth: () => ({ isAuthenticated: true, isLoading: false }),
+  useQueries: (request: Record<string, unknown>) => ("backlog" in request ? { backlog: h.backlog } : {}),
   useQuery: (ref: unknown, args: unknown) => {
     if (args === "skip") return undefined;
     const name = String((ref as { _name?: string })?._name ?? ref);
@@ -41,7 +43,7 @@ vi.mock("../../../../../convex/_generated/api", () => {
   const ref = (name: string) => ({ _name: name });
   return {
     api: {
-      bridge: { syncedNodes: ref("bridge:syncedNodes"), overview: ref("bridge:overview"), requestPairing: ref("bridge:requestPairing"), revokeDevice: ref("bridge:revokeDevice") },
+      bridge: { syncBacklog: ref("bridge:syncBacklog"), syncedNodes: ref("bridge:syncedNodes"), overview: ref("bridge:overview"), requestPairing: ref("bridge:requestPairing"), revokeDevice: ref("bridge:revokeDevice") },
       catalogGraph: { identity: ref("catalogGraph:identity") },
       identity: { session: ref("identity:session") },
       syncPolicy: { effective: ref("syncPolicy:effective"), overrideAccount: ref("syncPolicy:overrideAccount") },
@@ -118,6 +120,7 @@ beforeEach(() => {
     },
   );
   h.cloud = cloud;
+  h.backlog = undefined;
   h.local = bridge(true);
   for (const mock of [h.requestPairing, h.revokeDevice, h.overrideAccount, h.updatePreferences, h.runLocalDeviceAction, h.unpairBridge]) mock.mockReset();
   h.runLocalDeviceAction.mockResolvedValue({ status: "completed", message: "Paused the folder." });
@@ -177,6 +180,27 @@ describe("Devices page", () => {
     expect(await screen.findByText("Paused the folder.")).toBeTruthy();
   });
 
+  it("shows what each folder still has to move, each way", () => {
+    h.backlog = { files: [
+      { grantId: "grant_a", workId: "w1", path: "Notes/Cells.docx", direction: "toComputer" },
+      { grantId: "grant_a", workId: "w2", path: "Lab.docx", direction: "toComputer" },
+      { grantId: "grant_a", workId: "w3", path: "Essay.docx", direction: "toSpectra" },
+      { grantId: "grant_a", workId: "w4", path: "Plan.docx", direction: "conflict" },
+    ] };
+    render(<DevicesPage />);
+    const lanes = screen.getByLabelText("Still to sync");
+    expect(within(lanes).getByText("2 files to this computer")).toBeTruthy();
+    expect(within(lanes).getByText("1 file to Spectra")).toBeTruthy();
+    expect(within(lanes).getByText("1 file changed on both sides")).toBeTruthy();
+  });
+
+  it("keeps the page when the backlog can't be read", () => {
+    h.backlog = new Error("Could not find public function for 'bridge:syncBacklog'");
+    render(<DevicesPage />);
+    expect(screen.getByText("Biology")).toBeTruthy();
+    expect(screen.queryByLabelText("Still to sync")).toBeNull();
+  });
+
   it("asks before it stops using a folder", async () => {
     render(<DevicesPage />);
     fireEvent.click(screen.getByRole("button", { name: "Stop syncing Biology" }));
@@ -203,8 +227,9 @@ describe("Devices page", () => {
     expect(await screen.findByText("Connecting this computer.")).toBeTruthy();
     expect(h.requestPairing).toHaveBeenCalledWith({ browserOrigin: "https://spectra.test" });
     pairingStatus = { paired: true, sessionToken: "token" };
-    await waitFor(() => expect(h.local.refresh).toHaveBeenCalled());
-    expect(screen.queryByText("Connecting this computer.")).toBeNull();
+    // The shortcut looks again at once before joining, so wait for the join's own refresh.
+    await waitFor(() => expect(screen.queryByText("Connecting this computer.")).toBeNull());
+    expect(h.local.refresh).toHaveBeenCalled();
   });
 
   it("starts connecting by itself when Spectra AI or the command bar asks", async () => {
@@ -213,6 +238,37 @@ describe("Devices page", () => {
     render(<DevicesPage />);
     act(() => h.pairing.want());
     expect(await screen.findByText("Connecting this computer.")).toBeTruthy();
+  });
+
+  it("offers Try again on this computer when Bridge is unreachable: it looks again, then reconnects", async () => {
+    h.local = { ...bridge(true), reachability: "not-running", status: status({ paired: false }), discovery: { kind: "not-running" } };
+    render(<DevicesPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(h.local.refresh).toHaveBeenCalled());
+    expect(await screen.findByText("Connecting this computer.")).toBeTruthy();
+  });
+
+  it("says when a computer like this one reports to Spectra but this browser can't reach its Bridge", async () => {
+    const agent = Object.getOwnPropertyDescriptor(window.navigator, "userAgent");
+    Object.defineProperty(window.navigator, "userAgent", { value: "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", configurable: true });
+    try {
+      h.local = { ...bridge(false), reachability: "not-running" };
+      h.cloud = { devices: [{ ...cloud.devices[1], lastSeenAt: Date.now() }], mounts: [] };
+      render(<DevicesPage />);
+      expect((await screen.findByText(/Desk PC is connected to Spectra\. If that's this computer/)).hasAttribute("data-likely-here")).toBe(true);
+      fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+      await waitFor(() => expect(h.local.refresh).toHaveBeenCalled());
+    } finally {
+      if (agent) Object.defineProperty(window.navigator, "userAgent", agent);
+      else delete (window.navigator as { userAgent?: string }).userAgent;
+    }
+  });
+
+  it("asks before reconnecting a computer whose Bridge was disconnected on purpose", () => {
+    h.local = { ...bridge(false), reachability: "running", discovery: { kind: "running", health: { version: "1", paired: false, protocolVersion: "1.0", disconnectedHere: true } } };
+    render(<DevicesPage />);
+    expect(screen.getByText(/This computer was disconnected\. Spectra Bridge is still running here/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Connect this computer" })).toBeTruthy();
   });
 
   it("starts connecting from ?connect=1", async () => {

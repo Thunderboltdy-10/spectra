@@ -31,7 +31,13 @@ export type WorkPreview =
     }
   | { kind: "exchange"; ask: string; answer: string }
   | { kind: "code"; path: string; lines: string[] }
-  | { kind: "slides"; count: number; titles: string[] }
+  | {
+      kind: "slides";
+      count: number;
+      titles: string[];
+      /** The deck's first slide with what drawing it needs, when small enough to keep. */
+      first?: { slide: unknown; theme?: unknown; settings?: unknown; nativeBinding?: unknown };
+    }
   | { kind: "grid"; rows: string[][] }
   | { kind: "board"; pages: number; nodes: WhiteboardNode[]; edges: WhiteboardEdge[] }
   /** A file's first page, drawn small (a PDF). */
@@ -158,7 +164,16 @@ function slidesPreview(content: Json): WorkPreview | null {
   const titles = slides
     .map((slide) => text(slide.title, 80) || text(list(slide.objects).map((object) => firstWords(record(object).content)).find(Boolean), 80))
     .filter(Boolean);
-  return { kind: "slides", count: slides.length, titles: titles.slice(0, 3) };
+  // A card shows the first slide itself, as a deck's thumbnail does, when it
+  // is light enough to keep with the card (pictures are references, not bytes).
+  const first = {
+    slide: slides[0],
+    ...(content.theme ? { theme: content.theme } : {}),
+    ...(content.settings ? { settings: content.settings } : {}),
+    ...(content.nativeBinding ? { nativeBinding: content.nativeBinding } : {}),
+  };
+  const light = JSON.stringify(first).length <= 60_000;
+  return { kind: "slides", count: slides.length, titles: titles.slice(0, 3), ...(light ? { first } : {}) };
 }
 
 /** The first words a slide object holds, wherever its rich text keeps them. */

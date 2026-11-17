@@ -8,6 +8,11 @@ pub struct HealthResponse {
     pub protocol_version: String,
     pub port: u16,
     pub bind_error: Option<String>,
+    /// This computer was disconnected on purpose (from Bridge, or removed in
+    /// Spectra): pages wait for a person to connect it again instead of
+    /// joining by themselves. Absent from older Bridges, so it defaults off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub disconnected_here: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

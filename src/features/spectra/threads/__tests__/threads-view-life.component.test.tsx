@@ -9,6 +9,7 @@ const h = vi.hoisted(() => ({
 }));
 
 vi.mock("../../data/api", () => ({
+  keptSpectraThreads: () => null,
   getSpectraThreads: vi.fn(async () => ({
     threads: [
       { _id: "t1", status: "active", title: "Essay plan", updatedAt: Date.now(), lastMessageAt: Date.now() },

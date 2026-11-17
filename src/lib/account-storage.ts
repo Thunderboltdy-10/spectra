@@ -1,5 +1,7 @@
 import { useSpectraContextStore } from "@/stores/spectra-context-store";
 import { clearRunLedger } from "@/features/spectra/collaboration/run-ledger";
+import { clearThreadCache } from "@/features/spectra/data/thread-cache";
+import { clearKeptThreadIndex } from "@/features/spectra/data/api";
 import { ACCOUNT_SCOPE_KEY, prepareAccountStorageScope, retireAccountStorageRequests } from "./account-storage-scope";
 export { accountStorageScope, accountStorageRevision, accountStorageMatches, assertAccountStorageRevision, retireAccountStorageRequests } from "./account-storage-scope";
 
@@ -11,6 +13,12 @@ const ACCOUNT_LOCAL_PREFIXES = [
   "spectra:compute:",
   "spectra:preferences:",
   "spectra.bridge.",
+  // Kept copies shown while fresh ones load: another account must never see them.
+  "spectra:thread-cache:",
+  "spectra.threads.",
+  "spectra:calendar-overview:",
+  "spectra.agent.",
+  "spectra.island.",
 ];
 
 function removeMatching(storage: Storage, prefixes: readonly string[]) {
@@ -31,6 +39,8 @@ export function clearAccountScopedStorage() {
     // Storage can be unavailable in hardened/private browser contexts.
   }
   clearRunLedger();
+  clearThreadCache();
+  clearKeptThreadIndex();
   try {
     if (typeof indexedDB !== "undefined")
       indexedDB.deleteDatabase("spectra-yjs-room-v1");

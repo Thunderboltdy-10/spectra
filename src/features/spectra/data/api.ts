@@ -746,6 +746,8 @@ export type SpectraRunTab = {
   surface: "chat" | "workspace" | "artifact";
   selected?: boolean;
   hiddenAt?: number;
+  /** The run last seen on some device: read everywhere while it is still `runId`. */
+  seenRunId?: string;
   createdAt: number;
   updatedAt: number;
   run: SpectraRun;
@@ -1145,7 +1147,8 @@ export function getSpectraWorkspaceMetadata(workspaceId: string, signal?: AbortS
 // Workspaces change here or rarely: anything done here invalidates this, so a reload
 // starts from the kept list rather than scanning for it again.
 export const spectraWorkspaceCatalog = createCatalogPageCache<SpectraWorkspace>((_key, cursor, signal) => getSpectraWorkspacePage(cursor, signal), 30 * 60_000, "spectra.workspace.catalog.v1");
-export const spectraAgentCatalog = createCatalogPageCache<SpectraArtifact>((_key, cursor, signal) => getSpectraAgentPage(cursor, signal));
+// Kept across reloads like workspaces, so Agents opens on the last list while it refreshes.
+export const spectraAgentCatalog = createCatalogPageCache<SpectraArtifact>((_key, cursor, signal) => getSpectraAgentPage(cursor, signal), 5 * 60_000, "spectra.agent.catalog.v1");
 
 export async function exportSpectraWorkspaceManifest(workspaceId: string) {
   const qs = new URLSearchParams({
@@ -2627,22 +2630,76 @@ export async function getSpectraThreads(params?: {
   force?: boolean;
 }) {
   // No abort signal: the request is shared, and one caller leaving must not fail the others.
-  const qs = new URLSearchParams({ action: "threads" });
-  if (params?.includeArchived) qs.set("includeArchived", "true");
-  if (params?.brief) qs.set("brief", "true");
-  qs.set("limit", String(params?.limit ?? SPECTRA_THREAD_INDEX_LIMIT));
-  if (params?.cursor) qs.set("cursor", params.cursor);
+  const qs = threadIndexQuery(params);
   const key = qs.toString();
   return coalesceInFlight(
     threadIndexRequests,
     key,
     FIRST_PAINT_FETCH_TTL_MS,
     () =>
-      requestSpectra(`/api/spectra?${qs.toString()}`, { cache: "no-store" }).then(
-        (response) => readJson<SpectraThreadPage>(response),
-      ),
+      requestSpectra(`/api/spectra?${qs.toString()}`, { cache: "no-store" })
+        .then((response) => readJson<SpectraThreadPage>(response))
+        .then((page) => {
+          if (!params?.cursor) keepThreadIndex(key, page);
+          return page;
+        }),
     { force: params?.force },
   );
+}
+
+type ThreadIndexParams = { includeArchived?: boolean; limit?: number; cursor?: string; brief?: boolean };
+
+function threadIndexQuery(params?: ThreadIndexParams) {
+  const qs = new URLSearchParams({ action: "threads" });
+  if (params?.includeArchived) qs.set("includeArchived", "true");
+  if (params?.brief) qs.set("brief", "true");
+  qs.set("limit", String(params?.limit ?? SPECTRA_THREAD_INDEX_LIMIT));
+  if (params?.cursor) qs.set("cursor", params.cursor);
+  return qs;
+}
+
+/*
+ * The newest page of each thread list is kept in this browser, so a list shows
+ * at once on the next visit while the fresh page is read (it is never shown
+ * instead of a fresh read). Cleared when another account signs in.
+ */
+const KEPT_THREAD_INDEX = "spectra.threads.index.v1";
+const KEPT_THREAD_INDEX_MAX_AGE = 7 * 24 * 60 * 60_000;
+let keptThreadIndex: Record<string, { at: number; page: SpectraThreadPage }> | null = null;
+
+function loadKeptThreadIndex() {
+  if (keptThreadIndex) return keptThreadIndex;
+  keptThreadIndex = {};
+  if (typeof window === "undefined") return keptThreadIndex;
+  try {
+    const raw = JSON.parse(window.localStorage.getItem(KEPT_THREAD_INDEX) ?? "{}") as typeof keptThreadIndex;
+    for (const [key, entry] of Object.entries(raw ?? {}))
+      if (entry?.page && Date.now() - entry.at < KEPT_THREAD_INDEX_MAX_AGE) keptThreadIndex[key] = entry;
+  } catch {
+    // Corrupt or blocked storage: lists are just read again.
+  }
+  return keptThreadIndex;
+}
+
+function keepThreadIndex(key: string, page: SpectraThreadPage) {
+  const kept = loadKeptThreadIndex();
+  kept[key] = { at: Date.now(), page };
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(KEPT_THREAD_INDEX, JSON.stringify(kept));
+  } catch {
+    // Storage full or blocked: kept for this visit only.
+  }
+}
+
+/** The newest page of this thread list as last read, to show while a fresh one loads. */
+export function keptSpectraThreads(params?: Omit<ThreadIndexParams, "cursor">): SpectraThreadPage | null {
+  return loadKeptThreadIndex()[threadIndexQuery(params).toString()]?.page ?? null;
+}
+
+export function clearKeptThreadIndex() {
+  keptThreadIndex = {};
+  threadIndexRequests.clear();
 }
 
 export async function getSpectraThread(threadId: string) {
@@ -3055,6 +3112,6 @@ export function workspaceItemToArtifactCardView(
  * the reader can add to it, or in their own workspace it shows inside; with a
  * folder node, right beside the original.
  */
-export async function copySpectraArtifact(artifactId: string, place?: { workspaceId?: string; parentNodeId?: string }) {
+export async function copySpectraArtifact(artifactId: string, place?: { workspaceId?: string; parentNodeId?: string; keepTitle?: boolean }) {
   return postSpectra<{ artifactId: string }>({ action: "copyArtifact", artifactId, ...place });
 }

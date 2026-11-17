@@ -228,6 +228,38 @@ export const overview = query({ args: {}, handler: async (ctx) => {
 } });
 
 /**
+ * What each synced folder still has to move, both ways, file by file: work
+ * changed in Spectra and not yet written to the computer ("behind", or a
+ * write still pending), files changed on the computer and not yet in Spectra
+ * ("ahead"), and the ones that need a person (changed on both sides, or a
+ * write that failed). Read only from the replica states, a bounded page each.
+ */
+export const syncBacklog = query({ args: {}, handler: async (ctx) => {
+  const actor = await getOptionalAuthenticatedActor(ctx);
+  if (!actor) return null;
+  const mounts = await ctx.db.query("bridgeMounts")
+    .withIndex("by_account_state", (q) => q.eq("accountId", actor.accountId).eq("state", "active"))
+    .take(100);
+  const grantOf = new Map(mounts.map((mount) => [String(mount._id), mount.grantId]));
+  type Direction = "toComputer" | "toSpectra" | "conflict" | "problem";
+  const directions: Array<[Doc<"workReplicas">["state"], Direction]> = [
+    ["behind", "toComputer"], ["pending", "toComputer"], ["ahead", "toSpectra"], ["diverged", "conflict"], ["error", "problem"],
+  ];
+  const files: Array<{ grantId: string; workId: string; path: string; direction: Direction }> = [];
+  for (const [state, direction] of directions) {
+    const rows = await ctx.db.query("workReplicas")
+      .withIndex("by_account_state", (q) => q.eq("accountId", actor.accountId).eq("state", state))
+      .take(200);
+    for (const row of rows) {
+      const grantId = row.kind === "local" && row.mountId ? grantOf.get(String(row.mountId)) : undefined;
+      if (!grantId) continue;
+      files.push({ grantId, workId: String(row.workId), path: row.relativePath ?? "", direction });
+    }
+  }
+  return { files };
+} });
+
+/**
  * Where files from this account's computers stand in the Library. An empty
  * path asks for the synced folder itself. A file still arriving has no answer
  * yet, so it reads as null.
@@ -384,7 +416,17 @@ async function trashDeviceFiles(ctx: MutationCtx, accountId: Id<"accounts">, dev
     .take(200);
   for (const mount of mounts) {
     if (!mount.selectedFile && mount.rootOrgNodeId) {
-      const root = await ctx.db.get(mount.rootOrgNodeId);
+      const rootOrgNodeId = mount.rootOrgNodeId;
+      // A folder shared with another computer (the same OneDrive folder) stays for that one.
+      const shared = mount.rootKey
+        ? (await Promise.all(
+            (await ctx.db.query("bridgeDevices").withIndex("by_account_state", (q) => q.eq("accountId", accountId).eq("state", "active")).take(20))
+              .filter((other) => other._id !== deviceId)
+              .map((other) => ctx.db.query("bridgeMounts").withIndex("by_device_root_key", (q) => q.eq("deviceId", other._id).eq("rootKey", mount.rootKey)).unique()),
+          )).some((twin) => twin && twin.state !== "revoked" && twin.rootOrgNodeId === rootOrgNodeId)
+        : false;
+      if (shared) continue;
+      const root = await ctx.db.get(rootOrgNodeId);
       if (root && root.accountId === accountId) await trashNode(ctx, root);
       continue;
     }
@@ -417,6 +459,22 @@ async function retireDevice(ctx: MutationCtx, deviceId: Id<"bridgeDevices">, now
     { deviceId, step: 0 },
   );
 }
+
+/**
+ * Bridge was disconnected on its own computer: Spectra forgets that computer
+ * as if it were removed on the Devices page, so it never stays listed as
+ * connected. Its files stay in Spectra. Proven by the device's own key.
+ */
+export const disconnectSelf = mutation({
+  args: { credential: v.string() },
+  handler: async (ctx, args) => {
+    const credentialHash = await digest(z.string().min(32).max(256).parse(args.credential));
+    const device = await ctx.db.query("bridgeDevices").withIndex("by_credential_hash", (q) => q.eq("credentialHash", credentialHash)).unique();
+    if (!device || device.state !== "active") return { disconnected: false };
+    await retireDevice(ctx, device._id, Date.now());
+    return { disconnected: true };
+  },
+});
 
 export const revokeDevice = mutation({
   args: { deviceId: v.id("bridgeDevices"), removeFiles: v.optional(v.boolean()) },

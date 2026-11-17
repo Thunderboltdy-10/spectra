@@ -272,6 +272,24 @@ export function reconcileLineIds(
   ];
 }
 
+/**
+ * Source that reached us with its line breaks written as escapes (a literal
+ * backslash-n) — a model that double-encoded the file — shows as one long line
+ * and won't build. A whole file on one line with several such escapes is that,
+ * not real code (a real one-liner rarely has more than one or two), so the
+ * escapes are turned back into the characters they stand for.
+ */
+export function unescapeFlattenedSource(source: string) {
+  if (source.includes("\n") || source.length < 80) return source;
+  const escapes = source.match(/\\n/g)?.length ?? 0;
+  if (escapes < 3) return source;
+  return source
+    .replace(/\\r\\n/g, "\n")
+    .replace(/\\n/g, "\n")
+    .replace(/\\t/g, "\t")
+    .replace(/\\"/g, '"');
+}
+
 export function normalizeCodeContent(value: unknown): CodeContent {
   const input =
     value && typeof value === "object" && !Array.isArray(value)
@@ -303,7 +321,7 @@ export function normalizeCodeContent(value: unknown): CodeContent {
     }
     paths.add(uniquePath.toLowerCase());
     const source =
-      typeof row.source === "string" ? row.source.replaceAll("\r\n", "\n") : "";
+      typeof row.source === "string" ? unescapeFlattenedSource(row.source.replaceAll("\r\n", "\n")) : "";
     const incomingIds =
       Array.isArray(row.lineIds) &&
       row.lineIds.every((id) => typeof id === "string")

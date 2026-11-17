@@ -834,3 +834,25 @@ export function closeRequestReaches(
     (request.instance ?? null) === (studio.instanceKey ?? null)
   );
 }
+
+/**
+ * Native editors (document, code) read their body from Yjs, so the studio
+ * keeps the React body it was opened with. A list row has no body: it must
+ * take the live model's body once the room is ready, or code opens on the
+ * empty template with file ids that aren't in the room.
+ */
+export function shouldAdoptLiveBody(input: {
+  nativeBodyBinding: boolean;
+  rowHasBody: boolean;
+  alreadyAdopted: boolean;
+  liveInitialized: boolean;
+  liveBody: unknown;
+}) {
+  return (
+    input.nativeBodyBinding &&
+    !input.rowHasBody &&
+    !input.alreadyAdopted &&
+    input.liveInitialized &&
+    input.liveBody !== undefined
+  );
+}

@@ -14,8 +14,11 @@ vi.mock("../shared/school-sync", async (importOriginal) => {
 const modules = import.meta.glob("./**/*.ts");
 const fixture = (role: "student" | "school_admin" = "student") => calendarFixture(modules, role);
 
-beforeEach(() => vi.stubEnv("SPECTRA_CONNECTOR_BRIDGE_KEY", bridgeKey));
-afterEach(() => vi.unstubAllEnvs());
+// The fixture's task is due 2026-10-24; tasks already past when first seen
+// stay in ManageBac, so the clock sits before it.
+const FIXTURE_NOW = Date.parse("2026-10-01T00:00:00Z");
+beforeEach(() => { vi.stubEnv("SPECTRA_CONNECTOR_BRIDGE_KEY", bridgeKey); vi.useFakeTimers({ toFake: ["Date"], now: FIXTURE_NOW }); });
+afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); });
 
 describe("ManageBac task refresh preserves personal work", () => {
   for (const status of ["active", "completed", "cancelled", "removed"] as const) {

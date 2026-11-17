@@ -106,8 +106,14 @@ export function BridgeConnection() {
   const setupPending = useSetupDue(preferences.integrations);
   const inSetup = !accountReady || setupPending || touring;
   const hasDevice = useSession()?.hasDevice;
-  // A computer removed on purpose waits for "Pair again" instead of joining by itself.
-  const unjoined = checked && discovery.kind === "running" && !status?.paired && !bridgeRemovedHere();
+  // A computer removed or disconnected on purpose (here or in Bridge itself)
+  // waits for a person to connect it again instead of joining by itself.
+  const unjoined =
+    checked &&
+    discovery.kind === "running" &&
+    !discovery.health.disconnectedHere &&
+    !status?.paired &&
+    !bridgeRemovedHere();
   const [activation, setActivation] = useState(0);
   useEffect(() => {
     const activate = () => {

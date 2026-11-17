@@ -501,9 +501,12 @@ export const presentationContentSchema = z
           });
         }
         objectIds.add(object.id);
+        // PowerPoint lets shapes run past the slide edge (bleeds, rotated
+        // bands); an opened deck keeps them where the file put them.
         if (
-          object.x + object.width > 1_000 ||
-          object.y + object.height > canvasHeight
+          !deck.nativeBinding &&
+          (object.x + object.width > 1_000 ||
+            object.y + object.height > canvasHeight)
         ) {
           context.addIssue({
             code: z.ZodIssueCode.custom,

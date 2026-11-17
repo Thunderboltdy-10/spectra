@@ -19,7 +19,7 @@ vi.mock("next/font/google", () => ({ Figtree: () => ({ variable: "font-main" }),
 vi.mock("../account-gate", () => ({ AccountGate: ({ children }: { children: import("react").ReactNode }) => children }));
 vi.mock("next/navigation", () => ({ usePathname: () => route.pathname, useRouter: () => ({ push: vi.fn() }), useSearchParams: () => new URLSearchParams("section=appearance") }));
 vi.mock("next/link", () => ({ default: ({ children, ...props }: { children: ReactNode } & { prefetch?: boolean }) => { delete props.prefetch; return <a {...props}>{children}</a>; } }));
-vi.mock("@clerk/nextjs", () => ({ ClerkProvider: ({ children }: { children: ReactNode }) => children, useClerk: () => ({ openUserProfile: vi.fn() }) }));
+vi.mock("@clerk/nextjs", () => ({ ClerkProvider: ({ children }: { children: ReactNode }) => children, useClerk: () => ({ openUserProfile: vi.fn() }), useUser: () => ({ user: null }) }));
 vi.mock("@/lib/clerk-config", () => ({ getClerkPublishableKey: () => undefined }));
 vi.mock("@/lib/boot-diagnostics", () => ({ checkDeploymentConsistency: () => {} }));
 vi.mock("@/components/providers", () => ({ Providers: ({ children }: { children: ReactNode }) => children }));

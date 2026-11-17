@@ -47,6 +47,8 @@ export function LibraryCrumbs({
               type="button"
               data-drop-node={step.nodeId ?? "root"}
               data-drop-kind="container"
+              data-shelf-place={step.nodeId && !active ? step.nodeId : undefined}
+              data-shelf-name={step.nodeId && !active ? step.label : undefined}
               data-life-receive
               aria-current={active ? "location" : undefined}
               aria-label={home ? step.label : undefined}
@@ -95,7 +97,10 @@ export function crumbSteps({
   const top: CrumbStep = { label: "Library home", nodeId: null, onSelect: floor ? onLeaveFloor : undefined };
   if (!floor) return [top, ...path.map(step)];
   const below = path.findIndex((node) => node.nodeId === floor.nodeId);
-  const inside = [{ label: floor.label, nodeId: floor.nodeId }, ...(below === -1 ? [] : path.slice(below + 1).map(step))];
+  // A folder reached through a reference lives outside the workspace: it
+  // follows the workspace directly, so the reader still sees where they are.
+  const within = below === -1 ? path.slice(-1).filter((node) => node.nodeId !== floor.nodeId) : path.slice(below + 1);
+  const inside = [{ label: floor.label, nodeId: floor.nodeId }, ...within.map(step)];
   // A surface that cannot leave its workspace starts its path there.
   return onLeaveFloor ? [top, ...inside] : inside;
 }

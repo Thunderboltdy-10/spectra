@@ -26,6 +26,7 @@ export function LiveCodeRuntime({
   compact,
   allowInteraction,
   resources,
+  chromeless = compact,
 }: {
   artifactId: string;
   title: string;
@@ -33,13 +34,37 @@ export function LiveCodeRuntime({
   compact: boolean;
   allowInteraction: boolean;
   resources?: Record<string, unknown>;
+  /** In a thread: no card or toolbar of its own, so it blends into the reply. */
+  chromeless?: boolean;
 }) {
-  const content = useMemo(() => normalizeCodeContent(rawContent), [rawContent]);
+  const normalized = useMemo(() => normalizeCodeContent(rawContent), [rawContent]);
+  // What the preview is built from. A new object with the same code (a
+  // refetch, a focus, a re-render) is not a reason to rebuild.
+  const signature = useMemo(
+    () =>
+      JSON.stringify([
+        normalized.runtime,
+        normalized.entryFileId,
+        normalized.files,
+        normalized.dependencies ?? {},
+        normalized.assets ?? [],
+        normalized.visualisation.enabled,
+      ]),
+    [normalized],
+  );
+  const builtSignature = useRef<string | null>(null);
+  const content = normalized;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const buildContent = useMemo(() => normalized, [signature]);
   const [state, setState] = useState<RuntimeState>("loading");
   const [message, setMessage] = useState(
     "Preparing the live preview…",
   );
   const [previewFiles, setPreviewFiles] = useState<CodeFile[] | null>(null);
+  // A newer version failed to build while an older one is showing.
+  const [staleNote, setStaleNote] = useState<string | null>(null);
+  const previewRef = useRef<CodeFile[] | null>(null);
+  previewRef.current = previewFiles;
   const [assets, setAssets] = useState<SpectraSandboxAsset[]>([]);
   const [pythonState, setPythonState] = useState<
     "idle" | "loading" | "running" | "ready" | "error"
@@ -48,24 +73,31 @@ export function LiveCodeRuntime({
   const [pythonPreview, setPythonPreview] = useState<string | null>(null);
   const workerRef = useRef<{ cancel: () => void } | null>(null);
   const generationRef = useRef(0);
+  const abortRef = useRef<AbortController | null>(null);
 
   const prepare = useCallback(() => {
     generationRef.current += 1;
     const generation = generationRef.current;
+    builtSignature.current = signature;
+    abortRef.current?.abort();
     workerRef.current?.cancel();
     workerRef.current = null;
-    setState("loading");
-    setMessage("Preparing the live preview…");
-    setPreviewFiles(null);
-    setAssets([]);
+    // While a preview is showing, the next one is built behind it and swapped
+    // in only once it is ready: no flash back to a loading state.
+    const showing = Boolean(previewRef.current?.length);
+    if (!showing) {
+      setState("loading");
+      setMessage("Preparing the live preview…");
+    }
     setPythonState("idle");
     setPythonOutput([]);
     setPythonPreview(null);
     const controller = new AbortController();
+    abortRef.current = controller;
     void (async () => {
       const loaded = await loadCodeRuntimeAssets(
         artifactId,
-        content.assets ?? [],
+        buildContent.assets ?? [],
       );
       if (controller.signal.aborted || generation !== generationRef.current)
         return;
@@ -74,13 +106,14 @@ export function LiveCodeRuntime({
       }
       setAssets(loaded.assets);
       if (
-        content.runtime === "none" ||
-        content.runtime === "python" ||
-        content.visualisation.enabled === false
+        buildContent.runtime === "none" ||
+        buildContent.runtime === "python" ||
+        buildContent.visualisation.enabled === false
       ) {
+        setPreviewFiles(null);
         setState("ready");
         setMessage(
-          content.runtime === "python"
+          buildContent.runtime === "python"
             ? "Python source is ready in a disposable worker."
             : "Source is available without an executable preview.",
         );
@@ -91,10 +124,10 @@ export function LiveCodeRuntime({
         headers: { "Content-Type": "application/json" },
         signal: controller.signal,
         body: JSON.stringify({
-          runtime: content.runtime,
-          entryFileId: content.entryFileId,
-          files: content.files,
-          dependencies: content.dependencies ?? {},
+          runtime: buildContent.runtime,
+          entryFileId: buildContent.entryFileId,
+          files: buildContent.files,
+          dependencies: buildContent.dependencies ?? {},
         }),
       });
       const payload = (await response.json().catch(() => null)) as {
@@ -118,7 +151,7 @@ export function LiveCodeRuntime({
       if (controller.signal.aborted || generation !== generationRef.current)
         return;
       setPreviewFiles(
-        content.runtime === "browser"
+        buildContent.runtime === "browser"
           ? (payload.build.files ?? [])
           : [
               {
@@ -141,23 +174,48 @@ export function LiveCodeRuntime({
               },
             ],
       );
+      setStaleNote(null);
       setState("ready");
       setMessage("Live preview rebuilt from your latest code.");
     })().catch((error) => {
       if (controller.signal.aborted || generation !== generationRef.current)
         return;
-      setState("error");
-      setMessage(
+      const detail =
         error instanceof Error
           ? error.message
-          : "The live preview could not open. Try again in a moment.",
-      );
+          : "The live preview could not open. Try again in a moment.";
+      // Half-written code (while Spectra is still writing it) often fails to
+      // build: keep the last good preview and say so quietly.
+      if (previewRef.current?.length) {
+        setStaleNote(detail);
+        return;
+      }
+      setState("error");
+      setMessage(detail);
     });
-    return () => controller.abort();
-  }, [artifactId, content]);
+  }, [artifactId, buildContent, signature]);
 
-  useEffect(() => prepare(), [prepare]);
-  useEffect(() => () => workerRef.current?.cancel(), []);
+  // The first build starts at once; later changes (code streaming in, edits)
+  // settle for a moment so the preview updates smoothly instead of constantly.
+  useEffect(() => {
+    if (builtSignature.current === signature) return;
+    if (!previewRef.current?.length && builtSignature.current === null) {
+      prepare();
+      return;
+    }
+    const timer = window.setTimeout(prepare, 700);
+    return () => window.clearTimeout(timer);
+  }, [prepare, signature]);
+  useEffect(
+    () => () => {
+      abortRef.current?.abort();
+      workerRef.current?.cancel();
+      // An aborted build never finishes: if this component mounts again
+      // (StrictMode, a kept-alive embed) it must build afresh, not wait on it.
+      builtSignature.current = null;
+    },
+    [],
+  );
 
   const handlePythonEvent = useCallback((event: PythonRuntimeEvent) => {
     if (event.type === "status") {
@@ -233,6 +291,7 @@ export function LiveCodeRuntime({
         spinning
         title="Rebuilding live preview"
         detail={message}
+        plain={chromeless}
       />
     );
   if (state === "error")
@@ -252,7 +311,7 @@ export function LiveCodeRuntime({
   if (content.runtime === "browser" || content.runtime === "react") {
     if (content.visualisation.enabled !== false && previewFiles?.length)
       return (
-        <div className="space-y-2">
+        <div className="space-y-2" data-live-code-preview="">
           {!allowInteraction ? (
             <div className="flex items-center gap-1.5 px-1 text-micro font-semibold text-[var(--text-tertiary)]">
               <LockKeyhole className="h-3 w-3" /> View-only live preview
@@ -272,9 +331,15 @@ export function LiveCodeRuntime({
                 : undefined
             }
             compact={compact}
-            toolbar={!compact}
+            toolbar={!chromeless}
+            chromeless={chromeless}
             className={!allowInteraction ? "pointer-events-none" : ""}
           />
+          {staleNote ? (
+            <p className="px-1 text-micro text-[var(--text-tertiary)]" role="status">
+              Showing the last version that ran. The latest change didn&apos;t build: {staleNote}
+            </p>
+          ) : null}
         </div>
       );
   }
@@ -371,15 +436,20 @@ function RuntimeNotice({
   title,
   detail,
   action,
+  plain,
 }: {
   icon: typeof AlertTriangle;
   spinning?: boolean;
+  /** In a thread: no card of its own, so it blends into the reply. */
+  plain?: boolean;
   title: string;
   detail: string;
   action?: { label: string; onClick: () => void };
 }) {
   return (
-    <div className="flex min-h-40 items-center justify-center rounded-card border border-dashed border-[var(--border-strong)] bg-[var(--bg-secondary)] p-5 text-center">
+    <div
+      className={`flex min-h-40 items-center justify-center p-5 text-center ${plain ? "" : "rounded-card border border-dashed border-[var(--border-strong)] bg-[var(--bg-secondary)]"}`}
+    >
       <div className="max-w-sm">
         <Icon
           className={`mx-auto h-5 w-5 text-[var(--text-tertiary)] ${spinning ? "animate-spin motion-reduce:animate-none" : ""}`}

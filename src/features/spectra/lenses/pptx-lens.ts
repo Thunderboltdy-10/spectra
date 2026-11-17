@@ -171,6 +171,8 @@ function placeholderChain(shape: XmlElement, context: SlideContext): XmlElement[
 type SlideContext = {
   layoutPlaceholders: XmlElement[];
   masterPlaceholders: XmlElement[];
+  /** The master's body text style (`p:txStyles/p:bodyStyle`): bullets by level. */
+  masterBodyStyle?: XmlElement;
   palette: DrawingPalette;
   canvas: { width: number; height: number };
 };
@@ -266,7 +268,96 @@ function oleLabel(progId: string | undefined) {
  * SmartArt diagram. It keeps its part untouched; the projection says what it
  * is, its fallback picture when PowerPoint saved one, and a SmartArt's words.
  */
-async function nativeObjectFor(deck: Presentation, slidePartName: string, shape: XmlElement) {
+const DIAGRAM_DRAWING_RELATIONSHIP = "http://schemas.microsoft.com/office/2007/relationships/diagramDrawing";
+const DIAGRAM_DRAWING_NAMESPACE = "http://schemas.microsoft.com/office/drawing/2008/diagram";
+
+/** One box of a SmartArt as PowerPoint last laid it out, in fractions of its frame. */
+export type PptxSmartArtShape = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation?: number;
+  fill?: string;
+  line?: string;
+  geometry?: string;
+  text?: string;
+  fontSizePt?: number;
+  color?: string;
+  align?: "left" | "center" | "right";
+};
+
+/**
+ * PowerPoint saves every SmartArt's last layout as plain shapes beside its
+ * data (`dsp:drawing`). Drawing those is what makes the diagram look as it
+ * does in PowerPoint; the diagram parts themselves stay untouched.
+ */
+async function smartArtDrawing(
+  deck: Presentation,
+  slidePartName: string,
+  frame: XmlElement,
+  dataRoot: XmlElement | undefined,
+  palette: DrawingPalette,
+): Promise<PptxSmartArtShape[]> {
+  const slidePart = deck.office.package.getPart(slidePartName);
+  if (!slidePart) return [];
+  const drawingIds = slidePart.relationships().byType(DIAGRAM_DRAWING_RELATIONSHIP).map((relationship) => relationship.id);
+  const modelId = dataRoot ? descendants(dataRoot).find((node) => node.localName === "dataModelExt")?.getAttribute("relId") : undefined;
+  const drawingId = modelId && drawingIds.includes(modelId) ? modelId : drawingIds.length === 1 ? drawingIds[0] : undefined;
+  const drawingPart = drawingId ? deck.office.package.relatedPart(slidePart, drawingId) : undefined;
+  if (!drawingPart) return [];
+  const frameExt = descendants(frame).find((node) => node.localName === "xfrm")?.elements().find((node) => node.localName === "ext");
+  const frameWidth = emu(frameExt?.getAttribute("cx"), 0);
+  const frameHeight = emu(frameExt?.getAttribute("cy"), 0);
+  if (frameWidth <= 0 || frameHeight <= 0) return [];
+  let root: XmlElement;
+  try {
+    root = (await deck.office.xml(drawingPart.name)).root;
+  } catch {
+    return [];
+  }
+  const clamp = (value: number) => Math.max(-0.5, Math.min(1.5, value));
+  return descendants(root)
+    .filter((node) => node.namespaceUri() === DIAGRAM_DRAWING_NAMESPACE && node.localName === "sp")
+    .slice(0, 80)
+    .flatMap((sp): PptxSmartArtShape[] => {
+      const properties = child(sp, DIAGRAM_DRAWING_NAMESPACE, "spPr");
+      const xfrm = properties ? child(properties, DRAWINGML_NAMESPACE, "xfrm") : undefined;
+      const off = xfrm ? child(xfrm, DRAWINGML_NAMESPACE, "off") : undefined;
+      const ext = xfrm ? child(xfrm, DRAWINGML_NAMESPACE, "ext") : undefined;
+      if (!off || !ext) return [];
+      const style = child(sp, DIAGRAM_DRAWING_NAMESPACE, "style");
+      const fontColor = style ? drawingColor(colorIn(child(style, DRAWINGML_NAMESPACE, "fontRef")), palette) : undefined;
+      const fill = drawingFill(properties, palette);
+      const line = properties ? child(properties, DRAWINGML_NAMESPACE, "ln") : undefined;
+      const lineColor = line ? drawingFill(line, palette) : undefined;
+      const geometry = properties ? child(properties, DRAWINGML_NAMESPACE, "prstGeom")?.getAttribute("prst") : undefined;
+      const body = child(sp, DIAGRAM_DRAWING_NAMESPACE, "txBody");
+      const paragraphs = body ? body.elements().filter((node) => node.localName === "p") : [];
+      const text = paragraphs.map((paragraph) => textNodes(paragraph).map((node) => node.text()).join("")).join("\n").trim();
+      const firstRun = body ? descendants(body).find((node) => node.localName === "rPr") : undefined;
+      const size = Number(firstRun?.getAttribute("sz"));
+      const runColor = firstRun ? drawingFill(firstRun, palette) : undefined;
+      const algn = body ? descendants(body).find((node) => node.localName === "pPr")?.getAttribute("algn") : undefined;
+      const rotation = emu(xfrm?.getAttribute("rot")) / 60000;
+      return [{
+        x: clamp(emu(off.getAttribute("x")) / frameWidth),
+        y: clamp(emu(off.getAttribute("y")) / frameHeight),
+        width: clamp(emu(ext.getAttribute("cx")) / frameWidth),
+        height: clamp(emu(ext.getAttribute("cy")) / frameHeight),
+        ...(rotation ? { rotation } : {}),
+        ...(fill && fill !== "none" ? { fill } : {}),
+        ...(lineColor && lineColor !== "none" ? { line: lineColor } : {}),
+        ...(geometry && geometry !== "rect" ? { geometry } : {}),
+        ...(text ? { text: text.slice(0, 2_000) } : {}),
+        ...(Number.isFinite(size) && size > 0 ? { fontSizePt: size / 100 } : {}),
+        ...((runColor && runColor !== "none") || fontColor ? { color: runColor && runColor !== "none" ? runColor : fontColor } : {}),
+        ...(algn === "ctr" ? { align: "center" as const } : algn === "r" ? { align: "right" as const } : algn === "l" ? { align: "left" as const } : {}),
+      }];
+    });
+}
+
+async function nativeObjectFor(deck: Presentation, slidePartName: string, shape: XmlElement, palette: DrawingPalette) {
   const uri = firstDescendant(shape, DRAWINGML_NAMESPACE, "graphicData")?.getAttribute("uri") ?? "";
   if (uri === GRAPHIC_OLE_URI) {
     const ole = descendants(shape).find((node) => node.localName === "oleObj");
@@ -279,9 +370,10 @@ async function nativeObjectFor(deck: Presentation, slidePartName: string, shape:
     const slidePart = deck.office.package.getPart(slidePartName);
     const dataPart = dataId && slidePart ? deck.office.package.relatedPart(slidePart, dataId) : undefined;
     let items: string[] = [];
+    let data: XmlElement | undefined;
     if (dataPart) {
       try {
-        const data = (await deck.office.xml(dataPart.name)).root;
+        data = (await deck.office.xml(dataPart.name)).root;
         items = descendants(data)
           .filter((node) => node.localName === "pt" && (node.getAttribute("type") ?? "node") === "node")
           .map((point) => textNodes(point).map((node) => node.text()).join("").trim())
@@ -291,7 +383,8 @@ async function nativeObjectFor(deck: Presentation, slidePartName: string, shape:
         items = [];
       }
     }
-    return { kind: "smartArt" as const, label: "SmartArt", ...(items.length ? { items } : {}) };
+    const drawing = await smartArtDrawing(deck, slidePartName, shape, data, palette);
+    return { kind: "smartArt" as const, label: "SmartArt", ...(items.length ? { items } : {}), ...(drawing.length ? { drawing } : {}) };
   }
   return { kind: "other" as const, label: "embedded object" };
 }
@@ -340,15 +433,55 @@ function runFormat(runProperties: XmlElement | undefined) {
   };
 }
 
-function richParagraphs(deck: Presentation, slidePartName: string, root: XmlElement): PresentationParagraph[] {
+/** The bullet a paragraph properties element declares, if it declares one. */
+function declaredBullet(properties: XmlElement | undefined): "bullet" | "numbered" | "none" | undefined {
+  if (!properties) return undefined;
+  for (const node of properties.elements()) {
+    if (node.namespaceUri() !== DRAWINGML_NAMESPACE) continue;
+    if (node.localName === "buNone") return "none";
+    if (node.localName === "buAutoNum") return "numbered";
+    if (node.localName === "buChar" || node.localName === "buBlip") return "bullet";
+  }
+  return undefined;
+}
+
+/**
+ * The bullets a body placeholder's text inherits by level: its layout's and
+ * master's placeholder list styles, then the master's body style. PowerPoint
+ * draws these bullets though the slide itself names none.
+ */
+function inheritedBullets(shape: XmlElement, inherited: readonly XmlElement[], context: SlideContext) {
+  const type = firstDescendant(shape, PML_NAMESPACE, "ph")?.getAttribute("type") ?? (firstDescendant(shape, PML_NAMESPACE, "ph") ? "body" : undefined);
+  if (!type || !["body", "obj"].includes(type)) return undefined;
+  const listStyles = inherited.flatMap((node) => {
+    const body = child(node, PML_NAMESPACE, "txBody");
+    const list = body ? child(body, DRAWINGML_NAMESPACE, "lstStyle") : undefined;
+    return list ? [list] : [];
+  });
+  const sources = [...listStyles, ...(context.masterBodyStyle ? [context.masterBodyStyle] : [])];
+  return (level: number) => {
+    for (const source of sources) {
+      const declared = declaredBullet(child(source, DRAWINGML_NAMESPACE, `lvl${level + 1}pPr`));
+      if (declared) return declared;
+    }
+    return undefined;
+  };
+}
+
+function richParagraphs(
+  deck: Presentation,
+  slidePartName: string,
+  root: XmlElement,
+  inheritedBullet?: (level: number) => "bullet" | "numbered" | "none" | undefined,
+): PresentationParagraph[] {
   return descendants(root)
     .filter((node) => node.namespaceUri() === DRAWINGML_NAMESPACE && node.localName === "p")
     .map((paragraph) => {
       const paragraphProperties = paragraph.elements().find((node) => node.namespaceUri() === DRAWINGML_NAMESPACE && node.localName === "pPr");
-      const bullet = paragraphProperties?.elements().some((node) => node.namespaceUri() === DRAWINGML_NAMESPACE && ["buChar", "buAutoNum"].includes(node.localName))
-        ? paragraphProperties?.elements().some((node) => node.localName === "buAutoNum") ? "numbered" : "bullet"
-        : "none";
       const level = Number(paragraphProperties?.getAttribute("lvl"));
+      const bullet = declaredBullet(paragraphProperties) ??
+        inheritedBullet?.(Number.isFinite(level) && level >= 0 ? Math.min(8, level) : 0) ??
+        "none";
       const runs = descendants(paragraph)
         .filter((node) => node.namespaceUri() === DRAWINGML_NAMESPACE && ["r", "fld"].includes(node.localName))
         .flatMap((run) => {
@@ -554,12 +687,12 @@ async function slideObjects(
       : type === "table"
         ? { rows: tableCells(deck, slidePartName, shape, context.palette), nativeTable: true, nativeShapeId }
         : type === "embed"
-          ? { nativeShapeId, nativeObject: await nativeObjectFor(deck, slidePartName, shape), ...pictureMedia(deck, slidePartName, shape) }
+          ? { nativeShapeId, nativeObject: await nativeObjectFor(deck, slidePartName, shape, context.palette), ...pictureMedia(deck, slidePartName, shape) }
           : type === "shape"
             ? { nativeShapeId, nativeShapeKind: "shape" as const, ...(appearance ? { nativeAppearance: appearance } : {}) }
             : {
             text: shapeText(shape),
-            paragraphs: richParagraphs(deck, slidePartName, shape),
+            paragraphs: richParagraphs(deck, slidePartName, shape, inheritedBullets(shape, inherited, context)),
             nativeShapeId,
             nativeParagraphIndex: 0,
             nativeShapeKind: isTitle ? "placeholder" as const : "shape" as const,
@@ -690,6 +823,10 @@ async function projectPresentation(deck: Presentation, profile: LensCompatibilit
     const context: SlideContext = {
       layoutPlaceholders: placeholdersIn(inherited.layoutRoot),
       masterPlaceholders: placeholdersIn(inherited.masterRoot),
+      masterBodyStyle: (() => {
+        const styles = inherited.masterRoot ? child(inherited.masterRoot, PML_NAMESPACE, "txStyles") : undefined;
+        return styles ? child(styles, PML_NAMESPACE, "bodyStyle") : undefined;
+      })(),
       palette,
       canvas,
     };
@@ -1554,9 +1691,13 @@ function setRichText(
   txBody.elements()
     .filter((node) => node.namespaceUri() === DRAWINGML_NAMESPACE && node.localName === "p")
     .forEach((paragraph) => txBody.removeChild(paragraph));
+  // A placeholder inherits bullets from its layout and master, so a paragraph
+  // without one has to say so or PowerPoint draws the inherited bullet.
+  const placeholder = Boolean(firstDescendant(shape, PML_NAMESPACE, "ph"));
   for (const input of paragraphs) {
     const paragraph = new XmlElement("p", "a");
-    if (input.alignment || input.level !== undefined || input.bullet && input.bullet !== "none") {
+    const plain = !input.bullet || input.bullet === "none";
+    if (input.alignment || input.level !== undefined || !plain || placeholder) {
       const properties = new XmlElement("pPr", "a");
       if (input.alignment) properties.setAttribute("algn", input.alignment === "center" ? "ctr" : input.alignment === "right" ? "r" : input.alignment === "justify" ? "just" : "l");
       if (input.level !== undefined) properties.setAttribute("lvl", String(input.level));
@@ -1568,6 +1709,8 @@ function setRichText(
         const numbered = new XmlElement("buAutoNum", "a");
         numbered.setAttribute("type", "arabicPeriod");
         properties.appendChild(numbered);
+      } else if (placeholder) {
+        properties.appendChild(new XmlElement("buNone", "a"));
       }
       paragraph.appendChild(properties);
     }

@@ -203,13 +203,25 @@ function dateRange() {
 const dayAndTime = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
 
 /** Where ManageBac's settings live, or why an operator cannot open them from here. */
-function ManageBacLink({ operator, children }: { operator: boolean; children: ReactNode }) {
+/** What the open ManageBac conflicts are, said to the administrator. */
+function conflictWords(conflicts: NonNullable<SchoolAdministrationOverview["integration"]>["conflicts"]) {
+  const school = conflicts?.school ?? 0;
+  const mine = conflicts?.mine ?? 0;
+  const parts = [
+    school ? `${school} school ${school === 1 ? "record" : "records"}` : "",
+    mine ? (mine === 1 ? "an item of yours" : `${mine} of your items`) : "",
+  ].filter(Boolean);
+  if (!parts.length) return "ManageBac updated things that were also changed in Spectra. Choose which version to keep.";
+  return `ManageBac updated ${parts.join(" and ")} that ${school + mine === 1 ? "was" : "were"} also changed in Spectra. Choose which version to keep.`;
+}
+
+function ManageBacLink({ operator, section, children }: { operator: boolean; section?: "conflicts"; children: ReactNode }) {
   return operator ? (
     <InlineLink disabled title="ManageBac settings open only for this school's own administrators.">
       {children}
     </InlineLink>
   ) : (
-    <InlineLink href="/admin?tab=integrations">{children}</InlineLink>
+    <InlineLink href={section ? `/admin?tab=integrations&section=${section}` : "/admin?tab=integrations"}>{children}</InlineLink>
   );
 }
 
@@ -249,11 +261,28 @@ function OverviewSurface({
           ? "Reconnect ManageBac with a valid school API key to resume updates."
           : "Check the latest sync and connection so classes, tasks and deadlines stay up to date."
         : data.integration?.hasOpenConflicts
-        ? "Source updates overlap with changes in Spectra. Review them before choosing which to keep."
+        ? conflictWords(data.integration.conflicts)
         : data.integration?.syncFreshness === "never"
           ? "The connection is set up, but no complete sync has finished yet. Check its progress."
           : "Check the latest sync and connection so classes, tasks and deadlines stay up to date.",
-      action: <ManageBacLink operator={operator}>Review ManageBac</ManageBacLink>,
+      action:
+        data.integration?.status === "connected" && data.integration.hasOpenConflicts && !data.integration.conflicts?.school && data.integration.conflicts?.mine ? (
+          // Only the reader's own: they choose on their School page.
+          <InlineLink href="/school?review=changes">Review your changes</InlineLink>
+        ) : (
+          <ManageBacLink operator={operator} section={data.integration?.hasOpenConflicts ? "conflicts" : undefined}>
+            {data.integration?.hasOpenConflicts ? "Review changes" : "Review ManageBac"}
+          </ManageBacLink>
+        ),
+    });
+  const waiting = data.integration?.conflicts?.others ?? [];
+  if (waiting.length)
+    needs.push({
+      id: "managebac-people",
+      tone: "quiet",
+      title: `ManageBac updates waiting on ${waiting.length === 1 ? waiting[0]!.name : `${waiting.length} people`}`,
+      detail: `${new Intl.ListFormat("en", { type: "conjunction" }).format(waiting.slice(0, 4).map((person) => `${person.name} (${person.count})`))}${waiting.length > 4 ? " and others" : ""} changed something ManageBac has since updated. Each person chooses what to keep on their own School page; nothing is needed from you.`,
+      action: null,
     });
   if (data.metrics.feedbackNew)
     needs.push({
@@ -374,8 +403,8 @@ function OverviewSurface({
               </dd>
             </div>
             <div>
-              <dt>Files stored</dt>
-              <dd>{formatBytes(totals.storage_bytes)}</dd>
+              <dt>Kept in Spectra</dt>
+              <dd>{storedWords(data.usage.stored, totals.storage_bytes)}</dd>
             </div>
             <div>
               <dt>AI used this month</dt>
@@ -848,12 +877,34 @@ function CommunicationSurface({ operatorSessionId, busy, mutate, refreshKey, rea
   );
 }
 
+function storedCount(count: number, capped: boolean) {
+  return capped ? `${formatCompact(count)}+` : formatCompact(count);
+}
+
+/** "48 artifacts, 120 tasks, 3.2 MB of files" — what the school holds now. */
+function storedWords(stored: SchoolAdministrationOverview["usage"]["stored"], fallbackBytes: number | undefined) {
+  if (!stored) return formatBytes(fallbackBytes);
+  const plural = (count: number, word: string) => `${storedCount(count, stored.capped)} ${word}${count === 1 ? "" : "s"}`;
+  return `${plural(stored.artifacts, "artifact")}, ${plural(stored.tasks, "task")}, ${formatBytes(stored.fileBytes)} of files`;
+}
+
 /** The meters a school is measured by, in its own words, and how each is written. */
 function UsageSurface({ overview }: { overview: SchoolAdministrationOverview }) {
   const { totals, series, completeThrough, people } = overview.usage;
   const limits = overview.limits;
   return (
     <div className="admin-page">
+      {overview.usage.stored ? (
+        <section>
+          <AdminSectionHeader title="Kept in Spectra" detail="Everything the school holds right now, whatever month it was made in." />
+          <TallySheet>
+            <MetricCard label="Artifacts" value={storedCount(overview.usage.stored.artifacts, overview.usage.stored.capped)} detail="Documents, slides, code and the rest" />
+            <MetricCard label="Tasks" value={storedCount(overview.usage.stored.tasks, overview.usage.stored.capped)} detail="Calendar tasks and deadlines" />
+            <MetricCard label="Files" value={formatBytes(overview.usage.stored.fileBytes)} detail="Uploads, imported originals and pictures" />
+          </TallySheet>
+        </section>
+      ) : null}
+
       <section>
         <AdminSectionHeader title="This month" detail={`The school’s totals over the last 30 days, counted up to ${completeThrough}. Nobody’s artifact is read to count them.`} />
         <TallySheet>
@@ -1093,7 +1144,7 @@ function FeedbackEvidence({ feedbackId, operatorSessionId }: { feedbackId: strin
     <div className="space-y-3">
       {evidence.data.pagePath ? <p className="admin-footnote">Sent from {evidence.data.pagePath}</p> : null}
       {evidence.data.screenshotUrl ? (
-        <a href={evidence.data.screenshotUrl} target="_blank" rel="noreferrer" aria-label="Open the reporter’s screenshot">
+        <a href={evidence.data.screenshotUrl} target="_blank" rel="noreferrer" aria-label="Open the reporter’s screenshot" data-view-image={evidence.data.screenshotUrl} title="Reporter’s screenshot">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={evidence.data.screenshotUrl} alt="The page as the reporter saw it" className="max-h-80 w-full rounded-control object-contain" />
         </a>
@@ -1101,7 +1152,7 @@ function FeedbackEvidence({ feedbackId, operatorSessionId }: { feedbackId: strin
       {evidence.data.attachments.length ? (
         <div className="feedback-inbox-files">
           {evidence.data.attachments.map((file, index) => file.url ? (
-            <a key={index} href={file.url} target="_blank" rel="noreferrer" title={file.name}>
+            <a key={index} href={file.url} target="_blank" rel="noreferrer" title={file.name} data-view-image={file.mediaType?.startsWith("image/") ? file.url : undefined}>
               <FeedbackFilePreview name={file.name} mediaType={file.mediaType} url={file.url} />
               <span className="truncate">{file.name}</span>
             </a>

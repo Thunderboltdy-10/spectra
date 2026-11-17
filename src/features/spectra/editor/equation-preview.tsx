@@ -97,7 +97,9 @@ export function EquationPreview({
       }
     : {
         display: "inline-block",
-        minWidth: `${Math.min(80, Math.max(1, Math.ceil(latex.length * 0.5)))}ch`,
+        // Only a stand-in's width: once drawn, the equation is as wide as it is,
+        // so no gap trails it in the sentence.
+        ...(html === null ? { minWidth: `${Math.min(80, Math.max(1, Math.ceil(latex.length * 0.5)))}ch` } : {}),
         minHeight: "1.25em",
         verticalAlign: "middle",
       };

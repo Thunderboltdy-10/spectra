@@ -73,7 +73,12 @@ export type LifeCommand =
   /** A held formation lets go: it fades as the real element takes over. */
   | { type: "release"; id: number }
   /** A held formation sinks back into the field instead. */
-  | { type: "sink"; id: number };
+  | { type: "sink"; id: number }
+  /**
+   * A held formation follows its element: moved by (dx, dy) and drawn only
+   * inside `clip` (the part of the element that is on screen and uncovered).
+   */
+  | { type: "place"; id: number; dx: number; dy: number; clip: Rect | null };
 
 /** Frames timed before the tier is settled, and the median a device must keep under to stay full. */
 const TIER_SAMPLE = 90;
@@ -306,6 +311,14 @@ export class LifeEngine {
           entry.formation.hold = false;
           // Whole or still forming, it gives way: its element is real now.
           entry.formation.fade(TAKEOVER_FADE);
+        }
+        break;
+      }
+      case "place": {
+        const entry = this.formations.get(command.id);
+        if (entry) {
+          if (command.dx || command.dy) entry.formation.shift(command.dx, command.dy);
+          entry.formation.clip = command.clip;
         }
         break;
       }
@@ -874,6 +887,15 @@ export class LifeEngine {
     const opacity = f.opacity;
     if (opacity <= 0.003) return;
     context.save();
+    if (f.clip) {
+      if (f.clip.width <= 0 || f.clip.height <= 0) {
+        context.restore();
+        return;
+      }
+      context.beginPath();
+      context.rect(f.clip.x * ratio, f.clip.y * ratio, f.clip.width * ratio, f.clip.height * ratio);
+      context.clip();
+    }
     context.lineCap = "round";
     context.lineJoin = "round";
     if (f.fill && f.fillLevel > 0.01) {

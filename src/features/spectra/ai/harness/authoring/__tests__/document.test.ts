@@ -220,3 +220,14 @@ describe("document Markdown", () => {
     expect(documentReadback(content)).toMatch(/Empty: block 2 \(heading\) is empty/);
   });
 });
+
+describe("document citations", () => {
+  it("turns [[cite:…|Label]] into a citation node and writes it back the same way", async () => {
+    const { parseInline, serializeInline } = await import("../markdown");
+    const nodes = parseInline("Mitosis has four phases [[cite:art_123:slide-3|Biology notes]].");
+    const citation = nodes.find((node) => node.type === "spectraCitation");
+    expect(citation?.attrs).toMatchObject({ sourceId: "art_123", evidenceSpanId: "slide-3", label: "Biology notes" });
+    expect(nodes.some((node) => node.text?.includes("cite:"))).toBe(false);
+    expect(serializeInline(nodes)).toBe("Mitosis has four phases [[cite:art_123:slide-3|Biology notes]].");
+  });
+});

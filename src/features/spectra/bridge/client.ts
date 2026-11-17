@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { queryPermission } from "./network-permission";
 import { humanizePublicFailure } from "./humanize";
 import { accountStorageMatches, accountStorageRevision, assertAccountStorageRevision } from "@/lib/account-storage-scope";
 
@@ -29,6 +30,8 @@ const healthSchema = z
     protocolVersion: z.string(),
     port: z.number().optional(),
     bindError: z.string().nullable().optional(),
+    /** Disconnected on purpose on this computer (or removed in Spectra): wait for a person to connect it again. */
+    disconnectedHere: z.boolean().optional(),
   })
   .passthrough();
 export type BridgeHealth = z.infer<typeof healthSchema>;
@@ -356,10 +359,16 @@ export function pairingFailureMessage(
   return humanizePublicFailure(error);
 }
 
+/** How long a first look waits while the browser asks whether Spectra may reach this computer. */
+const BRIDGE_PERMISSION_WAIT_MS = 45_000;
+
 export async function discoverBridge(signal?: AbortSignal): Promise<BridgeDiscovery> {
   try {
+    // While the browser's question is open the request waits on the person;
+    // giving up after the usual moment would close it before they can answer.
+    const asking = (await queryPermission().catch(() => "unknown")) === "prompt";
     const response = await fetch(`${BRIDGE_URL}/v1/health`, {
-      signal: bridgeRequestSignal(signal),
+      signal: bridgeRequestSignal(signal, asking ? BRIDGE_PERMISSION_WAIT_MS : BRIDGE_REQUEST_TIMEOUT_MS),
       cache: "no-store",
     });
     const body = await response.json().catch(() => null);

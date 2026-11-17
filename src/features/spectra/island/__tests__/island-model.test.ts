@@ -75,6 +75,16 @@ describe("island tabs", () => {
     expect([...play, ...done].map((item) => item.runId)).toEqual(["new"]);
   });
 
+  it("keeps the most recent thread on the rail when every tab is hidden", () => {
+    const tabs = [
+      tab("older", { hiddenAt: 5, updatedAt: 10 }),
+      tab("latest", { hiddenAt: 6, updatedAt: 30 }),
+      tab("middle", { hiddenAt: 7, updatedAt: 20 }),
+    ];
+    const { play, done } = arrangeTabs(tabs, { seen: none });
+    expect([...play, ...done].map((item) => item.runId)).toEqual(["latest"]);
+  });
+
   it("never moves a tab while the user is looking", () => {
     const tabs = [tab("a")];
     const held = new Map([["a", "play" as const]]);

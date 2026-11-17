@@ -46,7 +46,7 @@ describe("Shared academic review operations", () => {
     const imported = await docxLens.open(await document.save());
     const tableBlock = imported.projection.blocks.find((item) => item.type === "table")!;
     expect(tableBlock.richRows?.flat(2)).toContainEqual(expect.objectContaining({ kind: "commentBoundary", commentId: "51" }));
-    await expect(docxLens.mutate(imported.preservedCarry, { kind: "delete-region", regionId: tableBlock.id })).rejects.toThrow(/preserved read-only/);
+    await expect(docxLens.mutate(imported.preservedCarry, { kind: "delete-region", regionId: tableBlock.id })).rejects.toThrow(/read-only/);
     const neighbor = imported.projection.blocks.find((item) => item.type === "paragraph")!;
     const changed = await shared(imported, [{ kind: "insert-note", noteType: "endnote", noteId: "7", content: [[{ text: "Disjoint note" }]], anchor: { regionId: neighbor.id, expectedText: neighbor.text, start: 0, end: 0 } }]);
     expect(changed.projection.blocks.find((item) => item.type === "table")).toEqual(tableBlock);

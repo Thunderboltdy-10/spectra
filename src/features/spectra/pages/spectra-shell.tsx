@@ -1,5 +1,6 @@
 "use client";
 
+import { cn } from "@/lib/utils";
 import { distinctHubTabs, hubTabsWithoutWorkspace, workSetLabel, type WorkspaceHubTab } from "./hub-tabs";
 import { takeFullViewRequest } from "../components/full-view-origin";
 import { subscribeShellWorkAvailability } from "../components/use-work-availability";
@@ -4364,7 +4365,15 @@ export function SpectraShell({
               )}
             </div>
             {multiSelectMode ? (
-              <div className="pointer-events-none absolute inset-x-0 bottom-[var(--spectra-composer-safe-area,84px)] z-composer-dock flex justify-center px-4">
+              <div
+                className={cn(
+                  // Centred like the island above it: on the page between the columns, or on the screen.
+                  "pointer-events-none fixed bottom-[var(--spectra-composer-safe-area,84px)] z-composer-dock flex justify-center px-4 transition-[left,right] duration-300 ease-[cubic-bezier(0.2,0.8,0.2,1)]",
+                  preferences.ai.islandCentre === "screen"
+                    ? "left-0 right-0"
+                    : "left-[calc(var(--spectra-rail-width,0px)+var(--spectra-lead-width,0px))] right-[calc(var(--spectra-side-width,0px)+8px)]",
+                )}
+              >
                 <div className="pointer-events-auto">
                   <SelectionActionBar
                     count={selectionCount}

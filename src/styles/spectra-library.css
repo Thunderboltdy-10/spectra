@@ -991,10 +991,181 @@
   --folder-ink: color-mix(in oklab, #e3b27c 80%, var(--text-primary));
 }
 
+/* A folder that shows what's inside: its newest artifacts peek over the
+ * edge, each a sheet in its kind's colour with its name along the top. */
+.folder-card-sheets > .folder-card-sheet {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  overflow: hidden;
+  padding: 6px 9px 0;
+  border-top: 3px solid var(--sheet-hue);
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.folder-card-sheet > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-card-sheet > svg {
+  flex: none;
+  color: var(--sheet-hue);
+}
+
+/* Two sheets side by side, each name clear of the other, over a front that
+ * sits lower to let them show. */
+.folder-card[data-peek] {
+  height: 146px;
+}
+
+.folder-card[data-peek] .folder-card-front {
+  top: 58px;
+}
+
+.folder-card-sheets > .folder-card-sheet:first-child {
+  top: 30px;
+  right: 50%;
+  left: 18px;
+  rotate: -1deg;
+}
+
+.folder-card-sheets > .folder-card-sheet:nth-child(2) {
+  top: 33px;
+  right: 18px;
+  left: 52%;
+  rotate: 0.8deg;
+}
+
+.folder-card-slot {
+  position: relative;
+}
+
+/* The folder's own switch between showing what's inside and staying plain. */
+.folder-card-look {
+  position: absolute;
+  bottom: 10px;
+  right: 10px;
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border-radius: 8px;
+  color: var(--folder-ink, var(--text-secondary));
+  opacity: 0;
+  transition: opacity 140ms var(--ease-standard), background-color 140ms var(--ease-standard);
+}
+
+.folder-card-slot:hover .folder-card-look,
+.folder-card-look:focus-visible {
+  opacity: 1;
+}
+
+.folder-card-look:hover {
+  background: color-mix(in oklab, var(--card-paper) 70%, transparent);
+}
+
+.folder-card-look:focus-visible {
+  outline: 2px solid var(--focus-ring-color);
+  outline-offset: 1px;
+}
+
+@media (hover: none) {
+  .folder-card-look {
+    opacity: 1;
+  }
+}
+
+/* What a folder holds, beside it while the pointer rests there. */
+.folder-peek {
+  --folder-kraft: #c08a52;
+  position: fixed;
+  z-index: var(--z-dropdown);
+  max-height: 320px;
+  overflow: hidden;
+  padding: 12px 6px 8px;
+  border-radius: 14px;
+  background: var(--card-paper);
+  box-shadow:
+    0 0 0 1px var(--card-border),
+    0 14px 32px -14px rgb(40 28 14 / 0.35);
+  pointer-events: none;
+  animation: folder-peek-in 160ms var(--ease-standard);
+}
+
+.folder-peek-title {
+  overflow: hidden;
+  margin: 0 10px 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-peek ul {
+  display: grid;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.folder-peek li {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.folder-peek li > svg {
+  flex: none;
+  color: var(--sheet-hue);
+}
+
+.folder-peek-name {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: var(--text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-peek-when {
+  flex: none;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.folder-peek-more {
+  margin: 4px 10px 0;
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+@keyframes folder-peek-in {
+  from {
+    opacity: 0;
+    translate: 0 4px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .folder-card-front,
   .folder-card-sheets > span {
     transition: none;
+  }
+
+  .folder-peek {
+    animation: none;
   }
 }
 
@@ -1041,6 +1212,12 @@ html[data-shelf-gathering] {
   font-size: 13px;
   font-weight: 600;
   pointer-events: none;
+}
+
+/* The card a hand has lifted stays in place, faded; its copy follows the hand. */
+[data-gather-source] {
+  opacity: 0.35;
+  transition: opacity 120ms ease;
 }
 
 /* A loose row or folder card on its way to a workspace. */
@@ -1096,6 +1273,23 @@ li[data-shelf-place][data-gather-over]::after {
   top: 50%;
   bottom: auto;
   translate: 0 -50%;
+}
+
+/* A folder taking it opens a little: its sheets rise and its front rings. */
+.folder-card[data-gather-over] .folder-card-sheets > * {
+  translate: 0 -7px;
+  transition: translate 160ms ease;
+}
+
+.folder-card[data-gather-over] .folder-card-front {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+/* A step of the path taking it. */
+button[data-shelf-place][data-gather-over]:not(.folder-card) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  box-shadow: 0 0 0 2px var(--accent);
 }
 
 /* The tile it is over says so with its ring and lift; the label is for rows. */
@@ -1230,4 +1424,9 @@ li[data-shelf-place][data-gather-over]::after {
   box-shadow:
     0 0 0 2px var(--brand-primary),
     0 12px 24px -18px color-mix(in oklab, var(--brand-primary) 60%, transparent);
+}
+
+/* A picture in a reply or a note opens in Spectra's viewer. */
+.spectra-prose img[data-view-image] {
+  cursor: zoom-in;
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import { cachedThread, readThread } from "../data/thread-cache";
 import { buttonVariants } from "@/components/ui/button";
 import {
   Fragment,
@@ -27,7 +28,6 @@ import { finishedWithLabel, openTraceWhenShown, ProgressTrace, WorkedForReveal }
 import {
   clearSpectraRunAgent,
   getSpectraOperationConflict,
-  getSpectraThread,
   getSpectraThreadMessages,
   getSpectraThreadRunTrace,
   postSpectra,
@@ -55,6 +55,7 @@ import { publicSpectraFailureText } from "../runs/live-dock";
 import { BatchedChoiceBlock, ChoiceBlock } from "./conversation-choice";
 import { compareConflictRegions } from "../collaboration/region-text";
 import { Icon } from "@/components/icons";
+import { IconButton } from "@/components/ui/icon-button";
 import { runTabCard, useRunTabs } from "../island/run-tabs";
 import { AnsweredInputs, HarnessInputPanel, WorkTouchCards, messageTouches } from "./harness-run-parts";
 import { HarnessWidgets, messageWidgets } from "./thread-widget";
@@ -1820,6 +1821,7 @@ export function ConversationSurface({
   onChoice,
   onRetryRun,
   onAnswer,
+  onEditMessage,
 }: {
   detail: SpectraThreadDetail | null;
   /** The catalog, when the host has one: result slips name works as they are now. */
@@ -1844,6 +1846,8 @@ export function ConversationSurface({
   onRetryRun?: (runId: string) => Promise<unknown> | unknown;
   /** Answers the run's open question or approval. */
   onAnswer?: (runId: string, toolCallId: string, value: HarnessAnswerValue) => Promise<boolean> | boolean;
+  /** Asks one of the person's own messages again, edited: the thread goes back to it and answers from there. */
+  onEditMessage?: (messageId: string, text: string) => Promise<boolean> | boolean;
 }) {
   const observedThreadId = threadId ?? detail?.thread._id;
   // Approvals and retries the thread can act on. The open question of the
@@ -2050,10 +2054,13 @@ export function ConversationSurface({
     setOlderPage(undefined);
     setOlderError(null);
   }, [renderedDetail?.thread._id]);
+  // An edited message and what followed it leave at once, before the thread reloads.
+  const [takenBack, setTakenBack] = useState<ReadonlySet<string>>(() => new Set());
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const displayedMessages = useMemo(() => {
     const rows = [...olderMessages, ...(renderedDetail?.messages ?? [])];
-    return [...new Map(rows.map((message) => [message._id, message])).values()];
-  }, [renderedDetail?.messages, olderMessages]);
+    return [...new Map(rows.map((message) => [message._id, message])).values()].filter((message) => !takenBack.has(message._id));
+  }, [renderedDetail?.messages, olderMessages, takenBack]);
   const loadOlder = useCallback(async () => {
     const pageState = olderPage ?? renderedDetail?.messagePage;
     if (!renderedDetail || !pageState?.hasOlder || loadingOlder) return;
@@ -2149,6 +2156,10 @@ export function ConversationSurface({
     return () => observer.disconnect();
   }, [renderedDetail?.thread._id, following, resting]);
   useEffect(() => setFollowing(true), [renderedDetail?.thread._id]);
+  // Nothing is edited while a reply is still being written here.
+  const answering =
+    liveExchange?.status === "starting" || liveExchange?.status === "streaming" ||
+    Boolean(renderedDetail?.activeExecution && isWorkingAiRunStatus(renderedDetail.activeExecution.run.status));
   const messageMeta = useCallback(
     (message: NonNullable<SpectraThreadDetail>["messages"][number]) => {
       return [
@@ -2331,7 +2342,21 @@ export function ConversationSurface({
                   key={message._id}
                   className={cn("group relative", compact ? "mb-7" : "mb-10")}
                 >
-                  {message.role === "user" ? (
+                  {message.role === "user" && editingMessageId === message._id && onEditMessage ? (
+                    <MessageEditor
+                      initial={message.content}
+                      onCancel={() => setEditingMessageId(null)}
+                      onSend={async (text) => {
+                        const later = visibleMessages.slice(messageIndex).map((other) => other._id);
+                        const sent = await onEditMessage(message._id, text);
+                        if (!sent) return false;
+                        setEditingMessageId(null);
+                        setTakenBack((current) => new Set([...current, ...later]));
+                        setOlderMessages((current) => current.filter((other) => other.createdAt < message.createdAt));
+                        return true;
+                      }}
+                    />
+                  ) : message.role === "user" ? (
                     <>
                       <div className="ml-auto w-fit max-w-[82%]">
                         <div className="whitespace-pre-wrap [overflow-wrap:anywhere] rounded-card rounded-br-chip border border-[color-mix(in_oklab,var(--accent-cyan)_16%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--accent-cyan)_5%,var(--bg-elevated))] px-4 py-3 text-ui leading-6 text-[var(--text-primary)]">
@@ -2352,8 +2377,17 @@ export function ConversationSurface({
                             </div>
                           ) : null}
                         </div>
-                        <div className="mt-1.5 text-right text-micro text-[var(--text-tertiary)]">
-                          {messageMeta(message)}
+                        <div className="mt-1 flex items-center justify-end gap-1 text-micro text-[var(--text-tertiary)]">
+                          {onEditMessage && !answering && !messageAttachments(message).length ? (
+                            <IconButton
+                              icon="edit"
+                              label="Edit and ask again"
+                              size="compact"
+                              className="opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
+                              onClick={() => setEditingMessageId(message._id)}
+                            />
+                          ) : null}
+                          <span>{messageMeta(message)}</span>
                         </div>
                         {/* A question still being answered shows its answer coming; details are for one left without a reply. */}
                         {shouldOfferTrace && message.runId && !(activeRun && isWorkingAiRunStatus(activeRun.status)) ? (
@@ -2785,17 +2819,18 @@ export function ThreadConversation({
   onOpenArtifact?: (artifactId: string, regionId?: string) => void;
   onOpenWorkspace?: (workspaceId: string) => void;
 }) {
-  const [detail, setDetail] = useState<SpectraThreadDetail | null>(null);
+  // A thread read before shows at once; a fresh copy replaces it when it arrives.
+  const [detail, setDetail] = useState<SpectraThreadDetail | null>(() => cachedThread(threadId));
   const workspaceCatalog = useWorkspaceCatalog();
   const workspaces = workspaceCatalog.items;
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !cachedThread(threadId));
   const activeThreadIdRef = useRef(threadId);
   const refreshRequestRef = useRef(0);
   activeThreadIdRef.current = threadId;
   const refresh = useCallback(async () => {
     const requestedThreadId = threadId;
     const requestId = ++refreshRequestRef.current;
-    const thread = await getSpectraThread(requestedThreadId);
+    const thread = await readThread(requestedThreadId);
     // A side-panel switch can finish the previous thread's fetch after the
     // new header has already rendered. Never let that stale response replace
     // the newly selected conversation body (or its workspace links).
@@ -2807,8 +2842,9 @@ export function ThreadConversation({
     setDetail(thread);
   }, [threadId]);
   useEffect(() => {
-    setDetail(null);
-    setLoading(true);
+    const kept = cachedThread(threadId);
+    setDetail(kept);
+    setLoading(!kept);
     void refresh()
       .catch((error) =>
         toast.error(
@@ -2895,5 +2931,74 @@ export function ThreadConversation({
       }
       onRetryRun={runEngine.retry}
     />
+  );
+}
+
+
+/** One of the person's own messages, open to change before it is asked again. */
+function MessageEditor({ initial, onCancel, onSend }: { initial: string; onCancel: () => void; onSend: (text: string) => Promise<boolean> }) {
+  const [text, setText] = useState(initial);
+  const [sending, setSending] = useState(false);
+  const field = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const element = field.current;
+    if (!element) return;
+    element.focus();
+    element.setSelectionRange(element.value.length, element.value.length);
+  }, []);
+  useEffect(() => {
+    const element = field.current;
+    if (!element) return;
+    element.style.height = "auto";
+    element.style.height = `${Math.min(element.scrollHeight, 360)}px`;
+  }, [text]);
+  const clean = text.trim();
+  const unchanged = clean === initial.trim();
+  const send = async () => {
+    if (!clean || unchanged || sending) return;
+    setSending(true);
+    try {
+      await onSend(clean);
+    } finally {
+      setSending(false);
+    }
+  };
+  return (
+    <form
+      className="ml-auto w-full max-w-[82%]"
+      aria-label="Edit message"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void send();
+      }}
+    >
+      <textarea
+        ref={field}
+        value={text}
+        rows={2}
+        aria-label="Message"
+        disabled={sending}
+        onChange={(event) => setText(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            onCancel();
+          } else if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+            event.preventDefault();
+            void send();
+          }
+        }}
+        className="block w-full resize-none rounded-card border border-[color-mix(in_oklab,var(--accent-cyan)_34%,var(--border-default))] bg-[var(--bg-elevated)] px-4 py-3 text-ui leading-6 text-[var(--text-primary)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]"
+      />
+      <div className="mt-2 flex flex-wrap items-center justify-end gap-2">
+        <span className="mr-auto text-micro text-[var(--text-tertiary)]">Spectra answers again from here. The messages after it are replaced.</span>
+        <button type="button" onClick={onCancel} disabled={sending} className={buttonVariants({ variant: "ghost", size: "sm" })}>
+          Cancel
+        </button>
+        <button type="submit" disabled={!clean || unchanged || sending} className={buttonVariants({ variant: "primary", size: "sm" })}>
+          {sending ? "Sending…" : "Send"}
+        </button>
+      </div>
+    </form>
   );
 }

@@ -90,9 +90,10 @@ export function LifeField() {
     };
     // Under everything, over only the body's paper: opaque surfaces cover it.
     const back = layer("-1");
-    // Over everything but toasts, the island included: formations hand over to
-    // the element they become, wherever it sits.
-    const front = layer("calc(var(--z-toast) - 1)");
+    // Over the page and its side panels, under what floats over the page:
+    // Setup and dialogs (modal), the island and its thread cards. Loading
+    // formations used to draw over all of those.
+    const front = layer("calc(var(--z-modal) - 1)");
     const detach = life.attach(back, front, chooseTier());
 
     const resize = () => life.resize(window.innerWidth, window.innerHeight, Math.min(2, window.devicePixelRatio || 1));
@@ -154,40 +155,107 @@ export function LifeField() {
     };
 
     // Loading placeholders become ghosts while they are in the page, and release into what replaces them.
-    const ghosts = new Map<Element, { formed: Formed; rect: DOMRect }>();
+    // The canvas is fixed to the screen, so each frame a ghost is moved with its placeholder (a scroll, a
+    // layout shift) and drawn only where the placeholder itself can be seen: inside the panes that clip it
+    // and never over a menu, a popup or the island that covers it.
+    type Ghost = { formed: Formed; rect: DOMRect; clippers: Element[]; clip: string };
+    const ghosts = new Map<Element, Ghost>();
+    const clippersOf = (element: Element) => {
+      const out: Element[] = [];
+      for (let parent = element.parentElement; parent && parent !== document.body; parent = parent.parentElement) {
+        const style = getComputedStyle(parent);
+        if (style.overflowX !== "visible" || style.overflowY !== "visible") out.push(parent);
+      }
+      return out;
+    };
+    const related = (element: Element, hit: Element | null) =>
+      !hit || hit === element || element.contains(hit) || hit.contains(element);
+    const visibleRect = (element: Element, ghost: Pick<Ghost, "clippers">, r: DOMRect) => {
+      let left = Math.max(0, r.left);
+      let top = Math.max(0, r.top);
+      let right = Math.min(window.innerWidth, r.right);
+      let bottom = Math.min(window.innerHeight, r.bottom);
+      for (const clipper of ghost.clippers) {
+        const c = clipper.getBoundingClientRect();
+        left = Math.max(left, c.left);
+        top = Math.max(top, c.top);
+        right = Math.min(right, c.right);
+        bottom = Math.min(bottom, c.bottom);
+      }
+      if (right - left < 2 || bottom - top < 2) return null;
+      // Covered anywhere we look (a menu, a dialog, the island): the ghost waits unseen until it is clear.
+      const inset = 3;
+      const points: [number, number][] = [
+        [(left + right) / 2, (top + bottom) / 2],
+        [left + inset, top + inset],
+        [right - inset, top + inset],
+        [left + inset, bottom - inset],
+        [right - inset, bottom - inset],
+      ];
+      for (const [x, y] of points) if (!related(element, document.elementFromPoint(x, y))) return null;
+      return { x: left, y: top, width: right - left, height: bottom - top };
+    };
+    const HIDDEN = { x: 0, y: 0, width: 0, height: 0 };
     const adopt = (element: Element) => {
       if (ghosts.has(element) || ghosts.size >= MAX_GHOSTS) return;
       const r = element.getBoundingClientRect();
       if (r.width < 8 || r.height < 4 || r.bottom < 0 || r.top > window.innerHeight) return;
+      const clippers = clippersOf(element);
+      const clip = visibleRect(element, { clippers }, r);
+      if (!clip) return;
       // One ghost per placeholder: its frame if it shows one, and its bars where the content will be, so it settles as
       // lines and releases into the real thing.
-      ghosts.set(element, { formed: life.ghost(figureOf(element, { bars: "[data-life-ghost-bar]", maxBars: 24, frame: hasVisibleFrame(element) })), rect: r });
+      const formed = life.ghost(figureOf(element, { bars: "[data-life-ghost-bar]", maxBars: 24, frame: hasVisibleFrame(element) }));
+      life.place(formed, 0, 0, clip);
+      ghosts.set(element, { formed, rect: r, clippers, clip: JSON.stringify(clip) });
     };
-    const sweep = () => {
-      for (const [element, { formed, rect }] of ghosts) {
-        if (element.isConnected && element.matches(GHOST)) {
-          // A ghost is drawn where its placeholder was. Once the placeholder
-          // scrolls or shifts away it fades, and is drawn again where the
-          // placeholder now is if that is still in view, so no bars are left
-          // standing over whatever slid under them.
-          const now = element.getBoundingClientRect();
-          if (Math.abs(now.top - rect.top) < 4 && Math.abs(now.left - rect.left) < 4) continue;
+    const follow = () => {
+      for (const [element, ghost] of ghosts) {
+        if (!element.isConnected || !element.matches(GHOST)) continue;
+        const now = element.getBoundingClientRect();
+        if (Math.abs(now.width - ghost.rect.width) > 4 || Math.abs(now.height - ghost.rect.height) > 4) {
+          // A different shape is a different figure: this one goes, and the placeholder is taken up afresh.
           ghosts.delete(element);
-          formed.release();
+          life.place(ghost.formed, 0, 0, HIDDEN);
+          ghost.formed.release();
           continue;
         }
+        const dx = now.left - ghost.rect.left;
+        const dy = now.top - ghost.rect.top;
+        const clip = visibleRect(element, ghost, now) ?? HIDDEN;
+        const key = JSON.stringify(clip);
+        if (!dx && !dy && key === ghost.clip) continue;
+        life.place(ghost.formed, dx, dy, clip);
+        ghost.rect = now;
+        ghost.clip = key;
+      }
+    };
+    const sweep = () => {
+      for (const [element, ghost] of ghosts) {
+        if (element.isConnected && element.matches(GHOST)) continue;
         ghosts.delete(element);
         // The ghost hands over: its lines flow into the content that took its place.
-        const content = element.isConnected ? (element as HTMLElement) : replacementOf(rect);
-        if (content) handOver(formed, content);
-        else formed.release();
+        const content = element.isConnected ? (element as HTMLElement) : replacementOf(ghost.rect);
+        if (content) handOver(ghost.formed, content);
+        else {
+          // Gone with its page: it leaves with it, not standing where the page used to be.
+          life.place(ghost.formed, 0, 0, HIDDEN);
+          ghost.formed.release();
+        }
       }
     };
     let scanFrame = 0;
+    let followFrame = 0;
+    const tick = () => {
+      followFrame = 0;
+      follow();
+      if (ghosts.size) followFrame = requestAnimationFrame(tick);
+    };
     const scan = () => {
       scanFrame = 0;
       sweep();
       document.querySelectorAll(GHOST).forEach(adopt);
+      if (ghosts.size && !followFrame) followFrame = requestAnimationFrame(tick);
     };
     const ghostObserver = new MutationObserver(() => {
       if (!scanFrame) scanFrame = requestAnimationFrame(scan);
@@ -196,7 +264,7 @@ export function LifeField() {
     scan();
     document.documentElement.dataset.life = "on";
     const rescan = () => {
-      if (ghosts.size && !scanFrame) scanFrame = requestAnimationFrame(scan);
+      if (!scanFrame) scanFrame = requestAnimationFrame(scan);
     };
 
     window.addEventListener("resize", resize);
@@ -210,6 +278,7 @@ export function LifeField() {
     document.documentElement.addEventListener("pointerleave", leave);
     return () => {
       cancelAnimationFrame(scanFrame);
+      cancelAnimationFrame(followFrame);
       ghostObserver.disconnect();
       for (const { formed } of ghosts.values()) formed.release();
       ghosts.clear();

@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { EmptyState, LoadingRows, ProblemState } from "@/components/ui/page-state";
 import { workTypeMeta } from "../artifacts/presentation";
 import { previewExtent, workPreview } from "../artifacts/work-preview";
-import { getSpectraThreads, type SpectraArtifact, type SpectraThread } from "../data/api";
+import { getSpectraThreads, keptSpectraThreads, type SpectraArtifact, type SpectraThread } from "../data/api";
 import { formatRelativeTime, formatShortDate } from "./spectra-view-model";
 import { useWorkPlaces, WorkPlaceLink } from "./work-origin";
 
@@ -201,13 +201,15 @@ export function WorkConversations({
     // The thread list is one request shared by every caller, so it is never
     // aborted here; a panel that has moved on only ignores the answer.
     let current = true;
-    setState({ status: "loading", threads: [] });
+    const kept = keptSpectraThreads({ limit: 120, brief: true });
+    setState(kept ? { status: "ready", threads: kept.threads.filter((thread) => aboutWork(thread, work._id)) } : { status: "loading", threads: [] });
     getSpectraThreads({ limit: 120, brief: true })
       .then((result) => {
         if (current) setState({ status: "ready", threads: result.threads.filter((thread) => aboutWork(thread, work._id)) });
       })
       .catch(() => {
-        if (current) setState({ status: "failed", threads: [] });
+        // The kept list stays up when a refresh fails.
+        if (current && !kept) setState({ status: "failed", threads: [] });
       });
     return () => {
       current = false;

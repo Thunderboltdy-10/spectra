@@ -253,6 +253,8 @@ export const docxInsertTableOperationSchema = z.object({
   rows: z.array(z.array(z.string().max(250_000)).min(1).max(63)).min(1).max(1_000),
   richRows: z.array(z.array(z.array(docxRichInlineSchema).max(10_000)).min(1).max(63)).min(1).max(1_000).optional(),
   headerRow: z.boolean().optional(),
+  /** Editor pixel widths per column; null leaves a column to share the rest. */
+  columnWidths: z.array(z.number().positive().max(100_000).nullable()).max(63).optional(),
 }).strict().superRefine((value, context) => {
   const columns = value.rows[0]?.length ?? 0;
   if (value.rows.some((row) => row.length !== columns) || value.rows.length * columns > 10_000)

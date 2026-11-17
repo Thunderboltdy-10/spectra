@@ -187,7 +187,7 @@ function isOutOfDate(protocolVersion: string | undefined) {
   return Boolean(protocolVersion) && protocolMajor(protocolVersion!) !== protocolMajor(BRIDGE_PROTOCOL_VERSION);
 }
 
-function thisComputerView(local: LocalBridge, cloud: CloudDevice | undefined, mounts: CloudMount[]): DeviceView {
+function thisComputerView(local: LocalBridge, cloud: CloudDevice | undefined, mounts: CloudMount[], now: number): DeviceView {
   const status = local.status;
   const live = local.reachability === "connected" && Boolean(status?.paired);
   const updateRequired = local.reachability === "update-required";
@@ -220,14 +220,18 @@ function thisComputerView(local: LocalBridge, cloud: CloudDevice | undefined, mo
   if (updateRequired)
     return { ...common, tone: "attention", label: "Out of date", detail: "Update Spectra Bridge to keep syncing." };
   if (!live) {
+    // Bridge still reports to Spectra, so it runs: only this browser lost it.
+    const reporting = Boolean(cloud && now - cloud.lastSeenAt < DEVICE_ONLINE_MS);
     const detail =
       local.reachability === "offline"
         ? "This browser is offline."
         : local.reachability === "port-taken"
           ? "Another app is using Bridge's connection. Close it, then try again."
           : local.reachability === "running"
-            ? "Bridge is running. Reconnect this computer to use its folders."
-            : "Bridge isn't running. Start Spectra Bridge on this computer.";
+            ? "Bridge is running. Try again to reconnect this browser to it."
+            : reporting
+              ? "Bridge is connected to Spectra, but this browser can't reach it. Try again. If that doesn't work, quit Bridge from its icon near the clock and open it again."
+              : "Bridge isn't running. Start Spectra Bridge on this computer, then try again.";
     return { ...common, tone: "offline", label: "Not connected", detail };
   }
   if (allPaused) return { ...common, tone: "paused", label: "Paused", detail: "Syncing is paused on this computer." };
@@ -291,7 +295,7 @@ export function devicesModel(input: {
   // Once the cloud has loaded, a cached id it no longer knows was removed.
   const known = Boolean(localId) && (live || cloud == null || Boolean(cloudThis));
   const thisComputer = known
-    ? thisComputerView(local, cloudThis, mounts.filter((mount) => mount.deviceId === localId && mount.state !== "revoked"))
+    ? thisComputerView(local, cloudThis, mounts.filter((mount) => mount.deviceId === localId && mount.state !== "revoked"), now)
     : null;
   const others = devices
     .filter((device) => device._id !== localId)

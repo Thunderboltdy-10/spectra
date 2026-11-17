@@ -826,7 +826,8 @@ export class ConvexHarnessBackend implements HarnessBackend {
       runId: this.input.runId,
       ...change,
     });
-    if (result.ok) this.changedWorkspace = true;
+    // Memory is Spectra's own note-keeping, not something of the person's that
+    // changed: it never offers "Undo Spectra's changes" on its own.
     return result;
   }
 

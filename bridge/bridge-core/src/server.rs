@@ -59,6 +59,8 @@ pub struct ServerState {
     local_development: bool,
     /// When Spectra last asked for an update, so a page cannot loop it.
     update_requested_at: AtomicU64,
+    /// Disconnected on purpose: pages wait for a person to connect it again.
+    disconnected_here: AtomicBool,
 }
 
 /// One update request per ten minutes.
@@ -151,6 +153,7 @@ impl ServerState {
             work_initializing: tokio::sync::Mutex::new(()),
             local_development,
             update_requested_at: AtomicU64::new(0),
+            disconnected_here: AtomicBool::new(false),
         }
     }
     /// The one test for a browser origin: pairing offers, CORS and updates.
@@ -269,6 +272,10 @@ impl ServerState {
         self.allowed_origins.writing().insert(origin);
         *self.paired.writing() = true;
         base64::Engine::encode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, token)
+    }
+    /// Whether this computer was disconnected on purpose; said in `/v1/health`.
+    pub fn set_disconnected_here(&self, disconnected: bool) {
+        self.disconnected_here.store(disconnected, Ordering::Release);
     }
     /// Unpairing: the browser session and the device identity are dropped.
     pub fn forget_pairing(&self) {
@@ -545,6 +552,7 @@ async fn health(State(state): State<Arc<ServerState>>) -> Json<HealthResponse> {
         protocol_version: crate::PROTOCOL_VERSION.into(),
         port: crate::BRIDGE_PORT,
         bind_error: state.bind_error.reading().clone(),
+        disconnected_here: state.disconnected_here.load(Ordering::Acquire),
     })
 }
 
@@ -1163,6 +1171,24 @@ mod tests {
         let status = client.get(format!("{base}/v1/status")).header("origin", origin).bearer_auth(token).send().await.unwrap();
         assert_eq!(status.headers().get("access-control-allow-origin").unwrap(), origin);
         assert_ne!(status.status(), 401);
+    }
+
+    #[tokio::test]
+    async fn health_says_when_this_computer_was_disconnected_on_purpose() {
+        let state = Arc::new(ServerState::unpaired());
+        let base = spawn(state.clone()).await;
+        let client = reqwest::Client::new();
+        let read = || async {
+            client.get(format!("{base}/v1/health")).send().await.unwrap().json::<serde_json::Value>().await.unwrap()
+        };
+        // Older pages never see the field unless it matters.
+        assert!(read().await.get("disconnectedHere").is_none());
+        state.set_disconnected_here(true);
+        assert_eq!(read().await["disconnectedHere"], true);
+        let parsed: HealthResponse = serde_json::from_value(read().await).unwrap();
+        assert!(parsed.disconnected_here);
+        state.set_disconnected_here(false);
+        assert!(read().await.get("disconnectedHere").is_none());
     }
 
     #[derive(Default)]

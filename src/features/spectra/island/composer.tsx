@@ -550,13 +550,9 @@ function RuntimeControls() {
     if (next === "spectra") return applyRuntimeChoice("spectra", patch);
     const [provider, ...rest] = next.split(":");
     const model = rest.join(":");
-    if (provider === "codex") {
-      patch({ codexModel: model });
-      applyRuntimeChoice("codex", patch);
-    } else if (provider === "claude") {
-      patch({ claudeModel: model });
-      applyRuntimeChoice("claude", patch);
-    }
+    // One write, so the model and the runtime land together.
+    if (provider === "codex") applyRuntimeChoice("codex", (next) => patch({ ...next, codexModel: model }));
+    else if (provider === "claude") applyRuntimeChoice("claude", (next) => patch({ ...next, claudeModel: model }));
   };
   return (
     <>

@@ -194,28 +194,11 @@ describe("P5.I3 embed convergence", () => {
     ).toBe("https://storage.example/public-share");
   });
 
-  it("unmounts only code runtimes off-screen or on hidden pages", () => {
-    expect(
-      shouldMountArtifactEmbedRuntime({
-        sourceType: "code",
-        nearViewport: false,
-        pageVisible: true,
-      }),
-    ).toBe(false);
-    expect(
-      shouldMountArtifactEmbedRuntime({
-        sourceType: "code",
-        nearViewport: true,
-        pageVisible: false,
-      }),
-    ).toBe(false);
-    expect(
-      shouldMountArtifactEmbedRuntime({
-        sourceType: "quiz",
-        nearViewport: false,
-        pageVisible: false,
-      }),
-    ).toBe(true);
+  it("defers a code runtime until it nears the viewport, then keeps it mounted", () => {
+    expect(shouldMountArtifactEmbedRuntime({ sourceType: "code", nearViewport: false })).toBe(false);
+    expect(shouldMountArtifactEmbedRuntime({ sourceType: "code", nearViewport: true })).toBe(true);
+    expect(shouldMountArtifactEmbedRuntime({ sourceType: "code", nearViewport: false, mounted: true })).toBe(true);
+    expect(shouldMountArtifactEmbedRuntime({ sourceType: "quiz", nearViewport: false })).toBe(true);
   });
 
   it("gives a whiteboard embed a stable 4:3 host instead of note dimensions", () => {

@@ -11,6 +11,7 @@ import { inkStyle, type ClassBook } from "../school/use-class-book";
 import { DueTask, TaskLink, useTaskPicking, type TaskOpen } from "./due-task";
 import type { WorkPicking } from "./library-note";
 import { ShelfNotes, useShelfStacks } from "./shelf-stacks";
+import { useShelfGather, useShelfMoveInto } from "./shelf-gather";
 import { SharedWorkGroups, useSharedWorks } from "./shared-works";
 import { useTreeChildren, type TreeNode } from "./tree-client";
 import { ShelfSection, useShelfFold } from "./shelf-fold";
@@ -105,6 +106,10 @@ export function ClassShelf({
   const { loading, ahead, months } = useClassTasks(providerClassId, now);
   const children = useTreeChildren(folderId, { sortKey: "updated", direction: "desc", pageSize: 100, withoutThreads: true });
   const shared = useSharedWorks(workspaceId);
+  // Cards and folders here can be dragged onto a folder, a workspace or a
+  // breadcrumb to file them there, as on the Library's home shelf.
+  const moveInto = useShelfMoveInto();
+  const gather = useShelfGather(({ nodeId, intoPlaceId }) => (intoPlaceId ? moveInto(nodeId, intoPlaceId) : undefined), !picking);
 
   const folders = children.nodes.filter((node) => node.kind === "folder");
   const work = children.nodes.filter((node) => node.kind !== "folder" && node.source?.blueprintKey !== "planner_task");
@@ -180,7 +185,7 @@ export function ClassShelf({
 
           {ownTaskItems.length ? (
             <ShelfSection foldKey="class:own-tasks" id="class-own-tasks" level={3} title="Your tasks" count={ownTasks.length}>
-              <ShelfNotes items={ownTaskItems} now={now} onOpen={onOpen} onMenu={onMenu} picking={picking} whereOf={sharedMark} />
+              <ShelfNotes items={ownTaskItems} now={now} onOpen={onOpen} onMenu={onMenu} picking={picking} whereOf={sharedMark} onMoveInto={moveInto} />
             </ShelfSection>
           ) : null}
           <ShelfSection foldKey="class:work" id="class-work" level={3} title="Your artifacts" count={work.length}>
@@ -188,11 +193,11 @@ export function ClassShelf({
               <>
                 {folders.length ? (
                   <div className="mb-6">
-                    <FolderCards folders={folders} now={now} onOpen={onOpen} onMenu={onMenu} picking={picking} />
+                    <FolderCards folders={folders} now={now} onOpen={onOpen} onMenu={onMenu} picking={picking} onGather={gather} />
                   </div>
                 ) : null}
                 {/* Inside the class every card is the class's, so each keeps its kind's colour. */}
-                <ShelfNotes items={shownWork} now={now} onOpen={onOpen} onMenu={onMenu} picking={picking} whereOf={sharedMark} />
+                <ShelfNotes items={shownWork} now={now} onOpen={onOpen} onMenu={onMenu} picking={picking} whereOf={sharedMark} onMoveInto={moveInto} />
                 {workItems.length > WORK_SHOWN ? (
                   <button type="button" className="today-link mt-3 inline-block" aria-expanded={allWork} onClick={() => setAllWork((open) => !open)}>
                     {allWork ? "Show fewer" : `Show all ${workItems.length}`}

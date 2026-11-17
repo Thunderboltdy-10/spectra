@@ -5,11 +5,12 @@ const h = vi.hoisted(() => ({
   authenticated: true, focused: true, revision: "a", paired: false,
   rejoin: vi.fn(async () => true), request: vi.fn(), runtime: vi.fn(), refresh: vi.fn(async () => {}),
 }));
+vi.mock("@clerk/nextjs", () => ({ useUser: () => ({ user: null }) }));
 vi.mock("convex/react", () => ({ useConvexAuth: () => ({ isAuthenticated: h.authenticated }), useMutation: () => h.request, useConvex: () => ({ query: vi.fn(async () => []), mutation: vi.fn() }) }));
 vi.mock("@/lib/account-storage-scope", () => ({ accountStorageRevision: () => h.revision, accountStorageMatches: (value: string) => value === h.revision }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({}), usePathname: () => "/devices" }));
 vi.mock("@/features/spectra/data/use-kept-query", () => ({ useQuery: () => undefined }));
-vi.mock("../bridge/use-bridge", () => ({ useBridgeHealth: () => ({ checked: true, discovery: { kind: "running" }, health: { paired: false }, status: { paired: h.paired }, refresh: h.refresh }) }));
+vi.mock("../bridge/use-bridge", () => ({ useBridgeHealth: () => ({ checked: true, discovery: { kind: "running", health: { paired: false } }, health: { paired: false }, status: { paired: h.paired }, refresh: h.refresh }) }));
 vi.mock("../devices/pairing", () => ({ rejoinBridge: h.rejoin }));
 vi.mock("../settings/preference-store", () => ({ useSpectraPreferences: () => ({ hydrated: false, preferences: { ai: { runtimeChosen: true } } }) }));
 vi.mock("../ai/use-agent-runtime", () => ({ recheckAgentRuntime: h.runtime, useAgentRuntime: () => ({}) }));

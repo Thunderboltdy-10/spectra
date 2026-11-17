@@ -1,5 +1,6 @@
 "use client";
 
+import { isImageHref } from "../files/image-viewer-host";
 import dynamic from "next/dynamic";
 import { createElement, Fragment, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
@@ -81,7 +82,7 @@ export function citationRegion(where: string | undefined) {
 }
 
 function Citation({ node, verified }: { node: Extract<RichInline, { type: "citation" }>; verified: Verified }) {
-  const text = `[${node.label ?? node.sourceId.replace(/^source:/, "")}]`;
+  const text = node.label ?? node.sourceId.replace(/^source:/, "");
   const source = verified.sources.get(node.sourceId);
   const opens = source && ("workId" in source || webUrl(source.url));
   if (source && opens) {
@@ -91,7 +92,7 @@ function Citation({ node, verified }: { node: Extract<RichInline, { type: "citat
   }
   // Verified, but with nowhere to open: no button that does nothing.
   if (source || verified.ids.has(node.sourceId)) return <span data-spectra-citation="" title="Verified source">{text}</span>;
-  return <span data-spectra-citation="" data-unverified="" title="Source verification unavailable">[{node.label ?? "source"}]</span>;
+  return <span data-spectra-citation="" data-unverified="" title="Source verification unavailable">{node.label ?? "source"}</span>;
 }
 
 const MARK_TAGS: Record<RichMark, string> = { bold: "strong", italic: "em", underline: "u", strike: "s" };
@@ -134,18 +135,18 @@ function Inlines({ content, verified }: { content: readonly RichInline[]; verifi
         const inner = <Inlines content={node.content} verified={verified} />;
         if (!href) return <span key={index}>{inner}</span>;
         const external = !href.startsWith("/");
-        return <a key={index} href={href} {...(external ? { target: "_blank", rel: "noopener noreferrer" } : {})}>{inner}</a>;
+        return <a key={index} href={href} {...(external ? { target: "_blank", rel: "noopener noreferrer" } : {})} {...(isImageHref(href) ? { "data-view-image": href } : {})}>{inner}</a>;
       }
       case "citation":
         return <Citation key={index} node={node} verified={verified} />;
       case "reference":
         return <button key={index} type="button" data-spectra-work-ref="" data-life-launch="" onClick={() => void spectraBus.command("work.open", { workId: node.workId, surface: "panel" })}>{node.label ?? "Referenced artifact"}</button>;
       case "footnote_ref":
-        return <sup key={index} data-footnote-ref="">[{node.id}]</sup>;
+        return <sup key={index} data-footnote-ref="">{node.id}</sup>;
       case "image":
         // User-authored media URLs are not known at build time.
         // eslint-disable-next-line @next/next/no-img-element
-        return safeMediaSrc(node.url) ? <img key={index} src={node.url} alt={node.alt} /> : <Fragment key={index}>{node.alt}</Fragment>;
+        return safeMediaSrc(node.url) ? <img key={index} src={node.url} alt={node.alt} data-view-image={node.url} /> : <Fragment key={index}>{node.alt}</Fragment>;
       case "break":
         return <br key={index} />;
       case "revision":
@@ -248,7 +249,7 @@ function Block({ block, verified }: { block: RichBlock; verified: Verified }): R
       return safeMediaSrc(block.url)
         // User-authored media URLs are not known at build time.
         // eslint-disable-next-line @next/next/no-img-element
-        ? <figure><img src={block.url} alt={block.alt} /></figure>
+        ? <figure><img src={block.url} alt={block.alt} data-view-image={block.url} /></figure>
         : null;
     case "embed":
       return <div data-spectra-reference="" data-reference-id={block.embedId}>

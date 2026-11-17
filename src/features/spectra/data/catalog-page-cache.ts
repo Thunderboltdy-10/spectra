@@ -1,9 +1,11 @@
-export type CatalogPage<T> = { items: T[]; isDone: boolean; continueCursor: string | null };
+/** `catchingUp`: the server is still indexing older work, so the list may be missing some of it. */
+export type CatalogPage<T> = { items: T[]; isDone: boolean; continueCursor: string | null; catchingUp?: boolean };
 export type CatalogSnapshot<T> = {
   items: T[];
   status: "idle" | "loading" | "ready" | "error";
   isDone: boolean;
   error: string | null;
+  catchingUp?: boolean;
 };
 type Entry<T> = {
   snapshot: CatalogSnapshot<T>;
@@ -102,7 +104,8 @@ export function createCatalogPageCache<T extends { _id: string }>(
             entry.cursor = page.continueCursor ?? undefined;
             entry.fetchedAt = Date.now();
             const keepLoading = options.all && !page.isDone;
-            notify(entry, { items: [...rows.values()], status: keepLoading ? "loading" : "ready", isDone: page.isDone, error: null });
+            notify(entry, { items: [...rows.values()], status: keepLoading ? "loading" : "ready", isDone: page.isDone, error: null,
+              ...(page.catchingUp ? { catchingUp: true } : {}) });
             keep(key, entry);
             if (keepLoading) { cursor = page.continueCursor!; continue; }
             return;

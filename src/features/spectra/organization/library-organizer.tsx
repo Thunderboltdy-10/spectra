@@ -12,6 +12,7 @@ import {
 import { createPortal } from "react-dom";
 import { Pencil, RotateCcw, ChevronRight, Copy, FolderPlus, Link2, Lock, Share2, Star, Trash2, ArrowRight, Users } from "@/components/icons/glyph-icons";
 import { copyWorkHere } from "./shared-works";
+import { useWorkspaceTransfer, type Destination } from "./workspace-transfer";
 import { toast } from "@/components/ui/toast";
 import { showRetryToast } from "@/components/ui/retry-toast";
 import { useConvexAuth, useMutation } from "convex/react";
@@ -34,6 +35,9 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -43,6 +47,7 @@ import {
 import {
   useTreeActions,
   useTreeChildren,
+  useTreeContainers,
   useTreePath,
   useTreeQuickView,
   useTreeSearch,
@@ -382,6 +387,18 @@ function LibraryOrganizerContent({
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(640);
   const [menu, setMenu] = useState<MenuState | null>(null);
+  const transfer = useWorkspaceTransfer();
+  // The workspaces a menu can send things to, read only while a menu is open.
+  const topPlaces = useTreeContainers(null, Boolean(menu?.nodeIds.length));
+  const destinations = useMemo<Destination[]>(
+    () => [
+      { nodeId: null, name: "Library home" },
+      ...topPlaces.nodes
+        .filter((node) => node.kind === "workspace" && node.workspace?.status !== "archived")
+        .map((node) => ({ nodeId: node.nodeId, name: node.name, workspaceId: node.workspace?.workspaceId })),
+    ],
+    [topPlaces.nodes],
+  );
   const [busy, setBusy] = useState(false);
   const [purgeConfirm, setPurgeConfirm] = useState<{
     nodeIds: string[];
@@ -487,7 +504,6 @@ function LibraryOrganizerContent({
 
   const firstResult = !loading ? rows[0] : undefined;
   const selectedSearchResult = rows.find((row) => row.nodeId === selection.cursorId);
-  const hasExactTitleMatch = rows.some((row) => titleSearchMatch(row.name, term) === "Exact title match");
 
   const nodesById = useMemo(() => {
     const map = seenRef.current;
@@ -1295,19 +1311,16 @@ function LibraryOrganizerContent({
         <div
           id={searchHelpId}
           role="status"
-          className="flex shrink-0 flex-wrap gap-x-3 gap-y-1 border-b border-[var(--border-subtle)] px-4 py-2 text-caption text-[var(--text-secondary)]"
+          // With results there is nothing to say on screen: the ranked rows speak
+          // for themselves, and the Enter hints stay for screen readers.
+          // Only a search still running shows here; an empty result says so in the list itself.
+          className={loading
+            ? "flex shrink-0 flex-wrap gap-x-3 gap-y-1 border-b border-[var(--border-subtle)] px-4 py-2 text-caption text-[var(--text-secondary)]"
+            : "sr-only"}
         >
-          <span>
-            {loading
-              ? "Searching titles…"
-              : rows.length === 0
-                ? "No title matches in the loaded results."
-                : hasExactTitleMatch
-                  ? "Ranked title matches. Partial matches are labeled."
-                  : hasMore
-                    ? "No exact title match in the loaded results. Showing ranked partial matches."
-                    : "No exact title match. Showing ranked partial matches."}
-          </span>
+          {loading || rows.length === 0 ? (
+            <span>{loading ? "Searching titles…" : "No title matches in the loaded results."}</span>
+          ) : null}
           {firstResult ? (
             <span>Enter in search opens “{firstResult.name}”.</span>
           ) : null}
@@ -1618,6 +1631,9 @@ function LibraryOrganizerContent({
                 if (node.sourceId) await copyWorkHere(node.sourceId, { workspaceId: node.workspaceContextId, parentNodeId: node.parentId ?? "root" });
             })()
           }
+          destinations={destinations}
+          onMoveTo={(nodes, to) => void transfer.moveTo(nodes, to)}
+          onDuplicateTo={(nodes, to) => void transfer.duplicateTo(nodes, to)}
           onNewFolder={createFolderHere}
           onNewWork={createWorkHere}
           onReveal={(node) => {
@@ -1733,6 +1749,9 @@ function NodeMenu({
   onShare,
   onSetShared,
   onCopy,
+  destinations,
+  onMoveTo,
+  onDuplicateTo,
   onNewFolder,
   onNewWork,
   onReveal,
@@ -1751,6 +1770,10 @@ function NodeMenu({
   onShare?: (artifactId: string) => void;
   onSetShared: (nodes: TreeNode[], shared: boolean) => void;
   onCopy: (nodes: TreeNode[]) => void;
+  /** The workspaces (and the Library outside them) things can be sent to. */
+  destinations: readonly Destination[];
+  onMoveTo: (nodes: TreeNode[], to: Destination) => void;
+  onDuplicateTo: (nodes: TreeNode[], to: Destination) => void;
   onNewFolder: () => void;
   onNewWork: (key: Parameters<typeof createDefaultArtifactPayload>[0]) => void;
   onReveal: (node: TreeNode) => void;
@@ -1764,6 +1787,34 @@ function NodeMenu({
   const flat = location.kind !== "folder";
   const work = single?.kind === "work" ? single : null;
   const count = nodes.length;
+  // Folders, works and references can go to another workspace; a workspace or thread cannot.
+  const sendable = count > 0 && nodes.every((node) => node.kind === "folder" || node.kind === "work" || node.kind === "link");
+  // A reference duplicates what it stands for.
+  const duplicable = sendable && nodes.every((node) => {
+    const kind = node.kind === "link" ? (node.target?.available ? node.target.kind : null) : node.kind;
+    return kind === "folder" || (kind === "work" && node.source?.blueprintKey !== "planner_task" && Boolean(node.sourceId ?? node.target?.sourceId));
+  });
+  const isHere = (to: Destination) => nodes.every((node) => (node.workspaceContextId ?? null) === (to.workspaceId ?? null));
+  const sendMenu = (label: string, Glyph: typeof Copy, onPick: (to: Destination) => void) => (
+    <DropdownMenuSub>
+      <DropdownMenuSubTrigger>
+        <Glyph className="size-3.5 text-[var(--text-tertiary)]" />
+        {label}
+      </DropdownMenuSubTrigger>
+      <DropdownMenuSubContent className="max-h-[320px] w-[220px] overflow-y-auto">
+        {destinations.length <= 1 ? (
+          <DropdownMenuItem disabled>No other workspaces yet</DropdownMenuItem>
+        ) : (
+          destinations.map((to) => (
+            <DropdownMenuItem key={to.nodeId ?? "home"} disabled={isHere(to)} onSelect={() => onPick(to)}>
+              <span className="truncate">{to.name}</span>
+              {isHere(to) ? <span className="ml-auto text-micro text-[var(--text-tertiary)]">Here</span> : null}
+            </DropdownMenuItem>
+          ))
+        )}
+      </DropdownMenuSubContent>
+    </DropdownMenuSub>
+  );
 
   return (
     <DropdownMenu
@@ -1833,12 +1884,12 @@ function NodeMenu({
           <>
             {single ? (
               <DropdownMenuItem onSelect={() => onOpen(single)}>
-                {single.isContainer ? (
+                {single.isContainer || single.target?.kind === "folder" ? (
                   <ChevronRight className="size-3.5 text-[var(--text-tertiary)]" />
                 ) : (
                   <ArrowRight className="size-3.5 text-[var(--text-tertiary)]" />
                 )}
-                {single.isContainer ? "Open folder" : "Open"}
+                {single.isContainer || single.target?.kind === "folder" ? "Open folder" : "Open"}
               </DropdownMenuItem>
             ) : null}
             {single && flat ? (
@@ -1876,6 +1927,8 @@ function NodeMenu({
                 {count === 1 ? "Make a copy" : `Make ${count} copies`}
               </DropdownMenuItem>
             ) : null}
+            {sendable ? sendMenu("Move to workspace", ArrowRight, (to) => onMoveTo(nodes, to)) : null}
+            {duplicable ? sendMenu("Duplicate to workspace", Copy, (to) => onDuplicateTo(nodes, to)) : null}
             {sharable ? (
               <DropdownMenuItem onSelect={() => onSetShared(nodes, !allShared)}>
                 {allShared ? (

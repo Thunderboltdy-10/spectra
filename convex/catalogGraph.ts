@@ -98,8 +98,10 @@ function matches(row: Source, actor: AuthenticatedActor, args: Args, search: str
     if (row.status === "deleted" || row.status !== (args.status ?? "active") || row.blueprintKey === "thread_reference" ||
       (args.blueprintKey && row.blueprintKey !== args.blueprintKey) ||
       (args.placement === "shared" && row.ownerAccountId === actor.accountId)) return false;
-    if (row.readModelVersion !== ARTIFACT_SUMMARY_READ_MODEL_VERSION)
-      throw new Error("CATALOG_READ_MODEL_REQUIRED: Library metadata needs its bounded migration.");
+    // A summary from an older read model isn't trusted (its projection may be
+    // missing facts); it is left out until the backfill rewrites it, instead
+    // of failing the whole page for everything else.
+    if (row.readModelVersion !== ARTIFACT_SUMMARY_READ_MODEL_VERSION) return false;
     const p = row.projection as Record<string, unknown>;
     const maySearchBody = row.blueprintKey !== "timetable" && (row.blueprintKey !== "quiz" || row.ownerAccountId === actor.accountId);
     return !search || `${p.title ?? ""}\n${p.summary ?? ""}\n${row.blueprintKey}\n${Array.isArray(p.tags) ? p.tags.join(" ") : ""}\n${maySearchBody ? row.searchText : ""}`.toLowerCase().includes(search);
@@ -210,11 +212,14 @@ async function graphPage(ctx: QueryCtx, args: Args) {
   const search = args.search?.trim().toLowerCase() ?? "";
   if (search.length > 200) throw new Error("CATALOG_SEARCH_TOO_LONG");
   if (args.placement && !["all", "shared"].includes(args.placement)) throw new Error("CATALOG_GRAPH_PLACEMENT_UNSUPPORTED");
+  let catchingUp = false;
   if (args.kind === "artifacts") {
     const migration = await budget.read(2, () => ctx.db.query("spectraReadModelMigrations")
       .withIndex("by_key", q => q.eq("key", CATALOG_MIGRATION_KEY)).unique());
-    if (migration?.state !== "complete" || migration.version !== ARTIFACT_SUMMARY_READ_MODEL_VERSION)
-      throw new Error("CATALOG_READ_MODEL_REQUIRED: Library metadata needs its bounded migration.");
+    // Before the summary backfill finishes (a deployment that never ran it, or
+    // a new version), work made since is already summarised: list that, and say
+    // older work may still be missing, rather than refusing to list anything.
+    catchingUp = migration?.state !== "complete" || migration.version !== ARTIFACT_SUMMARY_READ_MODEL_VERSION;
   }
   // An agent is granted as an agent and any other work as an artifact, so a
   // catalog of one type never needs to read the other kind's grants.
@@ -243,7 +248,7 @@ async function graphPage(ctx: QueryCtx, args: Args) {
     if (continueCursor.length > 16_384) throw new Error("CATALOG_GRAPH_CURSOR_TOO_LARGE");
     return { items: [] as Array<Record<string, unknown>>, isDone: false, continueCursor,
       phase: phase === "scanning" && state.stage === maxStage && !state.workspace ? "revalidating" as const : phase,
-      budget: diagnostics() };
+      ...(catchingUp ? { catchingUp } : {}), budget: diagnostics() };
   };
 
   if (state.workspace) {
@@ -363,7 +368,7 @@ async function graphPage(ctx: QueryCtx, args: Args) {
   }
   return { items, isDone,
     continueCursor: isDone ? null : await sealCatalogCursor(initial(scope, keyFor(emitted.at(-1)!)), scope),
-    phase: "ready" as const, budget: diagnostics() };
+    phase: "ready" as const, ...(catchingUp ? { catchingUp } : {}), budget: diagnostics() };
 }
 
 export const artifactGraphPage = (ctx: QueryCtx, args: ArtifactGraphArgs) => graphPage(ctx, { ...args, kind: "artifacts" });

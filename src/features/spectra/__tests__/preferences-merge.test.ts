@@ -7,6 +7,7 @@ import {
   DEFAULT_SPECTRA_PREFERENCES,
   applyPreferencePatch,
   mergePreferenceValues,
+  preferenceLayerValuesSchema,
   pruneWorkbarCommandOverrides,
   remotePreferenceLayersAreReady,
   resolvePreferences,
@@ -17,6 +18,16 @@ import {
 const known = knownCapabilityIds();
 
 describe("preference merge (P3.I4)", () => {
+  it("keeps a layer to the keys that were written, so one write never resets its siblings", () => {
+    const written = preferenceLayerValuesSchema.parse({ integrations: { tipsSeen: ["calendar"] }, ai: { runtime: "codex" } });
+    expect(written).toEqual({ integrations: { tipsSeen: ["calendar"] }, ai: { runtime: "codex" } });
+    const stored = { ai: { codexModel: "gpt-5", runtime: "spectra" }, integrations: { setupStep: "bridge", setupStatus: "pending" } };
+    expect(mergePreferenceValues(stored, written)).toMatchObject({
+      ai: { codexModel: "gpt-5", runtime: "codex" },
+      integrations: { setupStep: "bridge", tipsSeen: ["calendar"] },
+    });
+  });
+
   it("uses one deep merge so a partial workbar patch cannot wipe sibling pins", () => {
     const current = applyPreferencePatch(DEFAULT_SPECTRA_PREFERENCES, {
       workbar: {

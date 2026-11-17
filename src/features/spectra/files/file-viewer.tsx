@@ -40,17 +40,25 @@ const DESCRIPTIONS: Record<FileViewKind, string> = {
 
 function ViewerBody({ file, actions }: { file: ViewedFile; actions?: ReactNode }) {
   const [failed, setFailed] = useState(false);
+  // Grown to the whole window; a picture can also be seen at its own size.
+  const [wide, setWide] = useState(false);
+  const [actual, setActual] = useState(false);
   const office = isOfficeViewKind(file.kind) ? file.kind : null;
   return (
     <DialogContent
-      className="flex h-[min(88vh,960px)] w-[min(1180px,calc(100vw-32px))] max-w-none flex-col gap-3 p-4"
+      className={
+        wide
+          ? "flex h-[100dvh] w-screen max-w-none flex-col gap-3 rounded-none p-4"
+          : "flex h-[min(88vh,960px)] w-[min(1180px,calc(100vw-32px))] max-w-none flex-col gap-3 p-4"
+      }
       data-file-viewer={file.kind}
+      data-wide={wide || undefined}
     >
       <div className="min-w-0 pr-10">
         <DialogTitle className="truncate text-ui">{file.filename}</DialogTitle>
         <DialogDescription className="sr-only">{DESCRIPTIONS[file.kind]}</DialogDescription>
       </div>
-      <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-card border border-[var(--border-default)] bg-[var(--bg-secondary)]">
+      <div className={`relative flex min-h-0 flex-1 rounded-card ${actual ? "items-start justify-start overflow-auto" : "items-center justify-center overflow-hidden"} border border-[var(--border-default)] bg-[var(--bg-secondary)]`}>
         {file.kind === "legacy" ? (
           // No reader for the pre-2007 binary formats: say so, with no viewer.
           <EmptyState
@@ -70,13 +78,23 @@ function ViewerBody({ file, actions }: { file: ViewedFile; actions?: ReactNode }
         ) : file.kind === "image" ? (
           // A kept copy at a storage address: the image optimizer has nothing to add.
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={file.url} alt={file.filename} className="max-h-full max-w-full object-contain" onError={() => setFailed(true)} />
+          <img
+            src={file.url}
+            alt={file.filename}
+            className={actual ? "m-auto max-w-none cursor-zoom-out" : "max-h-full max-w-full cursor-zoom-in object-contain"}
+            title={actual ? "Fit to the window" : "See it at its own size"}
+            onClick={() => setActual((value) => !value)}
+            onError={() => setFailed(true)}
+          />
         ) : (
           <iframe title={file.filename} src={file.url} className="h-full w-full border-0 bg-[var(--bg-primary)]" />
         )}
       </div>
       <DialogFooter className="flex-wrap">
         {actions}
+        <Button variant="secondary" onClick={() => setWide((value) => !value)}>
+          {wide ? "Shrink" : "Expand"}
+        </Button>
         {file.url ? (
           <Button asChild variant="secondary">
             <a href={file.url} target="_blank" rel="noopener noreferrer">

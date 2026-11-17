@@ -26,7 +26,7 @@ use spectra_bridge_core::sync::{
     MAX_NATIVE_PAYLOAD_BYTES, QueuedChangeEnvelope, ReplicaMigrationPage, ReportedChange,
     WriteCompletion, claim_fs_request, claim_pending_payload_upload, claim_write,
     complete_fs_request_with_claim, complete_write_with_claim, detach_mount,
-    discover_resources_page, drain_cloud_queue_holding, exchange_pairing, inspect_write_target,
+    disconnect_self, discover_resources_page, drain_cloud_queue_holding, exchange_pairing, inspect_write_target,
     migrate_cloud_replica_page, refresh_structure_claim, refresh_write_claim, register_mount,
     report_health, report_missing_resources, resume_pairing, set_mount_availability,
     upload_resource_payload,
@@ -216,6 +216,7 @@ impl LocalBridgeControl for SpectraLocalControl {
             .map_err(|error| error.to_string())?;
         let result = complete_pairing_offer(self, &offer).await;
         if result.is_ok() {
+            mark_disconnected_here(&self.state, &self.journal, false);
             self.active_mount_syncs.pairing.resume();
             self.wake.wake_configuration();
             refresh_tray(&self.app);
@@ -339,12 +340,29 @@ impl LocalBridgeControl for SpectraLocalControl {
             .selection_gate
             .try_lock()
             .map_err(|_| "Finish the current connection or file selection first.".to_string())?;
+        // Spectra forgets this computer too, so it never stays listed as
+        // connected. Best effort: offline, the key is forgotten here anyway
+        // and Spectra lists the computer as offline.
+        let leaving = self
+            .journal
+            .config("device_id")
+            .ok()
+            .flatten()
+            .and_then(|device_id| HostPlatform.read_credential(&device_id).ok().flatten());
+        if let (Some(credential), Ok(deployment)) = (leaving, deployment_url(&self.journal)) {
+            let _ = tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                disconnect_self(&deployment, &credential),
+            )
+            .await;
+        }
         unpair_this_computer(
             &self.grants,
             &self.journal,
             &self.active_mount_syncs.pairing,
         )?;
         self.state.forget_pairing();
+        mark_disconnected_here(&self.state, &self.journal, true);
         self.wake.wake_configuration();
         refresh_tray(&self.app);
         Ok(())
@@ -354,6 +372,17 @@ impl LocalBridgeControl for SpectraLocalControl {
 /* ---------------------------------------------------------------- local state */
 
 const SYNC_PAUSED_KEY: &str = "sync_paused";
+/// Set when this computer was disconnected on purpose; cleared by the next pairing.
+const DISCONNECTED_HERE_KEY: &str = "disconnected_here";
+
+fn mark_disconnected_here(state: &ServerState, journal: &Journal, disconnected: bool) {
+    let _ = if disconnected {
+        journal.set_config(DISCONNECTED_HERE_KEY, "1")
+    } else {
+        journal.delete_config(DISCONNECTED_HERE_KEY)
+    };
+    state.set_disconnected_here(disconnected);
+}
 const LAST_SYNC_KEY: &str = "last_sync_at";
 
 fn mount_paused_key(grant_id: &str) -> String {
@@ -661,6 +690,12 @@ impl HealthReporter {
                 ) || sent_at.elapsed() >= HEALTH_REPORT_INTERVAL
             }
         }
+    }
+
+    /// Report on the next pass whatever changed: a cloud call was refused as
+    /// if this computer had been removed, and the report is what confirms it.
+    fn recheck(&mut self) {
+        self.last = None;
     }
 
     fn sent(&mut self, report: DeviceHealthReport) {
@@ -4424,6 +4459,25 @@ fn should_repair_pairing(error: &str) -> bool {
     error.contains("BRIDGE_CREDENTIAL_INVALID")
 }
 
+/// The queues Spectra answered this pass; any refusal of the key is a removal to confirm.
+const CLOUD_QUEUE_ERRORS: [&str; 5] = [
+    "native_ack_queue_error",
+    "outbound_queue_error",
+    "structure_queue_error",
+    "payload_queue_error",
+    "write_queue_error",
+];
+
+fn credential_refused(journal: &Journal) -> bool {
+    CLOUD_QUEUE_ERRORS.iter().any(|key| {
+        journal
+            .config(key)
+            .ok()
+            .flatten()
+            .is_some_and(|error| should_repair_pairing(&error))
+    })
+}
+
 #[cfg(test)]
 mod pairing_tests {
     use super::{resolve_pairing_deployment, should_repair_pairing};
@@ -4511,6 +4565,14 @@ mod pairing_tests {
     #[test]
     fn only_invalid_credentials_trigger_device_repair() {
         assert!(should_repair_pairing("bridge: BRIDGE_CREDENTIAL_INVALID"));
+        let journal = Journal::in_memory().unwrap();
+        assert!(!super::credential_refused(&journal));
+        journal.set_config("structure_queue_error", "network timeout").unwrap();
+        assert!(!super::credential_refused(&journal));
+        journal
+            .set_config("payload_queue_error", "bridge: BRIDGE_CREDENTIAL_INVALID")
+            .unwrap();
+        assert!(super::credential_refused(&journal));
         assert!(!should_repair_pairing("network timeout"));
         assert!(!should_repair_pairing("PAIRING_CHALLENGE_INVALID"));
     }
@@ -5175,6 +5237,8 @@ async fn run_sync_iteration(
                     && unpair_this_computer(grants, journal, &active_mount_syncs.pairing).is_ok()
                 {
                     state.forget_pairing();
+                    // Removed on purpose: pages here wait to be told to connect again.
+                    mark_disconnected_here(state, journal, true);
                 }
                 return PollResult::Unauthenticated;
             }
@@ -5344,7 +5408,7 @@ async fn run_sync_iteration(
         }
     };
 
-    if cloud_request_succeeded {
+    if cloud_request_succeeded && journal.config("health_report_error").ok().flatten().is_none() {
         // Cloud-connected status is evidence that at least one actual cloud
         // request returned successfully, not merely that local config exists.
         state.mark_cloud_seen();
@@ -5368,6 +5432,11 @@ async fn run_sync_iteration(
 
     if !failed {
         record_clean_pass(grants, journal, &paused_grants, current_time_ms());
+    }
+    if failed && credential_refused(journal) {
+        // Removed in Spectra: say so on the next pass rather than after the
+        // quarter-hour report, so Bridge stops showing itself connected.
+        health.recheck();
     }
     if failed {
         PollResult::FailedRequest
@@ -5447,7 +5516,12 @@ async fn run_work_signal(
             );
             let watching = async {
                 loop {
-                    if spectra_bridge_core::sync::cloud_reachable(&deployment).await {
+                    // Reaching Spectra is not being heard by it: while this
+                    // computer's reports are refused, Devices lists it offline,
+                    // so the tray must not say it is connected.
+                    if spectra_bridge_core::sync::cloud_reachable(&deployment).await
+                        && journal.config("health_report_error").ok().flatten().is_none()
+                    {
                         state.mark_cloud_seen();
                     }
                     tokio::time::sleep(CLOUD_CHECK_EVERY).await;
@@ -5588,6 +5662,7 @@ fn main() {
             let journal = Arc::new(Journal::open(&data_dir.join("bridge.sqlite"))?);
             let active_mount_syncs: ActiveMountSyncs = Arc::new(MountSyncs::default());
             let state = Arc::new(ServerState::unpaired());
+            state.set_disconnected_here(journal.config(DISCONNECTED_HERE_KEY)?.is_some());
             let credential_ready = if let Some(device_id) = journal.config("device_id")? {
                 match HostPlatform.read_credential(&device_id) {
                     Ok(Some(_)) => true,
@@ -6377,6 +6452,9 @@ mod devices_tests {
             ..report.clone()
         };
         assert!(reporter.due(&problem));
+        reporter.sent(report.clone());
+        reporter.recheck();
+        assert!(reporter.due(&report), "a refused key is confirmed on the next pass");
         reporter.last = Some((
             report.clone(),
             std::time::Instant::now() - HEALTH_REPORT_INTERVAL,

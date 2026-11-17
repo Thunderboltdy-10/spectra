@@ -116,6 +116,12 @@ export function arrangeTabs(
     const existing = byThread.get(tab.threadId);
     if (!existing || existing.run.updatedAt < tab.run.updatedAt) byThread.set(tab.threadId, tab);
   }
+  // With every tab put away, the most recent thread still stands on the rail,
+  // so the island is never an empty bar with nothing to go back to.
+  if (byThread.size === 0) {
+    const latest = tabs.reduce<SpectraRunTab | undefined>((best, tab) => (!best || best.run.updatedAt < tab.run.updatedAt ? tab : best), undefined);
+    if (latest) byThread.set(latest.threadId, latest);
+  }
   for (const tab of byThread.values()) {
     const model = deriveLiveDockTab(runTabSource(tab));
     const isSeen = seen.has(tab.runId);

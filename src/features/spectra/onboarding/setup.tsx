@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
-import { useConvexAuth, useMutation } from "convex/react";
+import { useConvex, useConvexAuth, useMutation } from "convex/react";
 import { useQuery } from "@/features/spectra/data/use-kept-query";
 import { api } from "../../../../convex/_generated/api";
 import { Button } from "@/components/ui/button";
@@ -23,7 +23,8 @@ import { NETWORK_PERMISSION_FIX, useNetworkPermission } from "../bridge/network-
 import { PairingPanel } from "../devices/pairing-panel";
 import { devicePairing } from "../devices/pairing";
 import { BridgeInstallSteps } from "../devices/bridge-install-steps";
-import { WorkHomeChoice } from "../devices/work-home-choice";
+import { moveEveryWork, WorkHomeChoice } from "../devices/work-home-choice";
+import { useDeviceState } from "../bridge/device-works";
 import { SubscriptionSetup } from "../ai/provider-setup";
 import { useAgentRuntime } from "../ai/use-agent-runtime";
 import { MODE_LABEL } from "../school/school-model";
@@ -62,11 +63,25 @@ function usePlatform(): BridgePlatform | null {
   return useSyncExternalStore(noop, () => bridgePlatform(), () => null);
 }
 
+const STEP_ORDER: readonly StepId[] = ["classes", "bridge", "storage", "subscriptions", "island", "syncs"];
+
+export function savedStepIndex(steps: readonly StepId[], saved: StepId) {
+  const exact = steps.indexOf(saved);
+  if (exact >= 0) return exact;
+  const rank = STEP_ORDER.indexOf(saved);
+  if (rank < 0) return 0;
+  const later = steps.findIndex((id) => STEP_ORDER.indexOf(id) > rank);
+  return later >= 0 ? later : Math.max(0, steps.length - 1);
+}
+
+/** Finished in this tab: an older answer echoing back never brings Setup back. */
+let finishedHere = false;
+
 export function SetupMount() {
   const { isAuthenticated } = useConvexAuth();
   const { preferences, accountReady } = useSpectraPreferences();
   const due = useSetupDue(preferences.integrations);
-  if (!isAuthenticated || !accountReady || !due) return null;
+  if (!isAuthenticated || !accountReady || !due || finishedHere) return null;
   return <Setup />;
 }
 
@@ -78,7 +93,21 @@ function Setup() {
   const platform = usePlatform();
   const phase = school?.phase;
   const schoolConnected = phase !== undefined && phase !== "no_school" && phase !== "awaiting_connection";
-  const bridgeHere = availability === "ready";
+  // Joined once during Setup, its steps stay: a moment of re-checking Bridge
+  // must not pull the step out from under the person, or skip it.
+  const [bridgeSeen, setBridgeSeen] = useState(false);
+  useEffect(() => {
+    if (availability === "ready") setBridgeSeen(true);
+  }, [availability]);
+  const bridgeHere = availability === "ready" || bridgeSeen;
+  // Bridge is checked within moments of opening; until then a Setup resumed at
+  // a step that needs it would jump past that step and back.
+  const [waitedForBridge, setWaitedForBridge] = useState(false);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setWaitedForBridge(true), 4000);
+    return () => window.clearTimeout(timer);
+  }, []);
+  const bridgeUnknown = availability === "checking" && !waitedForBridge;
   const syncs = useQuery(api.school.preferences, schoolConnected ? {} : "skip") as { kinds: SyncKindRow[] } | null | undefined;
   // Only what this school's ManageBac shares is worth asking about; with nothing to choose, the step is left out.
   const syncChoices = syncs?.kinds.filter(choosable).length ?? 0;
@@ -93,14 +122,32 @@ function Setup() {
     return list;
   }, [bridgeHere, platform, schoolConnected, syncChoices]);
 
-  const saved = preferences.integrations.setupStep as StepId;
-  const index = Math.max(0, steps.indexOf(saved));
+  // Once this person moves a step here, that step is the one shown: an older
+  // answer echoing back (a slow or re-read preference layer) never sends them
+  // back. Only a failed save lets go, so they see what the account kept.
+  const [held, setHeld] = useState<StepId | null>(null);
+  const stored = preferences.integrations.setupStep as StepId;
+  useEffect(() => {
+    if (saveError) setHeld(null);
+  }, [saveError]);
+  const saved = held ?? stored;
+  // A step that drops out for a moment (Bridge still being checked, the
+  // school status loading) must not send someone back to the first step:
+  // carry on at the next step that is still there.
+  const index = savedStepIndex(steps, saved);
   const step = steps[index]!;
 
-  const go = (to: StepId) => update("integrations", { setupStep: to });
+  const go = (to: StepId) => {
+    setHeld(to);
+    update("integrations", { setupStep: to });
+  };
   const advance = (choice: Partial<ClassShelfAnswer> = {}) => {
     const after = steps[index + 1];
-    if (after) return update("integrations", { ...choice, setupStep: after });
+    if (after) {
+      setHeld(after);
+      return update("integrations", { ...choice, setupStep: after });
+    }
+    finishedHere = true;
     update("integrations", { ...choice, setupStatus: "done", setupStep: "" });
     spectraBus.emit("workspace.refreshRequested", {});
     router.push(HOME_PATH);
@@ -113,7 +160,7 @@ function Setup() {
     (document.activeElement as HTMLElement | null)?.blur?.();
   }, []);
 
-  if (school === undefined || platform === null || (schoolConnected && syncs === undefined))
+  if (school === undefined || platform === null || (schoolConnected && syncs === undefined) || (bridgeUnknown && platform !== "other"))
     return <section className="spectra-setup" aria-busy="true" aria-label="Setting up Spectra" />;
 
   return (
@@ -328,6 +375,8 @@ function BridgeStep({ platform, ready, onDone, onBack }: { platform: BridgePlatf
 
 function StorageStep({ onDone, onBack }: { onDone: () => void; onBack?: () => void }) {
   const choose = useMutation(api.deviceWorks.choose);
+  const convex = useConvex();
+  const { storeId } = useDeviceState();
   const [only, setOnly] = useState<boolean | null>(null);
   const [saving, setSaving] = useState(false);
   const pick = only === null ? null : only ? ("device_backup" as const) : ("cloud" as const);
@@ -344,7 +393,12 @@ function StorageStep({ onDone, onBack }: { onDone: () => void; onBack?: () => vo
               if (!pick) return;
               setSaving(true);
               void choose({ storage: pick })
-                .then(onDone)
+                .then(() => {
+                  // Whatever is already on the other side follows the choice,
+                  // quietly, while Setup goes on; Devices shows what's left.
+                  if (storeId) void moveEveryWork(convex, storeId, pick === "cloud").catch(() => undefined);
+                  onDone();
+                })
                 .finally(() => setSaving(false));
             }}
           >
@@ -524,7 +578,7 @@ function SyncsStep({ onDone, onBack }: { onDone: () => void; onBack?: () => void
   return (
     <StepFrame
       title="What comes in from ManageBac"
-      about={`${MODE_LABEL.auto} keeps it up to date in the background, ${MODE_LABEL.manual} only when you press Sync now. Past tasks always come in. You can change any of this in School.`}
+      about={`${MODE_LABEL.auto} keeps it up to date in the background, ${MODE_LABEL.manual} only when you press Sync now. Past tasks stay out unless you bring back the ones you want from School, where you can also change any of this.`}
       actions={
         <Actions onBack={onBack}>
           <Button variant="primary" onClick={onDone}>

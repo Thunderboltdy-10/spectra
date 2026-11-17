@@ -13,8 +13,11 @@ vi.mock("../shared/school-sync", async (importOriginal) => {
 });
 
 const modules = import.meta.glob("./**/*.ts");
-beforeEach(() => vi.stubEnv("SPECTRA_CONNECTOR_BRIDGE_KEY", bridgeKey));
-afterEach(() => vi.unstubAllEnvs());
+// The fixture's task is due 2026-10-24; tasks already past when first seen
+// stay in ManageBac, so the clock sits before it.
+const FIXTURE_NOW = Date.parse("2026-10-01T00:00:00Z");
+beforeEach(() => { vi.stubEnv("SPECTRA_CONNECTOR_BRIDGE_KEY", bridgeKey); vi.useFakeTimers({ toFake: ["Date"], now: FIXTURE_NOW }); });
+afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); });
 
 describe("school administration launch evidence", () => {
   it("compares a person's actual saved planner and never returns another person's private copy", async () => {
@@ -41,7 +44,7 @@ describe("school administration launch evidence", () => {
     await expect(f.user.query(api.managebac.conflictComparison, { conflictId })).rejects.toThrow("INTEGRATION_CONFLICT_FORBIDDEN");
   });
 
-  it("reports conflicts with a single indexed row and derives freshness from the configured SLA", async () => {
+  it("reports conflicts from one bounded indexed read and derives freshness from the configured SLA", async () => {
     const f = await calendarFixture(modules, "school_admin");
     await f.sync();
     const { task } = await f.items();
@@ -63,7 +66,11 @@ describe("school administration launch evidence", () => {
       return { result, ...observed.snapshot() };
     });
     expect(measured.result).toMatchObject({ integration: { status: "connected", hasOpenConflicts: true, syncFreshness: "stale" } });
-    expect(measured.reads.filter(r => r.table === "externalSyncConflicts").reduce((sum, r) => sum + r.documentsReturned, 0)).toBe(1);
+    // The overview names who has open conflicts, so it reads them, but only up
+    // to a fixed bound through the integration's open-status index.
+    const conflictReads = measured.reads.filter(r => r.table === "externalSyncConflicts");
+    expect(conflictReads.length).toBe(1);
+    expect(conflictReads[0].documentsReturned).toBeLessThanOrEqual(300);
     await f.t.run(async ctx => {
       for (const conflict of await ctx.db.query("externalSyncConflicts").collect()) await ctx.db.delete(conflict._id);
       await ctx.db.patch(f.seed.integrationId, { lastSyncAt: Date.now() });

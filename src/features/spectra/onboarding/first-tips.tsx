@@ -59,8 +59,8 @@ export function FirstTipsMount() {
       said.current.add(id);
       const remember = () => save("integrations", { tipsSeen: [...latest.current.tipsSeen, id] });
       if (UNTIL_ANSWERED.has(id)) {
-        // Closed without an answer, it is said again on the next visit.
-        toast.info(FIRST_TIPS[id], { id: `tip:${id}`, duration: Infinity, closeButton: true, action: { label: "Got it", onClick: remember } });
+        // Stays until it is closed: one close, and closing it is the answer.
+        toast.info(FIRST_TIPS[id], { id: `tip:${id}`, duration: Infinity, closeButton: true, onDismiss: remember });
         return;
       }
       toast.info(FIRST_TIPS[id], { id: `tip:${id}`, duration: TIP_MS, closeButton: true });

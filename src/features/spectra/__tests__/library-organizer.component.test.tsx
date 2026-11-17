@@ -217,7 +217,7 @@ describe("LibraryOrganizer", () => {
     const input = screen.getByRole("searchbox", { name: "Search Library" });
     fireEvent.change(input, { target: { value: "Photosynthesis lecture draft" } });
     expect(screen.getAllByText("Partial match")).toHaveLength(2);
-    expect(screen.getByText("No exact title match. Showing ranked partial matches.")).toBeTruthy();
+    expect(screen.queryByText(/No exact title match/)).toBeNull();
     expect(screen.getByText('Enter in search opens “Water Cycle Field Guide”.')).toBeTruthy();
     expect(input.getAttribute("aria-describedby")).toBeTruthy();
     fireEvent.keyDown(input, { key: "Enter" });
@@ -263,14 +263,15 @@ describe("LibraryOrganizer", () => {
     expect(screen.queryByText(/Enter in search opens/)).toBeNull();
   });
 
-  it("qualifies partial results while further search pages remain", () => {
+  it("shows partial results without a notice about them while further pages remain", () => {
     tree.search = [node("s1", "Water Cycle Field Guide")];
     tree.searchStatus = "CanLoadMore";
     renderOrganizer();
     fireEvent.change(screen.getByRole("searchbox", { name: "Search Library" }), {
       target: { value: "Photosynthesis lecture draft" },
     });
-    expect(screen.getByText("No exact title match in the loaded results. Showing ranked partial matches.")).toBeTruthy();
+    expect(screen.getByText("Partial match")).toBeTruthy();
+    expect(screen.queryByText(/No exact title match|No title matches/)).toBeNull();
   });
 
   it("does not announce or open stale results while a new search loads", () => {

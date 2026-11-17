@@ -70,6 +70,8 @@ export type SchoolAdministrationOverview = {
     totals: Record<string, number>;
     series: UsageSeriesPoint[];
     completeThrough: string;
+    /** What the school keeps now (files' running balance, artifacts, tasks); absent on older servers. */
+    stored?: { fileBytes: number; artifacts: number; tasks: number; capped: boolean };
     /** Account id to name, for the people the chart splits by. */
     people?: Record<string, string>;
   };
@@ -90,6 +92,8 @@ export type SchoolAdministrationOverview = {
     lastSyncAt?: number;
     nextSyncAt?: number;
     hasOpenConflicts: boolean;
+    /** Open ManageBac conflicts: the school's own, the reader's own, and other people's (each decides their own). */
+    conflicts?: { school: number; mine: number; others: Array<{ accountId: string; name: string; count: number }>; othersTotal: number };
     syncFreshness: "never" | "stale" | "current";
     coverage?: {
       discovered: number;

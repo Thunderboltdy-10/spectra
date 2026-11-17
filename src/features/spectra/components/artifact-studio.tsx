@@ -269,6 +269,7 @@ import {
   setAtPointers,
   studioHistoryShortcut,
   studioIncomingSource,
+  shouldAdoptLiveBody,
   tagsFromDraft,
 } from "./artifact-studio-value-utils";
 import {
@@ -2907,6 +2908,20 @@ function ArtifactStudioEditor({
     [],
   );
   const incomingLiveContent = nativeBodyBinding ? null : live.liveValue.content;
+  // Native editors read their body from Yjs, so React keeps the body it was
+  // opened with. A list row carries no body (`content` is left out): code would
+  // then open on the empty template, with its file ids missing from the room,
+  // and an edit could save that template over the real files. Such a row takes
+  // its body from the live model once, when the room is ready.
+  const rowHasBody = artifact.content !== undefined;
+  const [liveBodyAdoptedFor, setLiveBodyAdoptedFor] = useState<string | null>(null);
+  const adoptLiveBody = shouldAdoptLiveBody({
+    nativeBodyBinding,
+    rowHasBody,
+    alreadyAdopted: liveBodyAdoptedFor === artifact._id,
+    liveInitialized: live.modelSnapshot.initialized,
+    liveBody: live.liveValue.content,
+  });
   const incomingLiveTagDraft = live.liveValue.tags.join(", ");
   const incomingReactBody = nativeBodyBinding ? null : content;
   const incomingLiveSummary = humanSummary(live.liveValue.summary);
@@ -2931,12 +2946,16 @@ function ArtifactStudioEditor({
       // Native document/code editors already consume their Yjs types directly.
       // Feeding every live-origin body projection back through React creates a
       // second full-document reconciliation path on each keystroke.
-      content: nativeBodyBinding
+      content: adoptLiveBody
+        ? live.liveValue.content
+        : nativeBodyBinding
         ? currentSnapshotRef.current.content
         : (nativeProjectionOverrideRef.current ??
           (nativeProjectionReady ? incomingReactBody : incomingLiveContent)),
     }),
     [
+      adoptLiveBody,
+      live.liveValue.content,
       incomingLiveContent,
       incomingLiveTagDraft,
       incomingReactBody,
@@ -2947,6 +2966,11 @@ function ArtifactStudioEditor({
       nativeProjectionReady,
     ],
   );
+  // Once the live body is the studio's own, Yjs carries every later change.
+  useEffect(() => {
+    if (adoptLiveBody && content === live.liveValue.content)
+      setLiveBodyAdoptedFor(artifact._id);
+  }, [adoptLiveBody, artifact._id, content, live.liveValue.content]);
   const currentSnapshot = useMemo(
     () => ({ title, summary, tagDraft, content }),
     [content, summary, tagDraft, title],

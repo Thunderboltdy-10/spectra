@@ -602,8 +602,46 @@
    island all read it, before React hydrates and after (SHELL.md). The rail
    collapses to icons when the user asks, and below 1024 px unless the user
    opened it there. */
+/* The open width is the person's: they drag the rail's edge (rail.tsx). */
 :root {
-  --spectra-rail-width: 232px;
+  --spectra-rail-width: var(--spectra-rail-expanded-width, 232px);
+}
+
+/* No easing while the edge follows the pointer. */
+html[data-spectra-rail-resizing] .spectra-shell-sidebar,
+html[data-spectra-rail-resizing] [data-island-root],
+html[data-spectra-rail-resizing] .spectra-app-shell {
+  transition: none !important;
+}
+
+.spectra-rail-resize {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 2;
+  width: 6px;
+  height: 100%;
+  cursor: ew-resize;
+  background: transparent;
+  touch-action: none;
+}
+.spectra-rail-resize::after {
+  content: "";
+  position: absolute;
+  inset: 0 2px;
+  border-radius: 1px;
+  background: transparent;
+  transition: background-color var(--motion-fast) var(--ease-standard);
+}
+.spectra-rail-resize:hover::after,
+.spectra-rail-resize:focus-visible::after,
+html[data-spectra-rail-resizing] .spectra-rail-resize::after {
+  background: color-mix(in oklab, var(--text-tertiary) 35%, transparent);
+}
+@media (max-width: 1023px) {
+  .spectra-rail-resize {
+    display: none;
+  }
 }
 
 html[data-spectra-sidebar-collapsed="true"] {
@@ -775,9 +813,10 @@ html[data-life="on"] [data-life-ghost] [data-life-ghost-bar] {
    their own grey (`.life-ghost-line`, a reply being written); whatever
    Spectra is working on has it cross over it (`[data-life-working]`, set by
    useLifeGlow); and a thing Spectra just made is crossed by it once as it
-   lands (`[data-life-working="arrival"]`). The gradient is fixed to the
-   viewport, so lines mounted together share one band, crossing slowly
-   as the field's ghosts do. */
+   lands (`[data-life-working="arrival"]`). The band belongs to the element
+   it crosses (never `background-attachment: fixed`): a fixed band stayed put
+   on the screen while the page scrolled under it, and repainted on every
+   scroll. */
 :root {
   --life-band-bar: color-mix(in oklab, var(--text-primary) 7%, transparent);
   --life-band-light: color-mix(in oklab, var(--bg-elevated) 92%, transparent);
@@ -787,12 +826,22 @@ html[data-life="on"] [data-life-ghost] [data-life-ghost-bar] {
   --life-band-period: 2.8s;
 }
 
+/* A 320px band from just left of the element to just past its right edge. */
 @keyframes life-band {
   from {
     background-position-x: -360px;
   }
   to {
-    background-position-x: calc(100vw + 40px);
+    background-position-x: calc(100% + 360px);
+  }
+}
+/* For marks too small for a 320px band: a band 2.5 times the mark's width. */
+@keyframes life-band-small {
+  from {
+    background-position-x: 150%;
+  }
+  to {
+    background-position-x: -50%;
   }
 }
 
@@ -801,7 +850,7 @@ html[data-life="on"] [data-life-ghost] [data-life-ghost-bar] {
   height: 0.6875rem;
   border-radius: 4px;
   background:
-    linear-gradient(90deg, transparent, var(--life-band-light), transparent) -360px 0 / 320px 100vh no-repeat fixed,
+    linear-gradient(90deg, transparent, var(--life-band-light), transparent) -360px 0 / 320px 100% no-repeat,
     var(--life-band-bar);
   animation: life-band var(--life-band-period) linear infinite;
 }
@@ -821,9 +870,9 @@ html[data-life="on"] [data-life-ghost] [data-life-ghost-bar] {
   height: 3px;
   border-radius: 2px;
   background:
-    linear-gradient(90deg, transparent, var(--brand-primary), transparent) -360px 0 / 320px 100vh no-repeat fixed,
+    linear-gradient(90deg, transparent, var(--brand-primary), transparent) 150% 0 / 250% 100% no-repeat,
     color-mix(in oklab, var(--brand-primary) 26%, transparent);
-  animation: life-band var(--life-band-period) linear infinite;
+  animation: life-band-small var(--life-band-period) linear infinite;
 }
 .life-working-mark::after {
   width: 64%;
@@ -840,7 +889,7 @@ html[data-life="on"] [data-life-ghost] [data-life-ghost-bar] {
   z-index: 1;
   border-radius: inherit;
   pointer-events: none;
-  background: linear-gradient(90deg, transparent, var(--life-band-tint), transparent) -360px 0 / 320px 100vh no-repeat fixed;
+  background: linear-gradient(90deg, transparent, var(--life-band-tint), transparent) -360px 0 / 320px 100% no-repeat;
   animation: life-band var(--life-band-period) linear infinite;
 }
 /* A thing that just landed is not swept: it settles into place, quietly, in no colour of its own. */

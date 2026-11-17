@@ -31,6 +31,17 @@ function saveOldWorkbench() {
   localStorage.setItem("theme", "dark");
 }
 describe("persisted workbench ownership", () => {
+  it("drops kept threads, calendar and lists when another account signs in", async () => {
+    const { cachedThread, rememberThread } = await import("@/features/spectra/data/thread-cache");
+    bindAccountStorageScope("deployment/account-A");
+    rememberThread("thread-a", { thread: { _id: "thread-a" } } as never);
+    for (const key of ["spectra:thread-cache:v1", "spectra.threads.index.v1", "spectra:calendar-overview:v1", "spectra.agent.catalog.v1", "spectra.island.seen.v1"])
+      localStorage.setItem(key, "[]");
+    bindAccountStorageScope("deployment/account-B");
+    expect(cachedThread("thread-a")).toBeNull();
+    for (const key of ["spectra:thread-cache:v1", "spectra.threads.index.v1", "spectra:calendar-overview:v1", "spectra.agent.catalog.v1", "spectra.island.seen.v1"])
+      expect(localStorage.getItem(key)).toBeNull();
+  });
   it("clears persisted and in-memory workbench references on an account transition", () => {
     saveOldWorkbench();
     clearAccountScopedStorage();

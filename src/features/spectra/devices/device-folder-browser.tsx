@@ -8,6 +8,7 @@ import { IconButton } from "@/components/ui/icon-button";
 import { nodeIdentity } from "../organization/node-identity";
 import { isPlaceNode, useTreeChildren, type TreeNode } from "../organization/tree-client";
 import { PlaceInMenu, type Placeable } from "./place-in-menu";
+import { BACKLOG_BADGE, type BacklogDirection, type BacklogFile, type FolderBacklog } from "./sync-backlog";
 
 /** What placing a row means: a reference is placed as the thing it points at. */
 function placeable(node: TreeNode): Placeable {
@@ -28,10 +29,18 @@ export function DeviceFolderBrowser({
   rootNodeId,
   name,
   onClose,
+  backlog,
+  waiting,
+  computer = "the computer",
 }: {
   rootNodeId: string;
   name: string;
   onClose: () => void;
+  /** What this folder still has to move, both ways. */
+  backlog?: FolderBacklog;
+  /** Per piece of work, the way it is still going. */
+  waiting?: ReadonlyMap<string, BacklogDirection>;
+  computer?: string;
 }) {
   const [trail, setTrail] = useState<readonly Placeable[]>([{ nodeId: rootNodeId, name }]);
   const here = trail[trail.length - 1]!;
@@ -97,6 +106,8 @@ export function DeviceFolderBrowser({
         <IconButton icon="close" label={`Close ${name}`} size="compact" onClick={onClose} />
       </div>
 
+      {backlog ? <StillToSync backlog={backlog} computer={computer} /> : null}
+
       {status === "LoadingFirstPage" ? (
         <p className="device-browser-quiet">Reading this folder</p>
       ) : !rows.length ? (
@@ -133,6 +144,7 @@ export function DeviceFolderBrowser({
                       {node.name}
                     </button>
                   )}
+                  {source && waiting?.get(source) ? <WaitingBadge direction={waiting.get(source)!} computer={computer} /> : null}
                   {place ? <Icon name="chevronRight" size={14} className="shrink-0 text-[var(--text-tertiary)]" /> : null}
                   {source ? (
                     <Link href={`/library?artifactId=${source}`} className="device-browser-open">
@@ -171,5 +183,55 @@ export function DeviceFolderBrowser({
         </PlaceInMenu>
       </div>
     </li>
+  );
+}
+
+function badgeLabel(direction: BacklogDirection, computer: string) {
+  return direction === "toComputer" ? `Going to ${computer}` : BACKLOG_BADGE[direction].label;
+}
+
+function WaitingBadge({ direction, computer }: { direction: BacklogDirection; computer: string }) {
+  const badge = BACKLOG_BADGE[direction];
+  return (
+    <span className="device-browser-waiting" data-way={direction} title={badgeLabel(direction, computer)}>
+      <Icon name={badge.icon} size={12} />
+      <span className="sr-only">{badgeLabel(direction, computer)}</span>
+    </span>
+  );
+}
+
+/*
+ * Everything in this folder still on its way, at any depth, listed by the way
+ * it is going: so a file deep in a subfolder is seen without opening it.
+ */
+function StillToSync({ backlog, computer }: { backlog: FolderBacklog; computer: string }) {
+  const groups = ([
+    ["conflict", backlog.conflict],
+    ["problem", backlog.problem],
+    ["toComputer", backlog.toComputer],
+    ["toSpectra", backlog.toSpectra],
+  ] as Array<[BacklogDirection, BacklogFile[]]>).filter(([, list]) => list.length);
+  if (!groups.length)
+    return <p className="device-browser-insync">Everything here matches on {computer} and in Spectra.</p>;
+  return (
+    <div className="device-browser-backlog" aria-label="Still to sync">
+      {groups.map(([direction, list]) => (
+        <section key={direction} className="device-browser-backlog-group" data-way={direction}>
+          <h5>
+            <Icon name={BACKLOG_BADGE[direction].icon} size={12} />
+            {badgeLabel(direction, computer)}
+            <span className="device-browser-backlog-count">{list.length.toLocaleString()}</span>
+          </h5>
+          <ul>
+            {list.slice(0, 8).map((file) => (
+              <li key={file.workId} title={file.path}>
+                <Link href={`/library?artifactId=${file.workId}`}>{file.path || "This file"}</Link>
+              </li>
+            ))}
+            {list.length > 8 ? <li className="device-browser-backlog-more">and {(list.length - 8).toLocaleString()} more</li> : null}
+          </ul>
+        </section>
+      ))}
+    </div>
   );
 }

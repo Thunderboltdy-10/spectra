@@ -2489,6 +2489,29 @@ export const hideTab = mutation({
 });
 
 /**
+ * The user has seen these runs (on any device). Marks their tabs so every
+ * device's island treats them as read. It leaves `updatedAt` alone: being
+ * read is not activity, and must not reorder the island.
+ */
+export const markTabsSeen = mutation({
+  args: { runIds: v.array(v.id("spectraAiRuns")) },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx);
+    let marked = 0;
+    for (const runId of args.runIds.slice(0, 40)) {
+      const tab = await ctx.db
+        .query("spectraRunTabs")
+        .withIndex("by_account_run", (q) => q.eq("ownerAccountId", actor._id).eq("runId", runId))
+        .first();
+      if (!tab || tab.schoolId !== actor.schoolId || tab.seenRunId === runId) continue;
+      await ctx.db.patch(tab._id, { seenRunId: runId });
+      marked += 1;
+    }
+    return { marked };
+  },
+});
+
+/**
  * The composer re-selects the conversation it shows on every change; when that
  * tab is already the open one, up to date and alone, there is nothing to
  * write, and the run (a large row) need not be read (LAUNCH-REVIEW E3).

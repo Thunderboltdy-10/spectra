@@ -49,7 +49,7 @@ import { isAdoptable, isPeekable, schoolRecordOf, useTaskPeek } from "./use-task
 import { useOpenSchoolTask } from "../../school/open-school-task";
 import { formatTime, isDeadline, isReschedulable, layerFor } from "../domain/item-format";
 import { CalendarItemCard, type OpenedCalendarItem } from "./calendar-item-card";
-import { CalendarComposer } from "./calendar-composer";
+import { CalendarComposer, type ComposerPlace } from "./calendar-composer";
 import { firstTipMoment } from "../../onboarding/first-tips";
 
 const HOUR = 60 * 60_000;
@@ -295,27 +295,76 @@ function localDayKey(value: number) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
+/* Building an Intl formatter is far slower than using one, and the grid asks
+   for a day key per item per loaded day on every render: with many tasks that
+   was most of Calendar's time. One formatter per timezone, and keys memoised. */
+const zonedFormatters = new Map<string, Intl.DateTimeFormat>();
+function zonedFormatter(timezone: string) {
+  let formatter = zonedFormatters.get(timezone);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat("en-GB", {
+      timeZone: timezone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    });
+    zonedFormatters.set(timezone, formatter);
+  }
+  return formatter;
+}
+
 function zonedParts(value: number, timezone: string) {
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    timeZone: timezone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(value);
+  const parts = zonedFormatter(timezone).formatToParts(value);
   return Object.fromEntries(parts.map((part) => [part.type, part.value]));
 }
 
+const dayKeyMemo = new Map<string, string>();
 function zonedDayKey(value: number, timezone: string) {
+  const memoKey = `${timezone}|${value}`;
+  const known = dayKeyMemo.get(memoKey);
+  if (known) return known;
   const parts = zonedParts(value, timezone);
-  return `${parts.year}-${parts.month}-${parts.day}`;
+  const key = `${parts.year}-${parts.month}-${parts.day}`;
+  if (dayKeyMemo.size > 20_000) dayKeyMemo.clear();
+  dayKeyMemo.set(memoKey, key);
+  return key;
 }
 
 function minutesOnDay(value: number, timezone: string) {
   const parts = zonedParts(value, timezone);
   return Number(parts.hour) * 60 + Number(parts.minute);
+}
+
+/* A copy of the calendar kept in this browser, shown only until the server's
+   answer arrives (never edited, never the only copy). Cleared with the rest
+   of the account's local data on sign-out (account-storage). */
+const KEPT_CALENDAR = "spectra:calendar-overview:v1";
+const KEPT_CALENDAR_MAX_AGE = 3 * 24 * 60 * 60_000;
+
+function readKeptCalendar(): CalendarOverview | null {
+  try {
+    const value = JSON.parse(window.localStorage.getItem(KEPT_CALENDAR) ?? "null") as { at: number; overview: CalendarOverview } | null;
+    if (!value?.overview || Date.now() - value.at > KEPT_CALENDAR_MAX_AGE) return null;
+    return {
+      ...value.overview,
+      items: value.overview.items.filter((item) => !item.id.startsWith("pending:")),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function keepCalendar(overview: CalendarOverview) {
+  try {
+    const encoded = JSON.stringify({ at: Date.now(), overview });
+    if (encoded.length > 900_000) return;
+    window.localStorage.setItem(KEPT_CALENDAR, encoded);
+  } catch {
+    // Storage full or blocked: Calendar just loads from the server.
+  }
 }
 
 function isDayItem(item: CalendarItem) {
@@ -441,6 +490,7 @@ export function CalendarApplication({ startAt, focusAt, still = false }: { start
   const schoolTask = useOpenSchoolTask();
   const taskPeek = useTaskPeek();
   const [composerOpen, setComposerOpen] = useState(false);
+  const [composerAt, setComposerAt] = useState<ComposerPlace | null>(null);
   const [visibleLayers, setVisibleLayers] = useState<Set<CalendarLayerKey>>(
     () => new Set(CALENDAR_LAYERS.map((layer) => layer.key)),
   );
@@ -545,6 +595,17 @@ export function CalendarApplication({ startAt, focusAt, still = false }: { start
   loadRef.current = load;
 
   useEffect(() => () => overviewRequestRef.current?.abort(), []);
+
+  // The last calendar read on this device shows at once while a fresh one loads.
+  useEffect(() => {
+    const kept = readKeptCalendar();
+    if (kept) setOverview((current) => current ?? kept);
+  }, []);
+  useEffect(() => {
+    if (!overview || continuation || refreshing) return;
+    const timer = window.setTimeout(() => keepCalendar(overview), 1_200);
+    return () => window.clearTimeout(timer);
+  }, [continuation, overview, refreshing]);
 
   useEffect(() => {
     // The week loads at once; moving old timetables onto the calendar runs
@@ -1215,7 +1276,7 @@ export function CalendarApplication({ startAt, focusAt, still = false }: { start
   };
 
   const commands: BarCommand[] = [
-    { id: "add", icon: "add", label: "Add", pinned: true, onSelect: () => setComposerOpen(true) },
+    { id: "add", icon: "add", label: "Add", pinned: true, onSelect: () => { setComposerAt(null); setComposerOpen(true); } },
     {
       id: "layers",
       icon: "layers",
@@ -1343,6 +1404,14 @@ export function CalendarApplication({ startAt, focusAt, still = false }: { start
                   onPreview={previewDrop}
                   onDrop={dropOnDay}
                   onDropAllDay={dropOnAllDay}
+                  onCreateAt={(day, minutes) => {
+                    taskPeek.close();
+                    setComposerAt({
+                      day: localDayKey(day.getTime()) as ComposerPlace["day"],
+                      time: minutes === null ? undefined : `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`,
+                    });
+                    setComposerOpen(true);
+                  }}
                   onOpen={openItem}
                   onDetails={(item, from) => {
                     taskPeek.close();
@@ -1386,6 +1455,7 @@ export function CalendarApplication({ startAt, focusAt, still = false }: { start
 
         <CalendarComposer
           open={composerOpen}
+          at={composerAt}
           onClose={() => setComposerOpen(false)}
           onCreate={async (draft) => {
             await calendarPost({ action: "createPersonalItem", ...draft, timezone });
@@ -1511,6 +1581,7 @@ function WeekGrid({
   onBlockDragStart,
   onBlockDragEnd,
   onResizeStart,
+  onCreateAt,
 }: {
   days: number[];
   focusedStart: number;
@@ -1523,6 +1594,8 @@ function WeekGrid({
   onPreview: (event: React.DragEvent<HTMLDivElement>, day: Date) => void;
   onDrop: (event: React.DragEvent<HTMLDivElement>, day: Date) => void;
   onDropAllDay: (event: React.DragEvent<HTMLDivElement>, day: Date) => void;
+  /** A right-click on an empty part of a day: a new task there, at the time pressed (null: the day itself). */
+  onCreateAt: (day: Date, minutes: number | null) => void;
   onOpen: (item: CalendarItem, from: HTMLElement) => void;
   /** Its details and actions, on a right-click. */
   onDetails: (item: CalendarItem, from: HTMLElement) => void;
@@ -1545,6 +1618,18 @@ function WeekGrid({
 }) {
   const dayDates = days.map((stamp) => new Date(stamp));
   const now = Date.now();
+  // Each day's timed blocks, grouped once rather than filtered per day.
+  const timedByDay = useMemo(() => {
+    const groups = new Map<string, CalendarItem[]>();
+    for (const item of timedItems) {
+      if (item.startAt === undefined) continue;
+      const key = zonedDayKey(item.startAt, timezone);
+      const group = groups.get(key);
+      if (group) group.push(item);
+      else groups.set(key, [item]);
+    }
+    return groups;
+  }, [timedItems, timezone]);
   const hoursHeight = HOURS * HOUR_PX;
   const first = new Date(focusedStart);
   return (
@@ -1584,6 +1669,11 @@ function WeekGrid({
               data-life-receive
               onDragOver={(event) => event.preventDefault()}
               onDrop={(event) => onDropAllDay(event, day)}
+              onContextMenu={(event) => {
+                if (event.defaultPrevented) return;
+                event.preventDefault();
+                onCreateAt(day, null);
+              }}
             >
               {items.map((item) => {
                 const layer = CALENDAR_LAYERS.find((candidate) => candidate.key === layerFor(item))!;
@@ -1628,9 +1718,7 @@ function WeekGrid({
           )}
         </div>
         {dayDates.map((day) => {
-          const columnItems = timedItems.filter(
-            (item) => item.startAt !== undefined && zonedDayKey(item.startAt, timezone) === localDayKey(day.getTime()),
-          );
+          const columnItems = timedByDay.get(localDayKey(day.getTime())) ?? [];
           const lanes = layoutTimedLanes(
             columnItems.map((item) => ({
               id: item.id,
@@ -1649,6 +1737,14 @@ function WeekGrid({
               key={`${day.toISOString()}-hours`}
               onDragOver={(event) => onPreview(event, day)}
               onDrop={(event) => onDrop(event, day)}
+              onContextMenu={(event) => {
+                // A block's own right-click shows its details.
+                if (event.defaultPrevented) return;
+                event.preventDefault();
+                const top = event.currentTarget.getBoundingClientRect().top;
+                const minutes = Math.round((((event.clientY - top) / HOUR_PX) * 60) / 15) * 15;
+                onCreateAt(day, Math.max(0, Math.min(HOURS * 60 - 15, minutes)));
+              }}
               data-life-receive
               // Its own stacking context: blocks layer within their day and pass under the hour gutter.
               className="relative isolate border-r border-[var(--border-subtle)] last:border-r-0"
@@ -1664,7 +1760,7 @@ function WeekGrid({
               {nowTop !== null ? (
                 <span
                   aria-hidden
-                  className="spectra-calendar-now pointer-events-none absolute inset-x-0 z-chrome h-px"
+                  className="spectra-calendar-now pointer-events-none absolute inset-x-0 h-px"
                   style={{ top: nowTop }}
                 />
               ) : null}

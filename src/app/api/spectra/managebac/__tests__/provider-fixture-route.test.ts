@@ -369,9 +369,11 @@ describe("ManageBac route provider fixture", () => {
   });
 
   it("syncs one job per kind through the real route: classes, tasks, grades, submissions and files", async () => {
-    // The provider fixture's deadlines are September 18–20, 2026. Keep the
-    // actual upcoming-deadline query inside that term as the wall clock advances.
-    vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-09-15T12:00:00Z"));
+    // The provider fixture's deadlines are September 10–20, 2026. Keep the
+    // actual upcoming-deadline query inside that term as the wall clock advances,
+    // within a day of the graded task's deadline: tasks already well past when
+    // Spectra first sees them are left in ManageBac.
+    vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-09-11T12:00:00Z"));
     fixture = fixtureModule.createManageBacProviderFixture();
     const origin = await fixture.start();
     stop = fixture.stop;

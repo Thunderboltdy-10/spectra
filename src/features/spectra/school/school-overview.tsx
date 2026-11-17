@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { Icon } from "@/components/icons";
@@ -68,6 +68,14 @@ export function Overview({
       setReviewError(sentenceOf(error, "Your changes could not be loaded. Try again."));
     }
   };
+  // Administration links straight here when the open changes are the reader's own.
+  const askedReview = useRef(false);
+  useEffect(() => {
+    if (askedReview.current || new URLSearchParams(window.location.search).get("review") !== "changes") return;
+    askedReview.current = true;
+    void openReview();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const searching = Boolean(query.trim());
   const groups = useMemo(() => groupCurrentTasks((tasks ?? []).filter((task) => taskMatches(task, query)), now), [now, query, tasks]);
   const subjects = book.classes.filter((cls) => !cls.archived && book.of(cls.providerClassId, cls.title)?.subject);

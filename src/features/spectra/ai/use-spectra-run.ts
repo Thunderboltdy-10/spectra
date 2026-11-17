@@ -1354,6 +1354,8 @@ export function useSpectraRun({
         choiceKey?: string;
         choiceMessageId?: string;
         executionId?: string;
+        /** Setup's island: a real thread and message, answered with a practice note. */
+        practice?: boolean;
         batchSelections?: Array<{
           questionId: string;
           choiceKey: string;
@@ -1451,6 +1453,7 @@ export function useSpectraRun({
             batchSelections: options?.batchSelections,
             ...(options?.steerRunId ? { steerRunId: options.steerRunId } : {}),
             ...(options?.agentId !== undefined ? { agentId: options.agentId } : {}),
+            ...(options?.practice ? { practice: true } : {}),
             ...(open?.length ? { open } : {}),
             ...(selection?.text.trim() ? { selection } : {}),
             ...(options?.references?.length ? { references: options.references } : {}),

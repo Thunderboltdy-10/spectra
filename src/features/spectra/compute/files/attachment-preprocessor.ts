@@ -356,3 +356,32 @@ export async function prepareAttachments(
     };
   });
 }
+
+/**
+ * The files of one message, with any that cannot be read set aside rather than
+ * failing the message: the words still go, the thread still stands, and the
+ * reply can say which file it could not open (SHELL.md, "Attachments").
+ */
+export async function prepareAttachmentsKeepingFailures(
+  input: AttachmentInput[] | undefined,
+): Promise<{ prepared: PreparedAttachment[]; kept: AttachmentInput[]; failed: Array<{ name: string; reason: string }> }> {
+  const rows = Array.isArray(input) ? input.slice(0, 4) : [];
+  try {
+    return { prepared: await prepareAttachments(rows), kept: rows, failed: [] };
+  } catch {
+    const kept: AttachmentInput[] = [];
+    const failed: Array<{ name: string; reason: string }> = [];
+    for (const row of rows) {
+      try {
+        await prepareAttachments([row]);
+        kept.push(row);
+      } catch (error) {
+        failed.push({
+          name: typeof row.name === "string" ? row.name.slice(0, 180) : "attachment",
+          reason: error instanceof Error ? error.message.slice(0, 200) : "It could not be read.",
+        });
+      }
+    }
+    return { prepared: kept.length ? await prepareAttachments(kept) : [], kept, failed };
+  }
+}

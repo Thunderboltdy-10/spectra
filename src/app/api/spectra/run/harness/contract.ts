@@ -75,6 +75,8 @@ export type Body = {
   submissionKey?: string;
   /** Runtimes this computer said it can't reach as the person sent. */
   unreachable?: unknown;
+  /** Sent from Setup's island: the thread and message are real, the answer is Spectra's practice note, no model runs. */
+  practice?: boolean;
   /**
    * The agent for this message. A string chooses that agent from the start
    * and keeps it for the thread; null switches the thread back to Auto;

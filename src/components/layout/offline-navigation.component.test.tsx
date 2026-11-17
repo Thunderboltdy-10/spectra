@@ -11,7 +11,7 @@ vi.mock("../account-gate", () => ({ AccountGate: ({ children }: { children: impo
 vi.mock("next/navigation", () => ({ usePathname: () => route.pathname, useRouter: () => route.router, useSearchParams: () => new URLSearchParams("section=appearance") }));
 vi.mock("sonner", () => ({ toast: { error: route.error, dismiss: vi.fn() } }));
 vi.mock("next/link", () => ({ default: ({ children, ...props }: { children: ReactNode } & { prefetch?: boolean }) => { delete props.prefetch; return <a {...props} onClick={event => { event.preventDefault(); route.router.push(String((props as { href?: string }).href)); }}>{children}</a>; } }));
-vi.mock("@clerk/nextjs", () => ({ ClerkProvider: ({ children }: { children: ReactNode }) => children, useClerk: () => ({ openUserProfile: vi.fn() }) }));
+vi.mock("@clerk/nextjs", () => ({ ClerkProvider: ({ children }: { children: ReactNode }) => children, useClerk: () => ({ openUserProfile: vi.fn() }), useUser: () => ({ user: null }) }));
 vi.mock("@/lib/clerk-config", () => ({ getClerkPublishableKey: () => undefined }));
 vi.mock("@/lib/boot-diagnostics", () => ({ checkDeploymentConsistency: () => {} }));
 vi.mock("@/components/providers", () => ({ Providers: ({ children }: { children: ReactNode }) => children }));
@@ -37,6 +37,7 @@ vi.mock("@/features/spectra/administration/api", () => ({ getAdministration: asy
 vi.mock("@/features/spectra/island/run-tabs", () => ({ useRunTabs: () => [], isActiveRunStatus: () => false }));
 vi.mock("@/features/spectra/data/api", () => ({
   getSpectraThreads: async () => ({ threads: [] }),
+  keptSpectraThreads: () => null,
   getSpectraNotificationCenter: async () => ({ comments: [], planner: [], timetable: [], invitations: [] }),
 }));
 

@@ -2,7 +2,7 @@ import { Presentation } from "@ariadng/office/pptx";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import type { Id } from "../../../../../../../convex/_generated/dataModel";
-import { fetchVerifiedNativePayload } from "@/features/spectra/lenses/native-payload-server";
+import { ensureImportedNativePayload, fetchVerifiedNativePayload } from "@/features/spectra/lenses/native-payload-server";
 import { sniffOfficeRasterMedia } from "@/features/spectra/lenses/office-media";
 import { OFFICE_ARCHIVE_LIMITS, prepareBoundedArchiveBytes } from "../../../../../../../shared/parser-limits";
 
@@ -45,6 +45,8 @@ export async function GET(request: NextRequest) {
       payloadHash: request.nextUrl.searchParams.get("payloadHash"),
       partName: request.nextUrl.searchParams.get("partName"),
     });
+    // An import made before its original was adopted as the cloud copy.
+    await ensureImportedNativePayload(input.artifactId as Id<"spectraArtifacts">).catch(() => undefined);
     const retained = await fetchVerifiedNativePayload(
       input.artifactId as Id<"spectraArtifacts">,
       "cloud",

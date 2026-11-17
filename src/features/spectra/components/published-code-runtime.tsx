@@ -22,6 +22,8 @@ type PublishedCodeRuntimeProps = {
   compact: boolean;
   resources?: Record<string, unknown>;
   allowInteraction?: boolean;
+  /** In a thread: no card, toolbar or build label, so it blends into the reply. */
+  chromeless?: boolean;
 };
 
 export function PublishedCodeRuntime(props: PublishedCodeRuntimeProps) {
@@ -48,6 +50,7 @@ function PublishedCodeRuntimeInstance({
   compact,
   resources,
   allowInteraction = true,
+  chromeless = compact,
 }: PublishedCodeRuntimeProps) {
   const [payload, setPayload] = useState<PublishedCodeBuildPayload | null>(
     null,
@@ -226,7 +229,7 @@ function PublishedCodeRuntimeInstance({
             <LockKeyhole className="h-3 w-3" /> View-only published preview
           </div>
         ) : null}
-        <div className="flex items-center justify-between gap-3 px-1 text-micro text-[var(--text-tertiary)]">
+        {chromeless ? null : <div className="flex items-center justify-between gap-3 px-1 text-micro text-[var(--text-tertiary)]">
           <span className="inline-flex items-center gap-1.5 font-semibold ">
             <ShieldCheck className="h-3 w-3 text-[var(--success)]" />
             Verified published build
@@ -234,7 +237,7 @@ function PublishedCodeRuntimeInstance({
           <span>
             {payload.runtime === "react" ? "React / TypeScript" : "Browser"}
           </span>
-        </div>
+        </div>}
         <SandboxedArtifactRuntime
           title={payload.accessibility?.title || title}
           description={
@@ -252,7 +255,8 @@ function PublishedCodeRuntimeInstance({
               : undefined
           }
           compact={compact}
-          toolbar={!compact}
+          toolbar={!chromeless}
+          chromeless={chromeless}
           className={!allowInteraction ? "pointer-events-none" : ""}
         />
       </div>

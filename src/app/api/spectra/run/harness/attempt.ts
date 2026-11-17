@@ -89,6 +89,37 @@ const STATE_LIMIT_CHARS = 800_000;
 
 export type AttemptMode = "start" | "resume" | "retry";
 
+/** What Setup's island answers: the thread is real and carries on once Setup is done. */
+export const PRACTICE_REPLY =
+  "I'm switched off while you finish Setup, so this is only a practice run. Your message is saved in this thread: once Setup is done, send it again here and I'll pick it up from where you left off.";
+
+/** A practice thread is named after what was asked, never after the practice note. */
+export function practiceTitle(prompt: string) {
+  const clean = prompt.replace(/\s+/g, " ").trim().replace(/[?.!,;:]+$/, "");
+  if (clean.length <= 60) return clean || "Practice thread";
+  const cut = clean.slice(0, 61);
+  const space = cut.lastIndexOf(" ");
+  return `${(space > 20 ? cut.slice(0, space) : cut.slice(0, 60)).trim()}…`;
+}
+
+function practiceResult() {
+  return {
+    status: "completed",
+    finishedWith: "spectra",
+    moved: false,
+    titling: Promise.resolve(),
+    state: {
+      text: PRACTICE_REPLY,
+      messages: [{ role: "assistant", content: PRACTICE_REPLY }],
+      artifacts: [],
+      widgets: [],
+      sources: [],
+      elapsedMs: 0,
+      turns: 0,
+    },
+  } as unknown as Awaited<ReturnType<typeof runHarness>>;
+}
+
 export type AttemptParams = RunPointers & {
   actorClerkId: string;
   runId: string;
@@ -117,6 +148,8 @@ export type AttemptParams = RunPointers & {
   relayId?: string;
   /** Runtimes the person's computer said it can't reach as they sent; only the first attempt uses it. */
   unreachable?: UnreachableRuntime[];
+  /** Setup's island: answer with the practice note instead of running a model. */
+  practice?: boolean;
   signal?: AbortSignal;
 };
 
@@ -593,7 +626,17 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
       ...(await runtimeFor(actorClerkId, preferences.runtime)),
       ...(params.mode === "start" && params.unreachable?.length ? { unreachable: params.unreachable } : {}),
     };
-    const result = await runHarness({
+    if (params.practice && params.mode === "start" && params.threadId)
+      titleWrites.push(
+        mutate("spectraThreads:applyGeneratedMetadata", {
+          actorClerkId,
+          threadId: params.threadId,
+          runId,
+          executionId,
+          title: practiceTitle(params.prompt),
+        }).catch(() => null),
+      );
+    const result = params.practice && params.mode === "start" ? practiceResult() : await runHarness({
       runId,
       backend,
       signal,

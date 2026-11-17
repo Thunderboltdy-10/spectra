@@ -1,5 +1,6 @@
 "use client";
 
+import { setDocumentDark } from "@/lib/document-theme";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConvex, useConvexAuth } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
@@ -120,7 +121,7 @@ function applyDocumentPreferences(preferences: SpectraPreferences) {
   // A light or dark chosen for this computer holds after a reload;
   // "Match computer" leaves the page as this browser last had it.
   const theme = preferences.appearance.theme;
-  if (theme !== "system") root.classList.toggle("dark", theme === "dark");
+  if (theme !== "system") setDocumentDark(theme === "dark");
   root.dataset.spectraDensity = preferences.appearance.density;
   root.dataset.spectraContrast =
     preferences.appearance.contrast === "high" ||
@@ -362,6 +363,10 @@ export function useSpectraPreferences({
         if (generation === writes.generation) {
           confirmedRef.current = next;
           setSaveError(null);
+        } else {
+          // A later write is still out: this one is kept all the same, so a
+          // failure of that later one never takes this one back with it.
+          confirmedRef.current = updatePreference(confirmedRef.current, section, patch, MERGE_OPTIONS);
         }
       } catch {
         revertFailedWrite(generation);

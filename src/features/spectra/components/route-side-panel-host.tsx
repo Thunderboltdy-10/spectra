@@ -37,6 +37,7 @@ import {
   useArtifactStudioState,
 } from "./artifact-studio-shell";
 import { workspaceHref } from "../pages/shell-location";
+import { carriedSplitWorkId } from "./carried-work";
 
 /**
  * Routes that already own `useArtifactStudioState` + `ArtifactStudio` (Home,
@@ -157,7 +158,10 @@ export function RouteSidePanelHost() {
     setThread(null);
     if (!eligible) return;
     const restored = readRouteSideSession(window.localStorage, pathname);
-    if (restored.workId) void loadWork(restored.workId);
+    // A work open beside the last page stays open on this one.
+    const carried = carriedSplitWorkId();
+    if (carried) void loadWork(carried);
+    else if (restored.workId) void loadWork(restored.workId);
     if (restored.threadId) void loadThread(restored.threadId);
     return () => {
       workLoad.cancel();

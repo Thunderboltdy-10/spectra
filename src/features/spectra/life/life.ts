@@ -212,6 +212,11 @@ class Life {
     return this.formed(id);
   }
 
+  /** A held figure follows its element: moved by (dx, dy), drawn only inside `clip`. */
+  place(formed: Formed, dx: number, dy: number, clip: Rect | null) {
+    this.post({ type: "place", id: formed.id, dx, dy, clip });
+  }
+
   /** Something goes away: its lines part into dots that sink into the field. */
   unform(what: Figure | Formed, { from }: { from?: Point } = {}): Promise<void> {
     const id = this.nextId++;

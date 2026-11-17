@@ -228,6 +228,7 @@ function AppearanceSettings({ p, update }: SectionProps<"appearance">) {
       <ToggleRow label="Reduced motion" description="Removes decorative transitions while preserving state changes." checked={p.reducedMotion} onCheckedChange={(reducedMotion) => update({ reducedMotion, motionLevel: reducedMotion ? "reduced" : "full" })} />
       <ToggleRow label="Reveal answers as they're written" description="When off, each part of an answer appears whole." checked={p.streamingReveal} onCheckedChange={(streamingReveal) => update({ streamingReveal })} />
       <ToggleRow label="Shimmer on the line being written" checked={p.activeTailShimmer} onCheckedChange={(activeTailShimmer) => update({ activeTailShimmer })} />
+      <SelectRow label="Folders in the Library" description="Show what's inside lets a folder's first artifacts peek out and lists its contents when you rest the pointer on it. Each folder can switch on its own too." value={p.folderLook} options={[{ value: "peek", label: "Show what's inside" }, { value: "plain", label: "Plain folders" }]} onChange={(folderLook) => update({ folderLook: folderLook as typeof p.folderLook, folderLookFlipped: [] })} />
     </SettingGroup>
   );
 }

@@ -1253,8 +1253,10 @@ function insertListParagraph(document: Document, list: NonNullable<Extract<DocxS
     const existing = paragraph.element.find(WML_NAMESPACE, "pPr");
     if (existing) paragraph.element.removeChild(existing);
     const copy = properties.clone();
-    copy.find(WML_NAMESPACE, "numPr")?.find(WML_NAMESPACE, "ilvl")?.setAttributeNs(WML_NAMESPACE, "val", String(list.level));
+    // Attach first: a detached clone cannot resolve its `w:` prefix, so the
+    // level lookup found nothing and every nested item landed at level 0.
     paragraph.element.insertBefore(copy, paragraph.element.children[0] ?? null);
+    copy.find(WML_NAMESPACE, "numPr")?.find(WML_NAMESPACE, "ilvl")?.setAttributeNs(WML_NAMESPACE, "val", String(list.level));
   }
   return paragraph;
 }
@@ -1272,6 +1274,8 @@ async function insertParagraph(
           : {}),
       });
   if (operation.inlineContent) await replaceParagraphRich(document, paragraph, operation.inlineContent, options);
+  // `addParagraph` writes text verbatim; a line break or tab must become Word's own token.
+  else if (/[\t\n]/.test(operation.text)) replaceParagraphText(document, paragraph, operation.text);
   // AI/cloud projections can give an inserted block an identity whose stable
   // Word paraId is already present on the native placeholder it replaces.
   // Pick a deterministic unused ID before the later delete/reorder operations
@@ -1306,10 +1310,64 @@ async function insertTable(
     properties.appendChild(header);
     header.setAttributeNs(WML_NAMESPACE, "val", operation.headerRow ? "1" : "0");
   }
+  if (operation.columnWidths) applyTableColumnWidths(document, table.element, operation.columnWidths);
   tableAnchor(table)!.setAttributeNs(W14_NAMESPACE, "paraId", paraId);
   placeInsertedRegion(document, table.element, operation.afterRegionId);
   document._markMainDirty();
   return `docx:table:${paraId.toLowerCase()}`;
+}
+
+/** The last section's writable width in twips (Word's default Letter page otherwise). */
+function sectionTextWidthTwips(document: Document) {
+  const section = document.body().find(WML_NAMESPACE, "sectPr");
+  const width = numberAttribute(section?.find(WML_NAMESPACE, "pgSz"), WML_NAMESPACE, "w") ?? 12_240;
+  const margins = section?.find(WML_NAMESPACE, "pgMar");
+  const left = numberAttribute(margins, WML_NAMESPACE, "left") ?? 1_440;
+  const right = numberAttribute(margins, WML_NAMESPACE, "right") ?? 1_440;
+  return Math.max(1_440, width - left - right);
+}
+
+/**
+ * Column widths dragged in the editor, as Word's grid and cell widths. Pixel
+ * widths keep their proportions; a table wider than the page is scaled to fit,
+ * and columns nobody sized share what is left.
+ */
+export function applyTableColumnWidths(
+  document: Document,
+  table: XmlElement,
+  widths: readonly (number | null)[],
+) {
+  const total = sectionTextWidthTwips(document);
+  const known = widths.map((width) => (width ? width * 15 : null));
+  const knownSum = known.reduce<number>((sum, width) => sum + (width ?? 0), 0);
+  const unknownCount = known.filter((width) => width === null).length;
+  const minimum = 360;
+  const scale = knownSum + unknownCount * minimum > total ? (total - unknownCount * minimum) / Math.max(1, knownSum) : 1;
+  const rest = Math.max(minimum, (total - knownSum * scale) / Math.max(1, unknownCount));
+  const twips = known.map((width) => Math.max(minimum, Math.round(width === null ? rest : width * scale)));
+  const grid = table.find(WML_NAMESPACE, "tblGrid");
+  grid?.findAll(WML_NAMESPACE, "gridCol").forEach((column, index) => {
+    if (twips[index]) column.setAttributeNs(WML_NAMESPACE, "w", String(twips[index]));
+  });
+  for (const row of table.findAll(WML_NAMESPACE, "tr"))
+    row.findAll(WML_NAMESPACE, "tc").forEach((cell, index) => {
+      const width = cell.find(WML_NAMESPACE, "tcPr")?.find(WML_NAMESPACE, "tcW");
+      if (width && twips[index]) {
+        width.setAttributeNs(WML_NAMESPACE, "w", String(twips[index]));
+        width.setAttributeNs(WML_NAMESPACE, "type", "dxa");
+      }
+    });
+  const properties = table.find(WML_NAMESPACE, "tblPr");
+  const layout = properties?.find(WML_NAMESPACE, "tblLayout");
+  if (properties && !layout) {
+    const fixed = new XmlElement("tblLayout", properties.prefix);
+    // Schema order: tblLayout comes before cell margins, look and captions.
+    const later = properties.elements().find((child) =>
+      ["tblCellMar", "tblLook", "tblCaption", "tblDescription"].includes(child.localName));
+    properties.insertBefore(fixed, later ?? null);
+    fixed.setAttributeNs(WML_NAMESPACE, "type", "fixed");
+  }
+  document._markMainDirty();
 }
 
 function safeStyleId(value: string) {
@@ -1321,7 +1379,7 @@ function safeStyleId(value: string) {
   return value;
 }
 
-async function resolveParagraphStyleId(document: Document, requested: string) {
+export async function resolveParagraphStyleId(document: Document, requested: string) {
   const safeRequested = safeStyleId(requested);
   const stylesPart = document.office.package.getPart("/word/styles.xml");
   if (!stylesPart)
@@ -1356,6 +1414,26 @@ async function resolveParagraphStyleId(document: Document, requested: string) {
     (definition) => definition.name?.toLocaleLowerCase() === safeRequested.toLocaleLowerCase(),
   );
   if (byName) return byName.id;
+  // Word's built-in headings are only written to styles.xml once used. A
+  // heading level the file never used gets Word's own definition, so the
+  // reference resolves and Word lists it as "Heading N".
+  const builtInHeading = Number(safeRequested.match(/^Heading([1-9])$/)?.[1]);
+  if (builtInHeading) {
+    const level = builtInHeading;
+    const basedOn = definitions.some((definition) => definition.id === "Normal")
+      ? '<w:basedOn w:val="Normal"/><w:next w:val="Normal"/>'
+      : "";
+    const size = [32, 26, 24, 22, 22, 22, 22, 21, 21][level - 1];
+    const style = parseXml(
+      `<w:style xmlns:w="${WML_NAMESPACE}" w:type="paragraph" w:styleId="Heading${level}">` +
+        `<w:name w:val="heading ${level}"/>${basedOn}<w:uiPriority w:val="9"/><w:unhideWhenUsed/><w:qFormat/>` +
+        `<w:pPr><w:keepNext/><w:keepLines/><w:spacing w:before="${level <= 2 ? 240 : 160}" w:after="80"/><w:outlineLvl w:val="${level - 1}"/></w:pPr>` +
+        `<w:rPr><w:b/>${level >= 4 ? "<w:i/>" : ""}<w:sz w:val="${size}"/><w:szCs w:val="${size}"/></w:rPr></w:style>`,
+    ).root;
+    styles.root.appendChild(style);
+    document.office.markDirty(stylesPart.name);
+    return `Heading${level}`;
+  }
   throw new DocxLensError(
     "DOCX_UNSUPPORTED_EDIT",
     `The Word style ${safeRequested} does not exist in this file, so Spectra will not create a dangling style reference.`,
@@ -1440,13 +1518,8 @@ function replaceParagraphText(document: Document, paragraph: Paragraph, text: st
     return;
   }
   const run = new XmlElement("r", "w");
-  const textElement = new XmlElement("t", "w");
-  if (/^\s|\s$/.test(text))
-    textElement.setAttribute("xml:space", "preserve");
-  textElement.appendChild(new XmlText(text));
-  run.appendChild(textElement);
   paragraph.element.appendChild(run);
-  document._markMainDirty();
+  replaceRunText(document, paragraph.runs().at(-1)!, text);
 }
 
 const CUSTOM_XML_PROPS_RELATIONSHIP =
@@ -1852,6 +1925,8 @@ async function insertImage(
         "The retained Word picture cannot be restored without copying unrelated run content.",
       );
     const restored = sourceRun.clone();
+    // Looked up once attached: a detached clone cannot resolve its prefixes.
+    paragraph.element.appendChild(restored);
     const docPr = descendants(restored).find(
       (candidate) =>
         candidate.namespaceUri() === WORDPROCESSING_DRAWING_NAMESPACE &&
@@ -1859,7 +1934,6 @@ async function insertImage(
     );
     const nativeId = operation.occurrenceId?.match(/^docpr:(\d+)$/)?.[1];
     if (docPr && nativeId) docPr.setAttribute("id", nativeId);
-    paragraph.element.appendChild(restored);
     document._markMainDirty();
     return;
   }
@@ -2475,7 +2549,7 @@ function applyRunFormat(document: Document, paragraph: Paragraph, format: DocxRu
   document._markMainDirty();
 }
 
-function applyParagraphFormat(
+export function applyParagraphFormat(
   document: Document,
   paragraph: Paragraph,
   format: DocxParagraphFormat,
@@ -3268,22 +3342,19 @@ async function projectDocument(
             projectedCellRichContent(document, cell, noteBodies, commentBodies),
           ),
         );
-        const unsafeInterior = table.rows().some((_row, _rowIndex) =>
-          _row.cells().some(
-            (cell, _columnIndex) =>
-              hasWml(
-                cell.element,
-                "ins",
-                "del",
-                "moveFrom",
-                "moveTo",
-                "fldChar",
-                "instrText",
-                "hyperlink",
-                "commentRangeStart",
-                "commentRangeEnd",
-                "commentReference",
-              ),
+        // Plain hyperlinks round-trip through the same rich writer as body
+        // paragraphs, so they leave the table editable. Fields, revisions,
+        // comment anchors (deleting the table would orphan them) and
+        // hyperlinks wrapping pictures keep it read-only.
+        const unsafeInterior = table.rows().some((row) =>
+          row.cells().some((cell) =>
+            hasWml(cell.element, "ins", "del", "moveFrom", "moveTo", "fldChar", "instrText", "commentRangeStart", "commentRangeEnd", "commentReference") ||
+            descendants(cell.element).some(
+              (candidate) =>
+                candidate.namespaceUri() === WML_NAMESPACE &&
+                candidate.localName === "hyperlink" &&
+                descendants(candidate).some((nested) => ["drawing", "pict", "object", "fldSimple"].includes(nested.localName)),
+            ),
           ),
         );
         const readOnly = nested || unsafeInterior;
@@ -3324,7 +3395,7 @@ async function projectDocument(
                 reason:
                   nested
                     ? "Nested Word tables are preserved read-only until their cell topology can be rewritten safely."
-                    : "This Word table contains a linked, field, revision, image, or equation range whose native boundary is preserved read-only.",
+                    : "This Word table holds a field, a tracked change, a comment or a linked picture, so it stays read-only here. Edit it in Word.",
               }
             : {}),
         });
@@ -3527,11 +3598,22 @@ export async function docxProjectionSemanticDigest(projection: Pick<DocxProjecti
       const { richRows: _richRows, ...rest } = block;
       return { ...rest, ...(plain ? {} : { richRows }) };
     }
+    if (block.type !== "paragraph" && block.type !== "heading") return block;
+    // Adjacent plain runs are one run to Word, and a paragraph that is only
+    // plain text reads back without rich content at all.
+    const inline = block.inlineContent?.reduce<NonNullable<typeof block.inlineContent>>((merged, item) => {
+      const last = merged.at(-1);
+      const plain = (value: typeof item) => value.kind === "text" && Object.keys(authoredSemanticValue(value) as object).every((key) => key === "kind" || key === "text");
+      if (last && plain(last) && plain(item) && last.kind === "text" && item.kind === "text") merged[merged.length - 1] = { ...last, text: last.text + item.text };
+      else merged.push(item);
+      return merged;
+    }, []);
+    const plainOnly = inline !== undefined && inline.every((item) => item.kind === "text" && Object.keys(authoredSemanticValue(item) as object).every((key) => key === "kind" || key === "text"));
+    const { inlineContent: _inline, ...rest } = block;
     return {
-      ...block,
-      ...((block.type === "paragraph" || block.type === "heading")
-        ? { text: block.text.replace(/ +$/u, "") }
-        : {}),
+      ...rest,
+      ...(inline && !plainOnly ? { inlineContent: inline } : {}),
+      text: block.text.replace(/ +$/u, ""),
     };
   });
   return sha256Payload(

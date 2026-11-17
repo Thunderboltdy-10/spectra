@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { getFunctionName } from "convex/server";
 import { mergePreferenceValues } from "../settings/schema";
@@ -50,6 +50,7 @@ vi.mock("../ai/provider-setup", () => ({ SubscriptionSetup: () => null }));
 vi.mock("../ai/use-agent-runtime", () => ({ useAgentRuntime: () => ({ status: null }) }));
 vi.mock("../island/phone-rest", () => ({ useIslandShowcase: () => {} }));
 vi.mock("@/components/layout/feedback-button", () => ({ FeedbackButton: () => null }));
+vi.mock("@/components/theme-provider", () => ({ useTheme: () => ({ theme: "light", setTheme: vi.fn(), toggleTheme: vi.fn() }) }));
 vi.mock("../school/use-class-book", () => ({ inkStyle: () => ({}), useClassBook: () => ({ classes: [], of: () => null }) }));
 
 const choice = { classShelvesStatus: "chosen", classShelfRecordIds: ["biology"] };
@@ -162,4 +163,35 @@ it("does not replace Setup with the old class-choice popup for an existing accou
   await act(async () => {});
   expect(screen.queryByRole("dialog")).toBeNull();
   expect(remote.state.request).not.toHaveBeenCalled();
+});
+
+it("moves past Bridge after Not now and stays there after acknowledgement and remount", async () => {
+  remote.state.layers[0].values.integrations.setupStep = "bridge";
+  let resolve!: () => void;
+  remote.state.mutation.mockImplementation((_ref: unknown, args: { values: unknown }) => new Promise<void>(done => {
+    resolve = () => {
+      remote.state.layers = [{ scope: "account", values: mergePreferenceValues(remote.state.layers[0].values, args.values) as typeof remote.state.layers[0]["values"], updatedAt: 2 }];
+      remote.state.listeners.forEach(callback => callback());
+      done();
+    };
+  }));
+  const view = render(<SetupMount />);
+  await screen.findByRole("heading", { name: "Put Spectra Bridge on this computer" });
+  fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+  const dialog = await screen.findByRole("alertdialog");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Not now" }));
+  const island = { name: "Everything starts at the island" };
+  await screen.findByRole("heading", island);
+  expect(remote.state.mutation.mock.calls.at(-1)![1].values).toEqual({ integrations: { setupStep: "island" } });
+  await act(async () => resolve());
+  expect(screen.getByRole("heading", island)).toBeTruthy();
+  // An older answer echoing back afterwards does not send them back to Bridge.
+  const acknowledged = remote.state.layers;
+  remote.state.layers = [{ scope: "account", values: { integrations: { setupStatus: "pending", setupStep: "bridge", ...choice } }, updatedAt: 1 }];
+  await act(async () => remote.state.listeners.forEach(callback => callback()));
+  expect(screen.getByRole("heading", island)).toBeTruthy();
+  remote.state.layers = acknowledged;
+  view.unmount();
+  render(<SetupMount />);
+  await screen.findByRole("heading", island);
 });

@@ -1,7 +1,7 @@
 import { revertRun } from "./harness/revert-run";
 import { getSpectraModelId } from "@/features/spectra/ai/model-config";
 import { withSpectraRequestLog } from "@/features/spectra/ai/run-log";
-import { prepareAttachments as prepareRunAttachments } from "@/features/spectra/compute/files/attachment-preprocessor";
+import { prepareAttachmentsKeepingFailures } from "@/features/spectra/compute/files/attachment-preprocessor";
 import { createNdjsonResponse } from "@/features/spectra/runs/streaming/ndjson-response";
 import { requireActor } from "@/lib/auth-server";
 import { errorStatus } from "@/lib/route-handler";
@@ -66,6 +66,7 @@ function payloadFrom(value: unknown): RunPayload {
     agentId: text(payload.agentId),
     relayId: text(payload.relayId),
     unreachable: normalizeUnreachable(payload.unreachable),
+    ...(payload.practice === true ? { practice: true } : {}),
   };
 }
 
@@ -447,15 +448,20 @@ async function handleSpectraRunRequestInLog(request: NextRequest) {
     const chosenAgentId = typeof body.agentId === "string" && body.agentId.trim() ? body.agentId.trim() : undefined;
     // Independent checks run together: they sit before the first token.
     const [prepared, joinable, agentAvailable] = await Promise.all([
-      prepareRunAttachments(body.attachments).then(
-        (value) => ({ ok: true as const, value }),
-        (error: unknown) => ({ ok: false as const, error }),
-      ),
+      // A file that cannot be read is set aside, never the message: the words
+      // still start the thread and the reply says which file it could not open.
+      prepareAttachmentsKeepingFailures(body.attachments),
       joinableRun(actor.clerkId, threadId, body.steerRunId?.trim() || undefined),
       chosenAgentId ? agentIsAvailable(actor.clerkId, chosenAgentId) : Promise.resolve(true),
     ]);
-    if (!prepared.ok) return new Response(publicError(prepared.error), { status: 400 });
-    const attachments = prepared.value;
+    let attachments = prepared.prepared;
+    let attachmentInput = prepared.kept;
+    const unreadFiles = [...prepared.failed];
+    const promptForModel = () => unreadFiles.length
+      ? `${prompt}
+
+[Spectra could not read ${unreadFiles.length === 1 ? "this attached file" : "these attached files"}, so ${unreadFiles.length === 1 ? "it was" : "they were"} left out: ${unreadFiles.map((file) => `${file.name} (${file.reason})`).join("; ")}. Say so briefly and carry on with the rest.]`
+      : prompt;
     if (joinable)
       return joinRun({
         actorClerkId: actor.clerkId,
@@ -463,7 +469,7 @@ async function handleSpectraRunRequestInLog(request: NextRequest) {
         prompt,
         submissionKey: body.submissionKey,
         timeZone: body.timeZone,
-        attachments: { input: body.attachments, prepared: attachments },
+        attachments: { input: attachmentInput, prepared: attachments },
       });
     if (!agentAvailable) return agentUnavailable();
     let created: {
@@ -496,9 +502,13 @@ async function handleSpectraRunRequestInLog(request: NextRequest) {
     }
     if (created.created && attachments.length > 0) {
       try {
-        await persistRunAttachments(created.runId, created.executionId, body.attachments, attachments);
+        await persistRunAttachments(created.runId, created.executionId, attachmentInput, attachments);
       } catch (error) {
-        return new Response(publicError(error), { status: 409 });
+        // The thread and the message already exist: the run goes on without
+        // the files rather than leaving a message that never gets an answer.
+        unreadFiles.push(...attachments.map(({ name }) => ({ name, reason: publicError(error) })));
+        attachments = [];
+        attachmentInput = [];
       }
     }
     const initialCard = created.card ?? (await latestCard(actor.clerkId, created.runId));
@@ -515,7 +525,7 @@ async function handleSpectraRunRequestInLog(request: NextRequest) {
       executionId: created.executionId,
       payload: {
         mode: "start",
-        prompt,
+        prompt: promptForModel(),
         surface,
         threadId: created.threadId,
         workspaceId: created.workspaceId ?? body.workspaceId,
@@ -525,6 +535,7 @@ async function handleSpectraRunRequestInLog(request: NextRequest) {
         timeZone: body.timeZone,
         ...(chosenAgentId ? { agentId: chosenAgentId } : {}),
         unreachable: normalizeUnreachable(body.unreachable),
+        ...(body.practice === true ? { practice: true } : {}),
       },
       attachments,
       prelude,
@@ -568,18 +579,20 @@ async function handleSpectraRunRequestInLog(request: NextRequest) {
 
   if (action === "steer") {
     const steer = body.text?.trim() ?? "";
-    let prepared: PreparedAttachment[];
-    try {
-      prepared = await prepareRunAttachments(body.attachments);
-    } catch (error) {
-      return new Response(publicError(error), { status: 400 });
-    }
-    if (!steer && !prepared.length) return new Response("Write a message first.", { status: 400 });
+    const files = await prepareAttachmentsKeepingFailures(body.attachments);
+    const prepared: PreparedAttachment[] = files.prepared;
+    if (!steer && !prepared.length)
+      return new Response(files.failed.length ? `Spectra could not read ${files.failed.map((file) => file.name).join(", ")}.` : "Write a message first.", { status: 400 });
+    const steerText = files.failed.length
+      ? `${steer}
+
+[Spectra could not read ${files.failed.map((file) => `${file.name} (${file.reason})`).join("; ")}, so it was left out.]`.trim()
+      : steer;
     let queued: { threadId: string | null } | null;
     try {
       queued = await queueSteer(actor.clerkId, runId, expectedExecutionId, {
-        text: steer,
-        ...(prepared.length ? { attachments: { input: body.attachments, prepared } } : {}),
+        text: steerText,
+        ...(prepared.length ? { attachments: { input: files.kept, prepared } } : {}),
       });
     } catch (error) {
       // The run is waiting or finished: the client sends the message as a new

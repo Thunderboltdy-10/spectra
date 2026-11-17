@@ -32,6 +32,8 @@ const REFERENCE = /^\[\[ref:([^\]|]+)(?:\|([^\]]+))?\]\]/;
 const FOOTNOTE_REF = /^\[\^([^\]\s]+)\]/;
 const AUTOLINK = /^<(https?:\/\/[^\s>]+)>/;
 const BARE_URL = /^https?:\/\/[^\s<]*[^\s<.,:;"')\]!?*_~]/;
+/** A web address written without its scheme ("www.example.com"): still a link. */
+const WWW_URL = /^www\.[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:[/?#][^\s<]*[^\s<.,:;"')\]!?*_~])?/i;
 
 function pushText(output: RichInline[], text: string, marks: readonly RichMark[]) {
   if (!text) return;
@@ -268,6 +270,15 @@ export function parseMarkdownInlines(text: string, marks: readonly RichMark[] = 
         flush();
         output.push({ type: "break" });
         index += rest.match(/^<br\s*\/?>/i)![0].length;
+        continue;
+      }
+    }
+    if ((char === "w" || char === "W") && !WORD.test(text[index - 1] ?? " ")) {
+      const url = rest.match(WWW_URL);
+      if (url) {
+        flush();
+        output.push({ type: "link", href: `https://${url[0]}`, content: [{ type: "text", text: url[0], ...(marks.length ? { marks: [...marks] } : {}) }] });
+        index += url[0].length;
         continue;
       }
     }

@@ -93,7 +93,7 @@ export function FeedbackInbox() {
                 {item.attachments.length ? (
                   <div className="feedback-inbox-files">
                     {item.attachments.map((file) => (
-                      <a key={file.url} href={file.url} target="_blank" rel="noreferrer" title={file.name}>
+                      <a key={file.url} href={file.url} target="_blank" rel="noreferrer" title={file.name} data-view-image={file.mediaType?.startsWith("image/") ? file.url : undefined}>
                         <FeedbackFilePreview name={file.name} mediaType={file.mediaType} url={file.url} />
                         <span className="truncate">{file.name}</span>
                       </a>

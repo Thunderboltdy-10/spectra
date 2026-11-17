@@ -317,3 +317,147 @@ describe("shared DOCX adapter", () => {
     }));
   });
 });
+
+describe("Word image placement and copy formatting", () => {
+  const image = (wrap: string, extra: Record<string, unknown> = {}) => ({
+    type: "image",
+    attrs: { src: onePixelPng, alt: "pic", wrap, widthPercent: 50, ...extra },
+  });
+
+  it("aligns a lone picture the way the editor shows it, in synced and copied files", async () => {
+    const { documentBlocksFromJson } = await import("../../../../shared/document-projection.mjs");
+    const doc: DocumentJsonNode = {
+      type: "doc",
+      content: [
+        { type: "paragraph", attrs: { blockId: "centred", textAlign: "center" }, content: [image("inline")] },
+        { type: "paragraph", attrs: { blockId: "broken" }, content: [image("break")] },
+        { type: "paragraph", attrs: { blockId: "right" }, content: [image("right")] },
+        { type: "paragraph", attrs: { blockId: "mixed" }, content: [{ type: "text", text: "Text " }, image("break")] },
+      ],
+    };
+    const blocks = documentBlocksFromJson(doc) as { id: string; attrs?: { paragraphFormat?: { alignment?: string } } }[];
+    expect(blocks.map((block) => block.attrs?.paragraphFormat?.alignment)).toEqual(["center", "center", "right", undefined]);
+
+    const copy = await exportDocxCopy(doc);
+    const reopened = await docxLens.open(copy.bytes);
+    expect(reopened.projection.blocks.map((block) => (block.attrs?.paragraphFormat as { alignment?: string } | undefined)?.alignment)).toEqual(["center", "center", "right", "left"]);
+  });
+
+  it("sizes picture percentages against the text column, keeps proportions on resize", async () => {
+    const { resizedImageAttrs, TEXT_COLUMN_EMU } = await import("../editor/document-image");
+    expect(resizedImageAttrs({}, 40)).toEqual({ widthPercent: 40 });
+    expect(resizedImageAttrs({ widthEmu: 2_000_000, heightEmu: 1_000_000 }, 50)).toEqual({
+      widthPercent: 50,
+      widthEmu: Math.round(TEXT_COLUMN_EMU / 2),
+      heightEmu: Math.round(TEXT_COLUMN_EMU / 4),
+    });
+    const copy = await exportDocxCopy(
+      { type: "doc", content: [{ type: "paragraph", content: [image("inline", { widthPercent: 100 })] }] },
+      { pageSetup: { size: "a4", margins: "normal" } },
+    );
+    const reopened = await docxLens.open(copy.bytes);
+    const picture = reopened.projection.blocks.flatMap((block) => block.inlineContent ?? []).find((item) => item.kind === "image");
+    // A4, normal margins: 11906 − 2 × 1440 twips.
+    expect(picture).toMatchObject({ kind: "image", widthEmu: (11_906 - 2_880) * 635 });
+  });
+
+  it("keeps nested list items, line breaks, quote paragraphs and paragraph spacing in a copy", async () => {
+    const copy = await exportDocxCopy({
+      type: "doc",
+      content: [
+        {
+          type: "bulletList",
+          content: [
+            {
+              type: "listItem",
+              content: [
+                { type: "paragraph", content: [{ type: "text", text: "Parent" }] },
+                { type: "bulletList", content: [{ type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "Child" }] }] }] },
+              ],
+            },
+          ],
+        },
+        { type: "paragraph", attrs: { textAlign: "justify", spacingAfter: 12 }, content: [{ type: "text", text: "One" }, { type: "hardBreak" }, { type: "text", text: "Two" }] },
+        { type: "blockquote", content: [
+          { type: "paragraph", content: [{ type: "text", text: "First quote" }] },
+          { type: "paragraph", content: [{ type: "text", text: "Second quote" }] },
+        ] },
+      ],
+    });
+    const reopened = await docxLens.open(copy.bytes);
+    const texts = reopened.projection.blocks.map((block) => block.text);
+    expect(texts.join("\n")).toContain("Child");
+    expect(texts).toContain("First quote");
+    expect(texts).toContain("Second quote");
+    const body = reopened.projection.blocks.find((block) => block.text.startsWith("One"));
+    expect(body?.text).toBe("One\nTwo");
+    expect(body?.attrs?.paragraphFormat).toMatchObject({ alignment: "justify", spacingAfterPoints: 12 });
+  });
+});
+
+describe("Word sync fidelity for content made in Spectra", () => {
+  const text = (value: string) => ({ type: "text", text: value });
+  const doc = (firstId: string): DocumentJsonNode => ({
+    type: "doc",
+    content: [
+      { type: "paragraph", attrs: { blockId: firstId }, content: [text("Intro")] },
+      { type: "heading", attrs: { blockId: "h4", level: 4 }, content: [text("Level four")] },
+      { type: "bulletList", attrs: { blockId: "l1" }, content: [
+        { type: "listItem", content: [
+          { type: "paragraph", content: [text("Parent")] },
+          { type: "bulletList", content: [{ type: "listItem", content: [{ type: "paragraph", content: [text("Child")] }] }] },
+        ] },
+      ] },
+      { type: "blockquote", attrs: { blockId: "q1" }, content: [{ type: "paragraph", content: [text("Quoted")] }] },
+      { type: "codeBlock", attrs: { blockId: "c1" }, content: [text("a = 1\nb = 2")] },
+      { type: "table", attrs: { blockId: "t1" }, content: [
+        { type: "tableRow", content: [
+          { type: "tableHeader", attrs: { colwidth: [300] }, content: [{ type: "paragraph", content: [text("Wide")] }] },
+          { type: "tableHeader", attrs: { colwidth: [100] }, content: [{ type: "paragraph", content: [text("Narrow")] }] },
+        ] },
+        { type: "tableRow", content: [
+          { type: "tableCell", content: [{ type: "paragraph", content: [text("a")] }] },
+          { type: "tableCell", content: [{ type: "paragraph", content: [text("b")] }] },
+        ] },
+      ] },
+      { type: "paragraph", attrs: { blockId: "p9" }, content: [text("Line one"), { type: "hardBreak" }, text("line two")] },
+    ],
+  });
+
+  async function documentXml(bytes: Uint8Array) {
+    const JSZip = (await import("jszip")).default;
+    return (await JSZip.loadAsync(bytes)).file("word/document.xml")!.async("string");
+  }
+
+  function expectFaithful(xml: string) {
+    expect(xml).toMatch(/w:pStyle w:val="Heading4"/);
+    expect(xml).toMatch(/<w:ilvl w:val="1"\/><w:numId w:val="\d+"\/><\/w:numPr><\/w:pPr><w:r><w:t>Child/);
+    expect(xml).toMatch(/<w:ind w:left="720"\/><\/w:pPr><w:r><w:t>Quoted/);
+    expect(xml).toMatch(/Consolas[^]*<w:t>a = 1<\/w:t><w:br\/><w:t>b = 2/);
+    expect(xml).toMatch(/<w:gridCol w:w="4500"\/><w:gridCol w:w="1500"\/>/);
+    expect(xml).toMatch(/<w:tblHeader w:val="1"\/>/);
+    expect(xml).toMatch(/Line one<\/w:t>(<\/w:r><w:r>)?<w:br\/>/);
+  }
+
+  it("writes headings 4–6, nested lists, quotes, code, column widths and line breaks into a synced Word file", async () => {
+    const { documentBlocksFromJson } = await import("../../../../shared/document-projection.mjs");
+    const { docxProjectionFromContent } = await import("../lenses/document-projection");
+    const source = Document.create();
+    source.addParagraph("Intro");
+    const opened = await docxLens.open(await source.save());
+    const tiptap = doc(opened.projection.blocks[0]!.id);
+    const update = docxProjectionFromContent(
+      { tiptap, blocks: documentBlocksFromJson(tiptap), nativeProjectionComplete: true },
+      opened.projection,
+    );
+    const output = await docxLens.materialize({ projection: update.projection, carry: opened.preservedCarry });
+    expectFaithful(await documentXml(output));
+    const styles = await (await (await import("jszip")).default.loadAsync(output)).file("word/styles.xml")!.async("string");
+    expect(styles).toContain('w:styleId="Heading4"');
+  });
+
+  it("writes the same details into a downloaded Word copy", async () => {
+    const copy = await exportDocxCopy(doc("first"));
+    expectFaithful(await documentXml(copy.bytes));
+  });
+});

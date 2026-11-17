@@ -255,7 +255,13 @@ export function ArtifactEmbedList({
   const result = useArtifactEmbedContainer(containerType, containerId);
   const update = useMutation(api.artifactEmbeds.update);
   const remove = useMutation(api.artifactEmbeds.remove);
-  const embeds = region ? result?.embeds.filter((embed) => region(embed.containerRegionId)) : result?.embeds;
+  const placed = region ? result?.embeds.filter((embed) => region(embed.containerRegionId)) : result?.embeds;
+  // One reply shows a work once, even if it was placed twice (older replies,
+  // a retried step): the first placement wins.
+  const embeds = placed?.filter((embed, index) => {
+    if (!embed.containerRegionId?.startsWith("reply:")) return true;
+    return placed.findIndex((other) => other.containerRegionId === embed.containerRegionId && String(other.sourceArtifactId) === String(embed.sourceArtifactId)) === index;
+  });
 
   if (!result || !embeds?.length) return null;
   return (

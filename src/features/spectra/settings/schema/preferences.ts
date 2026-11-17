@@ -104,6 +104,10 @@ const appearanceSchema = z.object({
   railOrder: z.array(z.string().max(32)).max(20).default([]),
   /** Library's workspace tiles, the same way. */
   workspaceOrder: z.array(z.string().max(64)).max(300).default([]),
+  /** Folders on a shelf: their contents peek out and show on hover, or they stay plain. */
+  folderLook: z.enum(["peek", "plain"]).default("peek"),
+  /** Folders switched to the other look from the folder itself. */
+  folderLookFlipped: z.array(z.string().max(64)).max(300).default([]),
 });
 
 const computeSchema = z.object({
@@ -195,18 +199,34 @@ export const workbarLayoutSchema = z.object({
     .optional(),
 });
 
+/**
+ * A layer holds only the keys someone set. Zod 4's `.partial()` still fills a
+ * field's `.default()`, which would turn a one-key write (say `tipsSeen`) into
+ * a write of every other key in the section at its default, undoing the
+ * person's earlier choices (the Setup step, the Codex/Claude model…).
+ */
+function layerOf<T extends z.ZodRawShape>(schema: z.ZodObject<T>) {
+  const shape = Object.fromEntries(
+    Object.entries(schema.shape).map(([key, field]) => [
+      key,
+      ((field instanceof z.ZodDefault ? field.unwrap() : field) as z.ZodType).optional(),
+    ]),
+  ) as unknown as { [K in keyof T]: z.ZodOptional<T[K] extends z.ZodDefault<infer Inner> ? Inner : T[K]> };
+  return z.object(shape);
+}
+
 export const preferenceLayerValuesSchema = z
   .object({
-    general: generalSchema.partial().optional(),
-    ai: aiSchema.partial().optional(),
-    writing: writingSchema.partial().optional(),
-    collaboration: collaborationSchema.partial().optional(),
-    appearance: appearanceSchema.partial().optional(),
-    compute: computeSchema.partial().optional(),
-    notifications: notificationsSchema.partial().optional(),
-    privacy: privacySchema.partial().optional(),
-    integrations: integrationsSchema.partial().optional(),
-    accessibility: accessibilitySchema.partial().optional(),
+    general: layerOf(generalSchema).optional(),
+    ai: layerOf(aiSchema).optional(),
+    writing: layerOf(writingSchema).optional(),
+    collaboration: layerOf(collaborationSchema).optional(),
+    appearance: layerOf(appearanceSchema).optional(),
+    compute: layerOf(computeSchema).optional(),
+    notifications: layerOf(notificationsSchema).optional(),
+    privacy: layerOf(privacySchema).optional(),
+    integrations: layerOf(integrationsSchema).optional(),
+    accessibility: layerOf(accessibilitySchema).optional(),
     workbar: z
       .record(
         z.string(),

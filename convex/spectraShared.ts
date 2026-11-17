@@ -650,6 +650,10 @@ export function isHollowDefaultContent(
       return description.length < 8 && titled.length === 0;
     }
     case "presentation": {
+      // An opened PowerPoint is whatever the file holds, a deck of pictures
+      // included; only Spectra's own blank deck can be hollow.
+      if (record.nativeBinding && typeof record.nativeBinding === "object")
+        return false;
       const slides = Array.isArray(record.slides) ? record.slides : [];
       const placeholder =
         /^(?:add a clear idea|click to edit|title|subtitle|new slide)\s*$/i;
@@ -664,6 +668,10 @@ export function isHollowDefaultContent(
         return objects.some((object) => {
           if (!object || typeof object !== "object" || Array.isArray(object))
             return false;
+          if (["image", "chart", "table", "media", "video"].includes(
+            String((object as Record<string, unknown>).type),
+          ))
+            return true;
           const text = (object as Record<string, unknown>).text;
           const contentText = asContentRecord(
             (object as Record<string, unknown>).content,

@@ -135,6 +135,23 @@ function requireFlashcardDirection(value: unknown) {
   return candidate;
 }
 
+type GraphStep = { items: unknown[]; isDone: boolean; continueCursor: string | null };
+
+/**
+ * A catalog page can take several empty steps on the server before it has
+ * anything to show (Convex allows one paginated read per query, and owned
+ * work, each kind of share and the final check are separate steps). Taking
+ * those steps here, next to Convex, saves the browser a round trip for each:
+ * it gets the first page with rows, the end, or where a long scan got to.
+ */
+async function scanGraph<TArgs extends { cursor?: string }>(functionName: string, args: TArgs) {
+  const started = Date.now();
+  let page = await spectraQuery<TArgs, GraphStep>(functionName, args);
+  for (let step = 1; step < 12 && !page.items.length && !page.isDone && page.continueCursor && Date.now() - started < 2_500; step++)
+    page = await spectraQuery<TArgs, GraphStep>(functionName, { ...args, cursor: page.continueCursor });
+  return page;
+}
+
 function emptySchoolRead(action: string) {
   if (action === "bootstrap") return ok({ actor: null, needsSchool: true });
   if (["artifactPage", "workspacePage", "artifactGraphPage", "workspaceGraphPage", "agentGraphPage"].includes(action))
@@ -198,7 +215,7 @@ export async function GET(request: NextRequest) {
         workspaceId: requireString(params.get("workspaceId"), "workspaceId"),
       }));
     }
-    if (action === "agentGraphPage") return ok(await spectraQuery("catalogGraph:listAgents", {
+    if (action === "agentGraphPage") return ok(await scanGraph("catalogGraph:listAgents", {
       cursor: params.get("cursor") ?? undefined,
     }));
     if (action === "artifactGraphPage" || action === "workspaceGraphPage") {
@@ -207,8 +224,8 @@ export async function GET(request: NextRequest) {
         return badRequest("Choose a page size between 1 and 24.");
       const common = { cursor: params.get("cursor") ?? undefined, limit, search: params.get("search") ?? undefined };
       return ok(action === "workspaceGraphPage"
-        ? await spectraQuery("catalogGraph:listWorkspaces", { ...common, includeArchived: params.get("includeArchived") === "true" })
-        : await spectraQuery("catalogGraph:listArtifacts", { ...common, status: params.get("status") ?? undefined,
+        ? await scanGraph("catalogGraph:listWorkspaces", { ...common, includeArchived: params.get("includeArchived") === "true" })
+        : await scanGraph("catalogGraph:listArtifacts", { ...common, status: params.get("status") ?? undefined,
             blueprintKey: params.get("blueprintKey") ?? undefined, placement: params.get("placement") ?? "all" }));
     }
 
@@ -828,6 +845,14 @@ export async function POST(request: NextRequest) {
     const _actor = await requireActor({ fresh: true });
     const body = (await request.json()) as Record<string, unknown>;
     const action = requireString(body.action, "action");
+
+    if (action === "markRunTabsSeen") {
+      const runIds = Array.isArray(body.runIds)
+        ? body.runIds.filter((id): id is string => typeof id === "string").slice(0, 40)
+        : [];
+      if (!runIds.length) return ok({ marked: 0 });
+      return ok(await spectraMutation("spectraRuns:markTabsSeen", { runIds }));
+    }
 
     if (action === "hideRunTab") {
       const result = await spectraMutation("spectraRuns:hideTab", {
@@ -1473,12 +1498,14 @@ export async function POST(request: NextRequest) {
           : source.content;
       const parentNodeId = optionalString(body.parentNodeId);
       const askedWorkspace = optionalString(body.workspaceId);
+      // A work copied as part of a whole folder keeps its own name.
+      const title = (body.keepTitle === true ? source.title : `${source.title} (copy)`).slice(0, 300);
       const workspaceId = askedWorkspace
         ? ((await spectraQuery("workspaceSharing:copyDestination", { workspaceId: askedWorkspace }).catch(() => null)) as string | null) ?? undefined
         : undefined;
       const result = await spectraMutation("spectraArtifacts:create", {
         blueprintKey: requireBlueprint(source.blueprintKey),
-        title: `${source.title} (copy)`.slice(0, 300),
+        title,
         summary: source.summary,
         content: encodeArtifactContentForStorage(source.blueprintKey, content),
         tags: source.tags,
@@ -1495,7 +1522,7 @@ export async function POST(request: NextRequest) {
         const { deviceStoreCall } = await import("@/lib/device-store");
         const baseline = deviceBaseline({
           typeKey: source.blueprintKey,
-          title: `${source.title} (copy)`.slice(0, 300),
+          title,
           summary: source.summary,
           tags: source.tags ?? [],
           schemaVersion: created.schemaVersion ?? 1,

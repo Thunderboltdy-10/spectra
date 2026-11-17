@@ -11,6 +11,7 @@ import { bumpPolicyVersion } from "./authorityShared";
 import { releaseClaimsForAccount } from "./regionClaims";
 import { releasePayloadIfUnreferenced } from "./payloadLifecycle";
 import { deleteStorageIfNoOtherBinding } from "./durableStorageBindings";
+import { schoolStorageRow } from "./metering";
 
 type Ctx = QueryCtx | MutationCtx;
 
@@ -265,7 +266,37 @@ async function schoolUsage(
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([date, values]) => ({ day: date, values, parts: parts[date] ?? {} })),
     completeThrough: toDay,
+    stored: await schoolStoredInventory(ctx, schoolId),
   };
+}
+
+const STORED_COUNT_CAP = 2000;
+
+/**
+ * What the school keeps in Spectra right now, not what changed in the range:
+ * the running file balance (storage meters only move when files come and go,
+ * so a quiet month reads 0 there) and how many artifacts and tasks it holds.
+ * Counts stop at a cap so a large school never makes this page expensive.
+ */
+async function schoolStoredInventory(ctx: Ctx, schoolId: Id<"schools">) {
+  const fileBytes = (await schoolStorageRow(ctx, schoolId))?.quantity ?? 0;
+  let artifacts = 0;
+  let tasks = 0;
+  let capped = false;
+  for (const status of ["active", "draft"] as const) {
+    for await (const row of ctx.db
+      .query("spectraArtifactSummaries")
+      .withIndex("by_school_status_updated_id", (q) => q.eq("schoolId", schoolId).eq("status", status))) {
+      if (row.blueprintKey === "planner_task") tasks += 1;
+      else artifacts += 1;
+      if (artifacts + tasks >= STORED_COUNT_CAP) {
+        capped = true;
+        break;
+      }
+    }
+    if (capped) break;
+  }
+  return { fileBytes: Math.max(0, fileBytes), artifacts, tasks, capped };
 }
 
 export const schoolOverview = mutation({
@@ -369,11 +400,23 @@ export const schoolOverview = mutation({
     const computedAt = Date.now();
     // The overview only needs to know whether review is needed. Never load the
     // school's complete conflict payloads to draw its connection status.
-    const openConflict = integration
+    // Each open conflict is one person's own decision (their edit against the
+    // source), or the school's when it belongs to no one. A bounded read: the
+    // overview names who has some, it never lists them.
+    const openConflicts = integration
       ? await ctx.db.query("externalSyncConflicts")
           .withIndex("by_integration_status", (q) => q.eq("integrationId", integration._id).eq("status", "open"))
-          .first()
-      : null;
+          .take(300)
+      : [];
+    const conflictsByPerson = new Map<string, number>();
+    let schoolConflicts = 0;
+    let ownConflicts = 0;
+    for (const conflict of openConflicts) {
+      if (!conflict.accountId) schoolConflicts += 1;
+      else if (conflict.accountId === actor.accountId) ownConflicts += 1;
+      else conflictsByPerson.set(conflict.accountId, (conflictsByPerson.get(conflict.accountId) ?? 0) + 1);
+    }
+    const openConflict = schoolConflicts + ownConflicts > 0;
     const directMetricState = { kind: "available" as const, updatedAt: computedAt };
     const counterMetricState = counters.length
       ? directMetricState
@@ -482,7 +525,17 @@ export const schoolOverview = mutation({
             status: integration.status,
             lastSyncAt: integration.lastSyncAt,
             nextSyncAt: integration.nextSyncAt,
-            hasOpenConflicts: Boolean(openConflict),
+            hasOpenConflicts: openConflict,
+            conflicts: {
+              school: schoolConflicts,
+              mine: ownConflicts,
+              others: [...conflictsByPerson].slice(0, 20).map(([accountId, count]) => ({
+                accountId,
+                name: memberRows.find(({ account }) => account?._id === accountId)?.account?.name || "Someone",
+                count,
+              })),
+              othersTotal: [...conflictsByPerson.values()].reduce((sum, count) => sum + count, 0),
+            },
             syncFreshness: !integration.lastSyncAt
               ? "never" as const
               : computedAt - integration.lastSyncAt > integration.freshnessSlaMinutes * 60_000
@@ -2328,7 +2381,10 @@ export const platformOverview = mutation({
           .map(([date, values]) => ({ day: date, values })),
         completeThrough: args.toDay,
       },
-      storageBytes: totals.storage_bytes ?? 0,
+      // Files kept now across schools (running balances), not the range's change.
+      storageBytes: (
+        await Promise.all(schools.map(async (school) => (await schoolStorageRow(ctx, school._id))?.quantity ?? 0))
+      ).reduce((sum, bytes) => sum + Math.max(0, bytes), 0),
       serviceHealth,
       integrations: {
         total: integrations.length,

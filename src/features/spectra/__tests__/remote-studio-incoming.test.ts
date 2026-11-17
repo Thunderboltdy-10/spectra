@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   decideRemoteStudioIncoming,
+  shouldAdoptLiveBody,
   rebaseCollaborativeSnapshot,
   reconciliationSnapshotKey,
   richTextValuesEquivalent,
@@ -775,5 +776,19 @@ describe("authoritative shorter, empty and nontext edits (R1)", () => {
     const key = (source: "provisional" | "live") => incomingReconciliationKey("a", snapshot, {source, revision: 10, localSync: false});
     expect(key("provisional")).not.toBe(key("live"));
     expect(key("live")).toBe(key("live"));
+  });
+});
+
+describe("shouldAdoptLiveBody", () => {
+  const base = { nativeBodyBinding: true, rowHasBody: false, alreadyAdopted: false, liveInitialized: true, liveBody: { files: [] } };
+  it("takes the live body for a native editor opened from a list row without one", () => {
+    expect(shouldAdoptLiveBody(base)).toBe(true);
+  });
+  it("leaves a row that brought its own body, an adopted body, or an unready room alone", () => {
+    expect(shouldAdoptLiveBody({ ...base, rowHasBody: true })).toBe(false);
+    expect(shouldAdoptLiveBody({ ...base, alreadyAdopted: true })).toBe(false);
+    expect(shouldAdoptLiveBody({ ...base, liveInitialized: false })).toBe(false);
+    expect(shouldAdoptLiveBody({ ...base, liveBody: undefined })).toBe(false);
+    expect(shouldAdoptLiveBody({ ...base, nativeBodyBinding: false })).toBe(false);
   });
 });

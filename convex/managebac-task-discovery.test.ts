@@ -29,8 +29,11 @@ const createFixture = async () => {
   return { ...f, task, official, plan, request, read };
 };
 
-beforeEach(() => vi.stubEnv("SPECTRA_CONNECTOR_BRIDGE_KEY", bridgeKey));
-afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
+// The fixture's task is due 2026-10-24; tasks already past when first seen
+// stay in ManageBac, so the clock sits before it.
+const FIXTURE_NOW = Date.parse("2026-10-01T00:00:00Z");
+beforeEach(() => { vi.stubEnv("SPECTRA_CONNECTOR_BRIDGE_KEY", bridgeKey); vi.useFakeTimers({ toFake: ["Date"], now: FIXTURE_NOW }); });
+afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 
 describe("imported task discovery and stable Calendar identity", () => {
   it("returns the canonical imported task with its planner and official deadline links", async () => {

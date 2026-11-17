@@ -1665,7 +1665,12 @@ export function pptxProjectionFromContent(
           ? next.hidden === true || undefined
           : slide.hidden,
         speakerNotes: next.speakerNotes ?? slide.speakerNotes,
-        text: completeObjects ? slide.text : text.length ? text : slide.text,
+        // Slide.text mirrors the paragraphs PowerPoint reads, not one entry per
+        // object; derive it from the objects only where the file's mirror
+        // already matched them, else keep the file's own.
+        text: !completeObjects && JSON.stringify(pptxTextFromObjects(slide.objects)) === JSON.stringify(slide.text)
+          ? pptxTextFromObjects(objects)
+          : slide.text,
         objects,
         ...(transition ? { transition } : {}),
       };
@@ -1902,9 +1907,13 @@ export function pptxOperationsBetween(
           shapeId: nativeShapeId,
           text: object.altText ?? "",
         });
-      const moved = (["x", "y", "width", "height", "rotation"] as const).some(
-        (key) => Math.abs(object[key] - previousObject[key]) > 0.5,
-      );
+      // Moved means moved on the file's own grid (whole EMUs, 1/60000°):
+      // anything the file would still hold differently must be written, or
+      // the readback refuses the save.
+      const emuPerUnit = (before.nativeBinding.canvasWidthEmu ?? 12192000) / 1000;
+      const moved = (["x", "y", "width", "height"] as const).some(
+        (key) => Math.round(object[key] * emuPerUnit) !== Math.round(previousObject[key] * emuPerUnit),
+      ) || Math.round(object.rotation * 60000) !== Math.round(previousObject.rotation * 60000);
       if (moved && !object.locked)
         operations.push({
           kind: "set-geometry",

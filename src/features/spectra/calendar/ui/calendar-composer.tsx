@@ -52,12 +52,17 @@ function minutesOf(time: string) {
   return hour! * 60 + minute!;
 }
 
+/** Where a right-click on the calendar asked for it: that day, and the time when it was on the hours. */
+export type ComposerPlace = { day: DayKey; time?: string };
+
 export function CalendarComposer({
   open,
+  at,
   onClose,
   onCreate,
 }: {
   open: boolean;
+  at?: ComposerPlace | null;
   onClose: () => void;
   /** Writes it; a rejection is shown here and the composer stays open. */
   onCreate: (draft: CalendarDraft) => Promise<void>;
@@ -74,13 +79,22 @@ export function CalendarComposer({
     if (!open) return;
     const now = Date.now();
     const hour = nextHour(now);
-    setWhen("day");
     setTitle("");
+    if (at) {
+      // A task at the time that was pressed, an hour long if it becomes an event.
+      setWhen(at.time ? "due" : "day");
+      setDay(at.day);
+      setStart(at.time ?? "09:00");
+      setEnd(laterBy(at.time ?? "09:00", 60));
+      setDueAt(at.time ?? "17:00");
+      return;
+    }
+    setWhen("day");
     setDay(hour ? todayKey(now) : addDays(todayKey(now), 1));
     setStart(hour ?? "09:00");
     setEnd(laterBy(hour ?? "09:00", 60));
     setDueAt("17:00");
-  }, [open]);
+  }, [open, at]);
 
   const event = when === "span";
   const overnight = event && minutesOf(end) <= minutesOf(start);

@@ -728,6 +728,44 @@ describe("Bridge write acknowledgement after native observation", () => {
   });
 });
 
+describe("the same cloud-drive folder on two computers", () => {
+  it("brings each file in once, with a copy on each computer", async () => {
+    const t = setupTest();
+    const fixture = await seedBridge(t);
+    const folder = { rootLabel: "School", grantId: "grant_a1", rootKey: "c".repeat(64), scanId: crypto.randomUUID(), fileCount: 1, doubleSyncRisk: true, ownerLockPaths: [] };
+    const firstMount = await t.mutation(api.bridgeSync.registerMount, { credential, ...folder });
+    const resource = { localResourceId: "lr_" + "1".repeat(16), relativePath: "Essay.docx", size: 12, contentHash: "d".repeat(64), nativeFormat: "docx" };
+    const first = (await t.mutation(api.bridgeSync.discoverResourcesPage, { credential, mountId: firstMount, resources: [resource] })).registrations[0];
+    if (!("workId" in first) || !first.workId) throw new Error("Expected the first computer's file");
+
+    const secondCredential = "bridge-batch-test-credential-00000002";
+    const secondDevice = await t.run(async (ctx) => {
+      const credentialHash = Array.from(
+        new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(secondCredential))),
+        (byte) => byte.toString(16).padStart(2, "0"),
+      ).join("");
+      const { _id, _creationTime, ...old } = (await ctx.db.get(fixture.deviceId))!;
+      return ctx.db.insert("bridgeDevices", { ...old, name: "Second computer", credentialHash });
+    });
+    const secondMount = await t.mutation(api.bridgeSync.registerMount, { credential: secondCredential, ...folder, grantId: "grant_b2", scanId: crypto.randomUUID() });
+    const [one, two] = await t.run((ctx) => Promise.all([ctx.db.get(firstMount), ctx.db.get(secondMount)]));
+    expect(two?.rootOrgNodeId).toBe(one?.rootOrgNodeId);
+
+    const second = (await t.mutation(api.bridgeSync.discoverResourcesPage, {
+      credential: secondCredential,
+      mountId: secondMount,
+      resources: [{ ...resource, localResourceId: "lr_" + "2".repeat(16) }],
+    })).registrations[0];
+    expect(second).toHaveProperty("workId", first.workId);
+    const locals = await t.run((ctx) =>
+      ctx.db.query("workReplicas").withIndex("by_work_kind", (q) => q.eq("workId", first.workId!).eq("kind", "local")).collect(),
+    );
+    expect(locals.map((replica) => replica.deviceId).sort()).toEqual([fixture.deviceId, secondDevice].sort());
+    const works = await t.run((ctx) => ctx.db.query("spectraArtifacts").collect());
+    expect(works.filter((work) => work.title === "Essay.docx" && work.status !== "deleted")).toHaveLength(1);
+  });
+});
+
 function setupTest() {
   const t = convexTest(schema, modules);
   aggregateTest.register(t, "orgNodeCountByType");

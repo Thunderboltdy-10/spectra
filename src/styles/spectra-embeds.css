@@ -771,3 +771,32 @@ button.work-embed-title:hover {
   font-size: 14px;
   color: var(--text-tertiary);
 }
+
+/* --- Code on a page ---------------------------------------------------------
+   A visualisation is made to sit in the text it illustrates: no card face of
+   its own, no tint, and as tall as it needs (up to the runtime's budget), so
+   it blends into the thread or document around it. The tab above still names
+   it and holds its menu. */
+.work-embed[data-work-card="code"] .work-embed-face {
+  min-width: 0;
+  padding: 4px 0 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.work-embed[data-work-card="code"]:hover .work-embed-face,
+.work-embed[data-work-card="code"]:focus-within .work-embed-face,
+[data-spectra-reference][data-selected] .work-embed[data-work-card="code"] .work-embed-face {
+  box-shadow: none;
+}
+
+.work-embed[data-work-card="code"][data-mode="expanded"] .work-embed-face {
+  max-height: none;
+  min-height: 0;
+  overflow: visible;
+}
+
+/* Before a visualisation first comes near the screen: its space, quietly. */
+.work-embed-waiting {
+  min-height: 160px;
+}

@@ -17,6 +17,7 @@ import type { SpectraRunPointer } from "../ai/use-spectra-run";
 import {
   getSpectraThread,
   getSpectraThreads,
+  keptSpectraThreads,
   postSpectra,
   type SpectraArtifact,
   type SpectraThread,
@@ -182,6 +183,11 @@ export function useSpectraContext(
 
   useEffect(() => {
     let disposed = false;
+    const kept = keptSpectraThreads({ brief: true });
+    if (kept) {
+      setThreads(kept.threads);
+      setThreadsLoaded(true);
+    }
     void getSpectraThreads({ brief: true })
       .then((value) => {
         if (!disposed) {

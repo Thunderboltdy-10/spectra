@@ -1,9 +1,10 @@
 import { Document, WML_NAMESPACE } from "@ariadng/office/docx";
 import { parseXml, serializeNode, XmlElement, XmlText } from "@ariadng/office/xml";
 import { latexToEquation } from "./equation-interchange";
-import { docxLens, type DocxProjection } from "./docx-lens";
+import { applyParagraphFormat, applyTableColumnWidths, docxLens, resolveParagraphStyleId, type DocxProjection } from "./docx-lens";
+import { TEXT_COLUMN_EMU, paragraphFormatForNode } from "../../../../shared/document-projection.mjs";
 import { documentContentToProseMirrorJson, type DocumentJsonNode } from "./document-projection";
-import { docxRichInlineSchema } from "./projection-contracts";
+import { docxRichInlineSchema, type DocxParagraphFormat } from "./projection-contracts";
 import { appendNoteReference, upsertNativeNote } from "./docx-academic";
 import { appendCommentBoundary, appendRevision, upsertNativeComment } from "./docx-academic-review";
 import { appendWordBibliography, appendWordCitation } from "./docx-citations";
@@ -94,7 +95,7 @@ function nativeImageToEditable(
       src: src ?? "",
       alt: typeof attrs.alt === "string" ? attrs.alt : "Word image",
       ...(typeof attrs.widthEmu === "number"
-        ? { widthPercent: Math.max(1, Math.min(100, (attrs.widthEmu / 914400) / 8.27 * 100)) }
+        ? { widthPercent: Math.round(Math.max(1, Math.min(100, (attrs.widthEmu / TEXT_COLUMN_EMU) * 100))) }
         : {}),
       ...(typeof attrs.widthEmu === "number" ? { widthEmu: attrs.widthEmu } : {}),
       ...(typeof attrs.heightEmu === "number" ? { heightEmu: attrs.heightEmu } : {}),
@@ -428,6 +429,11 @@ async function appendInlineContent(
       continue;
     }
     if (node.type === "text" && node.text) appendTextRun(document, paragraph, node.text, node.marks);
+    else if (node.type === "hardBreak") {
+      const run = new XmlElement("r", "w");
+      run.appendChild(new XmlElement("br", "w"));
+      paragraph.appendChild(run);
+    }
     else if (node.type === "inlineEquation") {
       const attrs = record(node.attrs);
       appendEquation(
@@ -449,8 +455,11 @@ async function appendParagraph(
   node: DocumentJsonNode,
   style: string | undefined,
   resolver: DocxAssetResolver | undefined,
+  look?: Partial<DocxParagraphFormat>,
 ) {
-  const paragraph = document.addParagraph("", style ? { style } : {});
+  // A fresh package defines only Normal; the heading style is added on first use.
+  const styleId = style ? await resolveParagraphStyleId(document, style) : undefined;
+  const paragraph = document.addParagraph("", styleId ? { style: styleId } : {});
   const blockId = record(node.attrs).blockId;
   paragraph.element.setAttributeNs(
     W14_NAMESPACE,
@@ -459,8 +468,74 @@ async function appendParagraph(
   );
   clearParagraph(paragraph.element);
   await appendInlineContent(document, paragraph.element, node.content ?? [], resolver);
+  applyNodeParagraphFormat(document, paragraph, node);
+  if (look) applyParagraphFormat(document, paragraph, look as DocxParagraphFormat);
   return paragraph;
 }
+
+/** How a quote, code block or callout looks in Word: the same as the Word sync writes it. */
+const QUOTE_LOOK = { indentLevel: 1, border: "left" } as const;
+const CODE_LOOK = { shading: "F2F2F2" } as const;
+const CALLOUT_LOOK = { border: "all", shading: "EEF3FB" } as const;
+
+function monospace(node: DocumentJsonNode): DocumentJsonNode {
+  if (node.type === "text")
+    return { ...node, marks: [...(node.marks ?? []), { type: "textStyle", attrs: { fontFamily: "Consolas" } }] };
+  return node.content ? { ...node, content: node.content.map(monospace) } : node;
+}
+
+/** Cell paragraphs joined by Word line breaks, so their text stays apart. */
+function cellInline(cell: DocumentJsonNode) {
+  return (cell.content ?? []).flatMap((child, index) => [
+    ...(index ? [{ type: "hardBreak" } as DocumentJsonNode] : []),
+    ...(child.content ?? [child]),
+  ]);
+}
+
+function writeCopyTableShape(document: Document, table: XmlElement, node: DocumentJsonNode) {
+  const properties = table.find(WML_NAMESPACE, "tblPr");
+  // `TableGrid` is not defined in a fresh package, so the borders are direct.
+  if (properties && !properties.find(WML_NAMESPACE, "tblBorders")) {
+    const borders = parseXml(
+      `<w:tblBorders xmlns:w="${WML_NAMESPACE}">` +
+        ["top", "left", "bottom", "right", "insideH", "insideV"]
+          .map((side) => `<w:${side} w:val="single" w:sz="4" w:space="0" w:color="auto"/>`)
+          .join("") +
+        "</w:tblBorders>",
+    ).root;
+    const later = properties.elements().find((child) =>
+      ["shd", "tblLayout", "tblCellMar", "tblLook", "tblCaption", "tblDescription"].includes(child.localName));
+    properties.insertBefore(borders, later ?? null);
+  }
+  const firstRow = node.content?.[0];
+  if (firstRow?.content?.length && firstRow.content.every((cell) => cell.type === "tableHeader")) {
+    const row = table.find(WML_NAMESPACE, "tr");
+    if (row) {
+      const rowProperties = new XmlElement("trPr", row.prefix);
+      row.insertBefore(rowProperties, row.children[0] ?? null);
+      const header = new XmlElement("tblHeader", row.prefix);
+      rowProperties.appendChild(header);
+      header.setAttributeNs(WML_NAMESPACE, "val", "1");
+    }
+  }
+  const widths = (firstRow?.content ?? []).map((cell) => {
+    const width = Number(Array.isArray(cell.attrs?.colwidth) ? cell.attrs.colwidth[0] : NaN);
+    return Number.isFinite(width) && width > 0 ? width : null;
+  });
+  if (widths.some((width) => width !== null)) applyTableColumnWidths(document, table, widths);
+}
+
+/** Alignment, spacing and indents the editor shows, written as Word's `w:pPr`. */
+function applyNodeParagraphFormat(
+  document: Document,
+  paragraph: ReturnType<Document["addParagraph"]>,
+  node: DocumentJsonNode | undefined,
+) {
+  const format = node ? (paragraphFormatForNode(node) as DocxParagraphFormat | undefined) : undefined;
+  if (format) applyParagraphFormat(document, paragraph, format);
+}
+
+let copyColumnEmu = TEXT_COLUMN_EMU;
 
 async function appendImage(document: Document, node: DocumentJsonNode, resolver: DocxAssetResolver | undefined) {
   const attrs = record(node.attrs);
@@ -489,9 +564,27 @@ async function appendImage(document: Document, node: DocumentJsonNode, resolver:
           ...(Number.isSafeInteger(heightEmu) && heightEmu > 0 ? { heightEmu } : {}),
         }
       : Number.isFinite(widthPercent) && widthPercent > 0
-      ? { widthPx: Math.round(793 * Math.min(100, widthPercent) / 100) }
+      ? { widthEmu: Math.round((copyColumnEmu * Math.min(100, widthPercent)) / 100) }
       : {}),
   });
+}
+
+/** Word does not shrink a picture to its column, so a large one is scaled here. */
+function fitDrawingToColumn(run: XmlElement) {
+  const descendants = (element: XmlElement): XmlElement[] =>
+    element.elements().flatMap((child) => [child, ...descendants(child)]);
+  const sizes = descendants(run).filter((element) => element.localName === "extent" || element.localName === "ext");
+  const outer = sizes.find((element) => element.localName === "extent");
+  const width = Number(outer?.getAttribute("cx"));
+  if (!outer || !Number.isFinite(width) || width <= copyColumnEmu) return;
+  const scale = copyColumnEmu / width;
+  for (const size of sizes) {
+    const cx = Number(size.getAttribute("cx"));
+    const cy = Number(size.getAttribute("cy"));
+    if (!Number.isFinite(cx) || !Number.isFinite(cy)) continue;
+    size.setAttribute("cx", String(Math.round(cx * scale)));
+    size.setAttribute("cy", String(Math.round(cy * scale)));
+  }
 }
 
 async function appendImageInline(
@@ -512,8 +605,35 @@ async function appendImageInline(
   const run = carrier?.elements().find((child) => child.localName === "r");
   if (!carrier || !run) throw new Error("The inline Word image drawing was not created.");
   carrier.removeChild(run);
+  fitDrawingToColumn(run);
   paragraph.appendChild(run);
   if (!carrier.elements().length) document.body().removeChild(carrier);
+}
+
+/** The writable width of the copy's page, the width image percentages refer to. */
+function textColumnEmu(setup: DocxPageSetup | undefined) {
+  // With no page controls the package keeps the library's Letter page.
+  const dimensions = PAGE_SIZES_TWIPS[setup ? setup.size ?? "a4" : "letter"] ?? PAGE_SIZES_TWIPS.a4!;
+  const pageWidth = setup?.orientation === "landscape" ? dimensions[1] : dimensions[0];
+  const margin = MARGIN_TWIPS[setup?.margins ?? "normal"] ?? MARGIN_TWIPS.normal!;
+  const columns = Math.min(3, Math.max(1, Math.round(Number(setup?.columns) || 1)));
+  const gap = 720 * (columns - 1);
+  return Math.round(((pageWidth - 2 * margin - gap) / columns) * 635);
+}
+
+function listItemParagraphs(
+  list: DocumentJsonNode,
+  level: number,
+): { paragraph: DocumentJsonNode; level: number }[] {
+  return (list.content ?? []).flatMap((item) =>
+    (item.content ?? []).flatMap((child) =>
+      child.type === "bulletList" || child.type === "orderedList"
+        ? listItemParagraphs(child, Math.min(8, level + 1))
+        : child.type === "paragraph" || child.type === "heading"
+          ? [{ paragraph: child, level }]
+          : [],
+    ),
+  );
 }
 
 /**
@@ -527,30 +647,35 @@ export async function exportDocxCopy(
 ) {
   const document = Document.create();
   setPageSetup(document, options.pageSetup);
+  copyColumnEmu = textColumnEmu(options.pageSetup);
   const notes: DocxFidelityNote[] = [];
   for (const node of json.content ?? []) {
     try {
       if (node.type === "table") {
         const rows = node.content ?? [];
         const columns = Math.max(1, ...rows.map((row) => row.content?.length ?? 0));
-        const table = document.addTable(Math.max(1, rows.length), columns, { style: "TableGrid" });
+        const table = document.addTable(Math.max(1, rows.length), columns);
         for (const [rowIndex, row] of rows.entries())
           for (const [columnIndex, cell] of (row.content ?? []).entries()) {
             const paragraph = table.cell(rowIndex, columnIndex).paragraphElements()[0];
             if (paragraph) {
               clearParagraph(paragraph);
-              await appendInlineContent(
-                document,
-                paragraph,
-                cell.content?.flatMap((child) => child.content ?? [child]) ?? [],
-                options.resolveAsset,
-              );
+              await appendInlineContent(document, paragraph, cellInline(cell), options.resolveAsset);
+              const alignment = (cell.content ?? []).find((child) => child.type === "paragraph")?.attrs?.textAlign;
+              if (alignment === "center" || alignment === "right" || alignment === "justify") {
+                const pPr = new XmlElement("pPr", paragraph.prefix);
+                paragraph.insertBefore(pPr, paragraph.children[0] ?? null);
+                const jc = new XmlElement("jc", paragraph.prefix);
+                pPr.appendChild(jc);
+                jc.setAttributeNs(WML_NAMESPACE, "val", alignment === "justify" ? "both" : alignment);
+              }
             }
           }
+        writeCopyTableShape(document, table.element, node);
         continue;
       }
       if (node.type === "image") {
-        await appendImage(document, node, options.resolveAsset);
+        await appendParagraph(document, { type: "paragraph", content: [node] }, undefined, options.resolveAsset);
         continue;
       }
       if (node.type === "spectraReference" || node.type === "spectraCitation") {
@@ -574,24 +699,24 @@ export async function exportDocxCopy(
         continue;
       }
       if (node.type === "bulletList" || node.type === "orderedList") {
-        const items = (node.content ?? []).flatMap((item) => {
-          const paragraph = item.content?.find((child) => child.type === "paragraph");
-          return paragraph ? [{ text: paragraph.content?.map((child) => child.text ?? "").join("") ?? "", level: 0 }] : [];
-        });
+        // Nested lists keep their depth; an item's later paragraphs follow it
+        // at the same level instead of being dropped.
+        const sources = listItemParagraphs(node, 0);
+        const items = sources.map((source) => ({ text: "", level: source.level }));
         const paragraphs =
           node.type === "bulletList"
             ? document.addBulletList(items)
             : document.addNumberedList(items);
         for (const [index, paragraph] of paragraphs.entries()) {
           clearParagraph(paragraph.element);
-          const item = (node.content ?? [])[index];
-          const source = item?.content?.find((child) => child.type === "paragraph");
+          const source = sources[index]?.paragraph;
           await appendInlineContent(document, paragraph.element, source?.content ?? [], options.resolveAsset);
+          applyNodeParagraphFormat(document, paragraph, source);
         }
         continue;
       }
       if (node.type === "heading") {
-        const level = Math.min(3, Math.max(1, Number(record(node.attrs).level) || 2));
+        const level = Math.min(6, Math.max(1, Number(record(node.attrs).level) || 2));
         await appendParagraph(document, node, `Heading${level}`, options.resolveAsset);
         continue;
       }
@@ -603,6 +728,20 @@ export async function exportDocxCopy(
             { type: "inlineEquation", attrs: { latex: String(attrs.latex ?? ""), display: attrs.display === "inline" ? "inline" : "block", ...(typeof attrs.ommlXml === "string" && attrs.ommlXml ? { ommlXml: attrs.ommlXml } : {}), ...(typeof attrs.ommlSourceLatex === "string" ? { ommlSourceLatex: attrs.ommlSourceLatex } : {}) } },
           ],
         }, undefined, options.resolveAsset);
+        continue;
+      }
+      if (node.type === "blockquote" || node.type === "callout") {
+        // One Word paragraph per editor paragraph: merging them ran the text together.
+        const look = node.type === "blockquote" ? QUOTE_LOOK : CALLOUT_LOOK;
+        const children = node.content?.some((child) => child.type === "paragraph" || child.type === "heading")
+          ? node.content
+          : [{ type: "paragraph", content: node.content ?? [] } as DocumentJsonNode];
+        for (const child of children)
+          await appendParagraph(document, child, child.type === "heading" ? `Heading${Math.min(6, Math.max(1, Number(record(child.attrs).level) || 2))}` : undefined, options.resolveAsset, look);
+        continue;
+      }
+      if (node.type === "codeBlock") {
+        await appendParagraph(document, monospace(node), undefined, options.resolveAsset, CODE_LOOK);
         continue;
       }
       if (

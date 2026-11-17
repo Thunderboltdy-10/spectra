@@ -4,6 +4,8 @@ import dynamic from "next/dynamic";
 import { requestFullView } from "../components/full-view-origin";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { useMutation } from "convex/react";
+import { describeFailure } from "@/components/ui/truthful-state";
 import { useQuery } from "@/features/spectra/data/use-kept-query";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
@@ -15,6 +17,7 @@ import { IconButton } from "@/components/ui/icon-button";
 import type { BarCommand, CollapseStep } from "@/components/ui/adaptive-bar";
 import { PageHeader } from "@/components/ui/page-header";
 import { useSpectraContextStore } from "@/stores/spectra-context-store";
+import { carriedSplitWorkId } from "../components/carried-work";
 import { useSpectraRun } from "../ai/use-spectra-run";
 import { useSpectraContext } from "../hooks/use-spectra-context";
 import { spectraBus } from "../events";
@@ -332,9 +335,13 @@ export function ChatShell() {
     artifacts,
   );
   const clearedWorkspaceArtifactRef = useRef(false);
+  const carriedWorkRef = useRef<string | null>(null);
   useEffect(() => {
     if (clearedWorkspaceArtifactRef.current) return;
     clearedWorkspaceArtifactRef.current = true;
+    // The work open beside the last page stays open here (a thread going full
+    // screen, or moving between pages); everything else starts closed.
+    carriedWorkRef.current = carriedSplitWorkId();
     studio.closeStudio();
     closePresentation("split");
     closePresentation("tab");
@@ -388,6 +395,12 @@ export function ChatShell() {
     },
     [artifacts, composerThread?.id, selectThread, studio, threadId],
   );
+  useEffect(() => {
+    const carried = carriedWorkRef.current;
+    if (!carried) return;
+    carriedWorkRef.current = null;
+    openArtifact(carried);
+  }, [openArtifact]);
 
   const applicationCommandDispatcher = useMemo(
     () =>
@@ -443,6 +456,7 @@ export function ChatShell() {
   }, [focusedArtifact, setVisibleArtifactIds]);
   const scopedWorkspaceId = chatWorkspaceId ?? detail?.thread.workspaceId;
 
+  const rewindThread = useMutation(api.spectraThreads.rewindThread);
   const runEngine = useSpectraRun({
     surface: "chat",
     workspaceId: scopedWorkspaceId,
@@ -786,6 +800,16 @@ export function ChatShell() {
           onCardRevise={(card, revision) => runEngine.revise(card, revision)}
           onRetryRun={runEngine.retry}
           onAnswer={runEngine.answer}
+          onEditMessage={threadId ? async (messageId, text) => {
+            try {
+              await rewindThread({ threadId: threadId as Id<"spectraThreads">, messageId: messageId as Id<"spectraMessages"> });
+            } catch (error) {
+              toast.error(describeFailure(error, { fallback: "That message could not be edited. Try again." }).message);
+              return false;
+            }
+            void runEngine.run(text, [], { threadId });
+            return true;
+          } : undefined}
           empty={
             loadError ? (
               <ProductErrorState

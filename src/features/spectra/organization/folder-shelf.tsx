@@ -6,6 +6,7 @@ import { FolderCards } from "./folder-cards";
 import { LibraryShelfSkeleton } from "./library-shelf";
 import { groupByWhen } from "./shelf-model";
 import { ShelfNotes, useShelfStacks } from "./shelf-stacks";
+import { useShelfGather, useShelfMoveInto } from "./shelf-gather";
 import { SharedWorkGroups, useSharedWorks } from "./shared-works";
 import { isPlaceNode, useTreeChildren, type TreeNode } from "./tree-client";
 import { useLoadOnApproach } from "./use-load-on-approach";
@@ -39,6 +40,10 @@ export function FolderShelf({
   const children = useTreeChildren(folderId, { sortKey: "updated", direction: "desc", pageSize: 24, withoutThreads: true });
   const mark = useLoadOnApproach(children.status, children.loadMore);
   const shared = useSharedWorks(workspaceId);
+  // Cards and folders here can be dragged onto a folder, a workspace or a
+  // breadcrumb to file them there, as on the Library's home shelf.
+  const moveInto = useShelfMoveInto();
+  const gather = useShelfGather(({ nodeId, intoPlaceId }) => (intoPlaceId ? moveInto(nodeId, intoPlaceId) : undefined), !picking);
   const sharedCount = shared.reduce((sum, group) => sum + group.works.length, 0);
   const places = children.nodes.filter(isPlaceNode);
   const work = children.nodes.filter((node) => !isPlaceNode(node));
@@ -51,12 +56,12 @@ export function FolderShelf({
       <div className="min-w-0">
         {places.length ? (
           <ShelfSection foldKey="folder:folders" id="shelf-folders" title="Folders" count={places.length}>
-            <FolderCards folders={places} now={now} onOpen={onOpen} onMenu={onMenu} picking={picking} />
+            <FolderCards folders={places} now={now} onOpen={onOpen} onMenu={onMenu} picking={picking} onGather={gather} />
           </ShelfSection>
         ) : null}
         {groups.map((group) => (
           <ShelfSection key={group.key} foldKey={`when:${group.key}`} label={group.label} title={group.label}>
-            <ShelfNotes items={group.items} now={now} onOpen={onOpen} onMenu={onMenu} picking={picking} whereOf={sharedMark} />
+            <ShelfNotes items={group.items} now={now} onOpen={onOpen} onMenu={onMenu} picking={picking} whereOf={sharedMark} onMoveInto={moveInto} />
           </ShelfSection>
         ))}
         <SharedWorkGroups groups={shared} place={name} workspaceId={workspaceId} now={now} onOpen={onOpen} picking={picking} />

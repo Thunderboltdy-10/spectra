@@ -157,6 +157,61 @@ function ChoiceCard({
   );
 }
 
+type ConvexClient = ReturnType<typeof useConvex>;
+
+let moveInFlight: Promise<{ moved: number; failed: number } | null> | null = null;
+
+/**
+ * Moves every work on the other side, one at a time, so it can stop anywhere
+ * safely: a work only leaves one side once the other holds it. A work that
+ * won't move (usually shared) is skipped, never retried in a loop. One move
+ * runs at a time in this tab; a second caller joins it.
+ */
+export function moveEveryWork(
+  convex: ConvexClient,
+  storeId: string,
+  toCloud: boolean,
+  onProgress?: (done: number) => void,
+) {
+  if (moveInFlight) return moveInFlight;
+  const revision = accountStorageRevision();
+  const run = async () => {
+    const skipped = new Set<string>();
+    let moved = 0;
+    for (;;) {
+      const limit = Math.min(50, 20 + skipped.size);
+      const ids = toCloud
+        ? await convex.query(api.deviceWorks.onThisComputer, { storeId, limit })
+        : await convex.query(api.deviceWorks.movable, { limit });
+      if (!accountStorageMatches(revision)) return null;
+      const left = ids.filter((id) => !skipped.has(id));
+      if (!left.length) break;
+      for (const id of left) {
+        try {
+          if (toCloud) await moveWorkToCloud(id);
+          else {
+            const work = await getSpectraArtifact(id);
+            if (!accountStorageMatches(revision)) return null;
+            await moveWorkToDevice(work.artifact, storeId);
+          }
+          moved += 1;
+        } catch {
+          skipped.add(id);
+        }
+        if (!accountStorageMatches(revision)) return null;
+        onProgress?.(moved + skipped.size);
+      }
+      // A full page of works that won't move: stop rather than ask for the same page again.
+      if (skipped.size >= 50) break;
+    }
+    return { moved, failed: skipped.size };
+  };
+  moveInFlight = run().finally(() => {
+    moveInFlight = null;
+  });
+  return moveInFlight;
+}
+
 /** Moves whatever is on the other side, a work at a time, so it can stop anywhere safely. */
 function MoveWorks({ storage }: { storage: WorkStorage }) {
   const convex = useConvex();
@@ -171,35 +226,16 @@ function MoveWorks({ storage }: { storage: WorkStorage }) {
     const revision = accountStorageRevision();
     if (!accountStorageMatches(revision)) return;
     setMoving({ done: 0, total });
-    let done = 0;
-    let failed = 0;
     try {
-      for (;;) {
-        const ids = toCloud
-          ? await convex.query(api.deviceWorks.onThisComputer, { storeId, limit: 20 })
-          : await convex.query(api.deviceWorks.movable, { limit: 20 });
-        if (!accountStorageMatches(revision)) return;
-        const left = ids.slice(failed);
-        if (!left.length) break;
-        for (const id of left) {
-          try {
-            if (toCloud) await moveWorkToCloud(id);
-            else {
-              const work = await getSpectraArtifact(id);
-              if (!accountStorageMatches(revision)) return;
-              await moveWorkToDevice(work.artifact, storeId);
-            }
-            if (!accountStorageMatches(revision)) return;
-            done += 1;
-          } catch {
-            if (!accountStorageMatches(revision)) return;
-            failed += 1;
-          }
-          setMoving({ done: done + failed, total: Math.max(total, done + failed) });
-        }
-      }
-      if (failed) toast.warning(`${failed === 1 ? "One artifact" : `${failed} works`} stayed where they were, usually because they're shared.`);
-      else toast.success(toCloud ? "Your artifact is online now." : "Your artifact is on this computer now.");
+      const result = await moveEveryWork(convex, storeId, toCloud, (done) =>
+        setMoving({ done, total: Math.max(total, done) }),
+      );
+      if (!result || !accountStorageMatches(revision)) return;
+      if (result.failed)
+        toast.warning(`${result.failed === 1 ? "One artifact" : `${result.failed} artifacts`} stayed where they were, usually because they're shared.`);
+      else toast.success(toCloud ? "Your artifacts are online now." : "Your artifacts are on this computer now.");
+    } catch {
+      if (accountStorageMatches(revision)) toast.error("Moving stopped part way. Everything moved so far is safe; try again to finish.");
     } finally {
       if (accountStorageMatches(revision)) setMoving(null);
     }

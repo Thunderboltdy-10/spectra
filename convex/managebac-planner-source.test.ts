@@ -13,8 +13,11 @@ vi.mock("../shared/school-sync", async (importOriginal) => {
 const modules = import.meta.glob("./**/*.ts");
 const changedSource = { ...initialSource, title: "Revised official essay", description: "New source instructions.", dueAt: "2026-10-25T09:00:00+01:00" };
 
-beforeEach(() => vi.stubEnv("SPECTRA_CONNECTOR_BRIDGE_KEY", bridgeKey));
-afterEach(() => vi.unstubAllEnvs());
+// The fixture's task is due 2026-10-24; tasks already past when first seen
+// stay in ManageBac, so the clock sits before it.
+const FIXTURE_NOW = Date.parse("2026-10-01T00:00:00Z");
+beforeEach(() => { vi.stubEnv("SPECTRA_CONNECTOR_BRIDGE_KEY", bridgeKey); vi.useFakeTimers({ toFake: ["Date"], now: FIXTURE_NOW }); });
+afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); });
 
 describe("ManageBac planner source preservation", () => {
   it.each(["legacy", "array"] as const)("refreshes copied text and official date in %s representation", async representation => {

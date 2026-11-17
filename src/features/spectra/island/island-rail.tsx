@@ -6,7 +6,12 @@ import { WorkingMark } from "@/components/ui/skeleton";
 import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { tabTitle, type IslandTab } from "./island-model";
+import { prefetchThread } from "../data/thread-cache";
 import type { TabGhost as TabGhostRect } from "./use-tab-drag";
+
+/** The scroller's fade at its far end and the gap between tabs (spectra-island.css). */
+const RAIL_FADE = 36;
+const RAIL_GAP = 3;
 
 /*
  * The island's threads (ISLAND.md, "The rail"): folder tabs standing on the
@@ -110,8 +115,9 @@ export function IslandRail({
       data-settled={settled || undefined}
       inert={!raised}
       onKeyDown={onKeyDown}
-      // Never more than three threads across: each takes at least a third of the room between the two ends.
-      style={{ bottom, maxWidth, "--rail-tab-min": `${Math.max(76, Math.floor((maxWidth - 96) / 3))}px` } as CSSProperties}
+      // Three threads across, all three readable: a third of the room between the
+      // two ends once the end fade (36px) and the gaps between tabs are set aside.
+      style={{ bottom, maxWidth, "--rail-tab-min": `${Math.max(76, Math.floor((maxWidth - 96 - RAIL_FADE - 2 * RAIL_GAP) / 3))}px` } as CSSProperties}
       className="island-rail"
     >
       {/* New thread and every thread hold the two ends; the threads in hand run between them. */}
@@ -234,7 +240,11 @@ function RailTab({
       aria-pressed={current}
       aria-keyshortcuts="Alt+ArrowLeft Alt+ArrowRight Delete"
       style={{ "--order": order } as CSSProperties}
-      onPointerEnter={(event) => handlers.onHover(tab, { x: event.clientX, y: event.clientY })}
+      onPointerEnter={(event) => {
+        // Its card opens on a held hover: start reading the thread now.
+        prefetchThread(tab.threadId);
+        handlers.onHover(tab, { x: event.clientX, y: event.clientY });
+      }}
       onPointerMove={(event) => handlers.onMove(tab, { x: event.clientX, y: event.clientY })}
       onPointerLeave={() => handlers.onLeave(tab)}
       onPointerDown={(event) => handlers.onPointerDown(tab, event)}

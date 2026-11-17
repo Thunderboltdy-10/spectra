@@ -65,6 +65,16 @@
     line-height: 1.25;
   }
 
+  /* A thread is read top to bottom as replies: a little more air between
+     paragraphs and before each section than in a dense document. */
+  .spectra-conversation .spectra-prose {
+    --prose-gap: 1em;
+  }
+
+  .spectra-conversation .spectra-prose :where(h1, h2, h3, h4, h5, h6):not(:first-child) {
+    margin-top: 1.6em;
+  }
+
   .spectra-prose :where(h1) {
     font-size: 1.6em;
     letter-spacing: -0.03em;
@@ -345,7 +355,7 @@
 
   .spectra-prose :where(.spectra-equation-inline) {
     display: inline-flex;
-    margin: 0 0.15em;
+    margin: 0 0.1em;
     vertical-align: baseline;
   }
 

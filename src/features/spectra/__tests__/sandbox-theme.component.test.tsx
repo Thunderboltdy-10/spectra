@@ -78,7 +78,8 @@ describe("sandbox host theme and presentation updates", () => {
       const frame = container.querySelector("iframe")!;
       expect(container.querySelectorAll("iframe")).toHaveLength(1);
       expect(container.contains(placeholder)).toBe(false);
-      expect(frame.style.height).toBe(`${props.expected}px`);
+      // The frames share one box that holds the height (a new build loads behind the shown one).
+      expect(frame.parentElement?.style.height).toBe(`${props.expected}px`);
       expect(frame.srcdoc).toContain('"theme":"dark"');
       expect(recoverableError).not.toHaveBeenCalled();
     },
@@ -131,7 +132,7 @@ describe("sandbox host theme and presentation updates", () => {
     expect(frame.closest("section")?.getAttribute("data-runtime-status")).toBe(
       "ready",
     );
-    expect(frame.style.height).toBe("560px");
+    expect(frame.parentElement?.style.height).toBe("560px");
     expect(frame.srcdoc).toBe(srcdoc);
   });
 

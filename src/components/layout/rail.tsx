@@ -11,7 +11,7 @@ import type { AdministrationIdentity } from "@/features/spectra/administration/a
 import { readIdentity } from "@/features/spectra/administration/identity";
 import { formatRelativeTime } from "@/features/spectra/components/spectra-view-model";
 import { useWorkspaceCatalog } from "@/features/spectra/data/use-catalog-pages";
-import { getSpectraThreads, type SpectraSchoolMessage, type SpectraThread } from "@/features/spectra/data/api";
+import { getSpectraThreads, keptSpectraThreads, type SpectraSchoolMessage, type SpectraThread } from "@/features/spectra/data/api";
 import { threadClick } from "@/features/spectra/components/side-open";
 import { spectraBus } from "@/features/spectra/events";
 import { useSpectraRouter } from "@/features/spectra/hooks/use-spectra-router";
@@ -46,6 +46,82 @@ export const RAIL_COLLAPSED_WIDTH = 56;
 const NARROW = "(max-width: 1023px)";
 /** Phones: the rail leaves the screen and opens over the page (spectra-field.css). */
 const PHONE = "(max-width: 639px)";
+const WIDTH_KEY = "spectra:sidebar-width";
+const RAIL_DEFAULT = 232;
+const RAIL_MIN = 200;
+const RAIL_MAX = 400;
+
+function setRailWidth(width: number | null) {
+  const root = document.documentElement;
+  if (width === null) root.style.removeProperty("--spectra-rail-expanded-width");
+  else root.style.setProperty("--spectra-rail-expanded-width", `${width}px`);
+}
+
+/** The open rail's right edge: drag it wider or narrower, like the side panels.
+ * Double-click puts it back; arrow keys move it for the keyboard. */
+function RailResizeHandle() {
+  const [width, setWidth] = useState(RAIL_DEFAULT);
+  useLayoutEffect(() => {
+    const saved = Number(window.localStorage.getItem(WIDTH_KEY));
+    if (saved >= RAIL_MIN && saved <= RAIL_MAX) setWidth(saved);
+  }, []);
+  const commit = (next: number | null) => {
+    const value = next === null ? RAIL_DEFAULT : Math.round(Math.min(RAIL_MAX, Math.max(RAIL_MIN, next)));
+    setWidth(value);
+    setRailWidth(next === null ? null : value);
+    try {
+      if (next === null) window.localStorage.removeItem(WIDTH_KEY);
+      else window.localStorage.setItem(WIDTH_KEY, String(value));
+    } catch {}
+    // Pages that measure themselves look again once the rail has settled.
+    window.dispatchEvent(new Event("resize"));
+  };
+  return (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize the sidebar"
+      aria-valuemin={RAIL_MIN}
+      aria-valuemax={RAIL_MAX}
+      aria-valuenow={width}
+      tabIndex={0}
+      className="spectra-rail-resize"
+      onDoubleClick={() => commit(null)}
+      onKeyDown={(event) => {
+        if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+        event.preventDefault();
+        commit(width + (event.key === "ArrowRight" ? 16 : -16));
+      }}
+      onPointerDown={(event) => {
+        if (event.button !== 0) return;
+        event.preventDefault();
+        const handle = event.currentTarget;
+        handle.setPointerCapture(event.pointerId);
+        const root = document.documentElement;
+        root.dataset.spectraRailResizing = "";
+        document.body.style.cursor = "ew-resize";
+        document.body.style.userSelect = "none";
+        let latest = width;
+        const move = (next: PointerEvent) => {
+          latest = Math.round(Math.min(RAIL_MAX, Math.max(RAIL_MIN, next.clientX)));
+          setRailWidth(latest);
+        };
+        const end = () => {
+          handle.removeEventListener("pointermove", move);
+          handle.removeEventListener("pointerup", end);
+          handle.removeEventListener("pointercancel", end);
+          delete root.dataset.spectraRailResizing;
+          document.body.style.cursor = "";
+          document.body.style.userSelect = "";
+          commit(latest);
+        };
+        handle.addEventListener("pointermove", move);
+        handle.addEventListener("pointerup", end);
+        handle.addEventListener("pointercancel", end);
+      }}
+    />
+  );
+}
 const STORAGE_KEY = "spectra:sidebar-collapsed";
 const PINNED_LIMIT = 6;
 const THREAD_LIMIT = 8;
@@ -253,6 +329,7 @@ export function Rail() {
           "transition-[width] duration-[var(--motion-base)] ease-standard",
         )}
       >
+        {collapsed ? null : <RailResizeHandle />}
         <div className={cn("flex h-14 shrink-0 items-center gap-1", collapsed ? "justify-center px-2" : "pl-3 pr-2")}>
           {collapsed ? (
             <Tooltip label="Open the rail" side="right">
@@ -408,9 +485,13 @@ function RailThreads() {
   const [threads, setThreads] = useState<SpectraThread[] | null>(null);
   useEffect(() => {
     let live = true;
+    const active = (rows: SpectraThread[]) => rows.filter((thread) => thread.status === "active");
+    // The list as last read shows at once; the fresh one replaces it.
+    const kept = keptSpectraThreads({ brief: true });
+    if (kept) setThreads(active(kept.threads));
     const load = () =>
       void getSpectraThreads({ brief: true })
-        .then(({ threads: rows }) => live && setThreads(rows.filter((thread) => thread.status === "active")))
+        .then(({ threads: rows }) => live && setThreads(active(rows)))
         .catch(() => live && setThreads((current) => current ?? []));
     load();
     const off = spectraBus.on("threads.changed", load);

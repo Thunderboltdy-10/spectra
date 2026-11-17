@@ -28,7 +28,7 @@ describe("verified citations", () => {
   const render = (props: { sources?: CitationSource[]; verifiedSourceIds?: string[] }) =>
     act(() => root.render(<SpectraRichContent content={CONTENT} {...props} />));
   const citation = (label: string) =>
-    [...container.querySelectorAll("button, span")].find((element) => element.textContent === `[${label}]`)!;
+    [...container.querySelectorAll("button, span")].find((element) => element.textContent === label)!;
 
   it("opens an artifact source in the Side", () => {
     const opened: unknown[] = [];
@@ -70,7 +70,7 @@ describe("verified citations", () => {
     expect(citation("2").tagName).toBe("SPAN");
     expect(container.querySelectorAll("button")).toHaveLength(0);
     // An unverified citation says so.
-    expect(container.textContent).toContain("[3]");
+    expect(container.textContent).toContain("3");
     expect(container.querySelector('[title="Source verification unavailable"]')).not.toBeNull();
   });
 });

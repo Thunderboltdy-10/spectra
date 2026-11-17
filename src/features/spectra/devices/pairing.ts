@@ -14,6 +14,7 @@ import {
   pairingFailureMessage,
   pairingStatus,
   persistBridgeSession,
+  setBridgeRemovedHere,
   protocolMajor,
   type BridgeDiscovery,
   type BridgePlatform,
@@ -56,7 +57,11 @@ const browserDeps: PairingDeps = {
   discover: () => discoverBridge(),
   offer: offerPairing,
   status: pairingStatus,
-  persist: persistBridgeSession,
+  // Joined again, from any page: this computer is no longer one removed on purpose.
+  persist: (token) => {
+    persistBridgeSession(token);
+    setBridgeRemovedHere(false);
+  },
   enableDiscovery: enableBridgeDiscovery,
   platform: () => bridgePlatform(),
   origin: () => window.location.origin,

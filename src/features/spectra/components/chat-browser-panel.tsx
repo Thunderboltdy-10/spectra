@@ -5,7 +5,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CalendarDays, MessageSquare, MessagesSquare, X } from "@/components/icons/glyph-icons";
 import type { SpectraThread } from "../data/api";
-import { getSpectraThread, getSpectraThreads } from "../data/api";
+import { getSpectraThread, getSpectraThreads, keptSpectraThreads } from "../data/api";
 import { formatRelativeTime } from "./spectra-view-model";
 import { ProductErrorState } from "./product-state";
 
@@ -86,7 +86,9 @@ export function ChatBrowserPanel({
 
   useEffect(() => {
     let alive = true;
-    setLoading(true);
+    const kept = keptSpectraThreads({ limit: 120, brief: true });
+    if (kept) setThreads(kept.threads);
+    setLoading(!kept);
     setLoadError(false);
     void getSpectraThreads({ limit: 120, brief: true })
       .then((result) => {
@@ -94,7 +96,8 @@ export function ChatBrowserPanel({
         setThreads(result.threads);
       })
       .catch(() => {
-        if (!alive) return;
+        // The kept list stays up when a refresh fails.
+        if (!alive || kept) return;
         setThreads([]);
         setLoadError(true);
       })

@@ -25,6 +25,7 @@ export function SandboxedArtifactRuntime({
   assets,
   compact,
   toolbar = true,
+  chromeless = false,
   viewportHeight,
   className = "",
   onEvent,
@@ -42,6 +43,8 @@ export function SandboxedArtifactRuntime({
   assets?: SpectraSandboxAsset[];
   compact: boolean;
   toolbar?: boolean;
+  /** No card of its own: it sits straight on the page (thread embeds). */
+  chromeless?: boolean;
   viewportHeight?: number;
   className?: string;
   onEvent?: (event: SpectraSandboxFrameMessage) => void;
@@ -64,12 +67,18 @@ export function SandboxedArtifactRuntime({
   const [clientMounted, setClientMounted] = useState(false);
   const [generation, setGeneration] = useState(0);
   const channel = `spectra-${stableId}-${generation}`;
-  const frameRef = useRef<HTMLIFrameElement>(null);
+  // Frames on screen: the one showing, plus the next build loading behind it.
+  // A new version is swapped in only once it says it is ready, so changes
+  // (code streaming in, an edit, a refetch) never flash back to loading.
+  const [frames, setFrames] = useState<Array<{ key: number; srcDoc: string; ready: boolean }>>([]);
+  const frameKey = useRef(0);
+  const frameEls = useRef(new Map<number, HTMLIFrameElement>());
   const [status, setStatus] = useState<SpectraRuntimeStatus>("loading");
   const [message, setMessage] = useState<string | null>(null);
   const [height, setHeight] = useState(viewportHeight ?? (compact ? 220 : 420));
   // The frame shares the page's colour scheme, so its transparent paper shows the page behind it.
   const [scheme, setScheme] = useState(() => readSpectraSandboxTheme().theme);
+  const growthRef = useRef({ last: 0, step: 0, repeats: 0 });
   const onEventRef = useRef(onEvent);
   const onStatusChangeRef = useRef(onStatusChange);
   const safeResources = useMemo(() => {
@@ -142,41 +151,85 @@ export function SandboxedArtifactRuntime({
     onStatusChangeRef.current = onStatusChange;
   }, [onStatusChange]);
 
+  const srcDoc = clientMounted ? document.srcDoc : null;
+  const framesRef = useRef(frames);
+  framesRef.current = frames;
   useEffect(() => {
+    if (!srcDoc) return;
+    const current = framesRef.current;
+    if (current.some((frame) => frame.srcDoc === srcDoc)) return;
+    const shown = [...current].reverse().find((frame) => frame.ready);
+    frameKey.current += 1;
+    const next = { key: frameKey.current, srcDoc, ready: false };
+    setFrames(shown ? [shown, next] : [next]);
+    if (shown) return;
     setStatus("loading");
     setMessage(document.diagnostics[0] ?? null);
-    onStatusChangeRef.current?.(
-      "loading",
-      document.diagnostics[0] ?? null,
-      document.diagnostics,
-    );
-  }, [document]);
+    onStatusChangeRef.current?.("loading", document.diagnostics[0] ?? null, document.diagnostics);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [srcDoc]);
 
   useEffect(() => {
     setHeight(viewportHeight ?? (compact ? 220 : 420));
-  }, [compact, document, viewportHeight]);
+  }, [compact, viewportHeight]);
+
+  /** The frame on screen: the newest ready one, else the one still loading. */
+  const shownKey = [...frames].reverse().find((frame) => frame.ready)?.key ?? frames.at(-1)?.key ?? null;
+  const newestKey = frames.at(-1)?.key ?? null;
+  const shownKeyRef = useRef(shownKey);
+  shownKeyRef.current = shownKey;
+  const newestKeyRef = useRef(newestKey);
+  newestKeyRef.current = newestKey;
 
   useEffect(() => {
     function receive(event: MessageEvent) {
+      let from: number | null = null;
+      for (const [key, element] of frameEls.current)
+        if (element.contentWindow && event.source === element.contentWindow) from = key;
       if (
-        event.source !== frameRef.current?.contentWindow ||
+        from === null ||
         !isSpectraSandboxFrameMessage(event.data) ||
         event.data.channel !== channel
       )
         return;
       const payload = event.data;
+      const shown = from === shownKeyRef.current;
+      const newest = from === newestKeyRef.current;
+      // A frame being replaced has nothing more to say; the one loading behind
+      // it only reports that it is ready, its size, or that it failed.
+      if (!shown && !newest) return;
+      if (!shown && payload.type !== "spectra:ready" && payload.type !== "spectra:resize" && payload.type !== "spectra:error") return;
+      if (payload.type === "spectra:ready" || (!shown && payload.type === "spectra:error")) {
+        // The next version is ready (or failed, which the reader should see):
+        // it replaces the one showing.
+        const ready = from;
+        setFrames((current) =>
+          current
+            .filter((frame) => frame.key >= ready)
+            .map((frame) => (frame.key === ready ? { ...frame, ready: true } : frame)),
+        );
+      }
       onEventRef.current?.(payload);
       if (payload.type === "spectra:ready") {
-        setStatus((current) => (current === "loading" ? "ready" : current));
+        setStatus("ready");
         onStatusChangeRef.current?.(
           "ready",
           document.diagnostics[0] ?? null,
           document.diagnostics,
         );
       } else if (payload.type === "spectra:resize") {
-        if (viewportHeight === undefined)
-          // As tall as the work inside, however short.
-          setHeight(Math.max(48, Math.min(SPECTRA_EMBED_BUDGETS.maxHeight, payload.height)));
+        if (viewportHeight === undefined && newest) {
+          // As tall as the work inside, however short. A page sized to the
+          // frame (100vh plus a margin) grows by the same step every time it
+          // is given room: after a few equal steps, stop feeding it.
+          const next = Math.max(48, Math.min(SPECTRA_EMBED_BUDGETS.maxHeight, payload.height));
+          const loop = growthRef.current;
+          const step = next - loop.last;
+          loop.repeats = step > 0 && step === loop.step ? loop.repeats + 1 : 0;
+          loop.step = step;
+          loop.last = next;
+          if (loop.repeats < 3) setHeight(next);
+        }
       } else if (payload.type === "spectra:error") {
         if (isBenignRuntimeError(payload.message)) return;
         setStatus("error");
@@ -205,17 +258,18 @@ export function SandboxedArtifactRuntime({
     const sendHostState = () => {
       const theme = readSpectraSandboxTheme(forceReducedMotion);
       setScheme(theme.theme);
-      frameRef.current?.contentWindow?.postMessage(
-        {
-          type: "spectra:host",
-          channel,
-          ...theme,
-          resources: safeResources,
-          parameters: safeParameters,
-          ...(exportRequest ? { exportRequest } : {}),
-        },
-        "*",
-      );
+      for (const element of frameEls.current.values())
+        element.contentWindow?.postMessage(
+          {
+            type: "spectra:host",
+            channel,
+            ...theme,
+            resources: safeResources,
+            parameters: safeParameters,
+            ...(exportRequest ? { exportRequest } : {}),
+          },
+          "*",
+        );
     };
     sendHostState();
     const observer = new MutationObserver(sendHostState);
@@ -236,6 +290,7 @@ export function SandboxedArtifactRuntime({
     safeParameters,
     safeResources,
     status,
+    shownKey,
   ]);
 
   if (!document.srcDoc)
@@ -249,8 +304,9 @@ export function SandboxedArtifactRuntime({
     );
   return (
     <section
-      className={`relative overflow-hidden rounded-card border border-[var(--border-default)] bg-[var(--bg-primary)] ${className}`}
+      className={`relative overflow-hidden ${chromeless ? "" : "rounded-card border border-[var(--border-default)] bg-[var(--bg-primary)]"} ${className}`}
       data-runtime-status={status}
+      data-chromeless={chromeless ? "" : undefined}
     >
       {description ? (
         <p id={descriptionId} className="sr-only">
@@ -274,26 +330,42 @@ export function SandboxedArtifactRuntime({
           </button>
         </div>
       ) : null}
-      {clientMounted ? (
-        <iframe
-          key={channel}
-          ref={frameRef}
-          title={`${title} interactive preview`}
-          aria-describedby={descriptionId}
-          srcDoc={document.srcDoc}
-          sandbox="allow-scripts"
-          referrerPolicy="no-referrer"
-          loading="lazy"
-          allow="camera 'none'; microphone 'none'; geolocation 'none'; clipboard-read 'none'; clipboard-write 'none'; payment 'none'; serial 'none'; usb 'none'"
-          className="block w-full border-0 bg-transparent transition-[height] duration-[var(--motion-slow)] ease-standard motion-reduce:transition-none"
-          style={{ height, colorScheme: scheme }}
-        />
+      {frames.length ? (
+        <div
+          key="frames"
+          data-runtime-frames=""
+          className="relative transition-[height] duration-[var(--motion-slow)] ease-standard motion-reduce:transition-none"
+          style={{ height }}
+        >
+          {frames.map((frame) => {
+            const shown = frame.key === shownKey;
+            return (
+              <iframe
+                key={`${channel}:${frame.key}`}
+                ref={(element) => {
+                  if (element) frameEls.current.set(frame.key, element);
+                  else frameEls.current.delete(frame.key);
+                }}
+                title={`${title} interactive preview`}
+                aria-describedby={shown ? descriptionId : undefined}
+                aria-hidden={shown ? undefined : true}
+                tabIndex={shown ? undefined : -1}
+                srcDoc={frame.srcDoc}
+                sandbox="allow-scripts"
+                referrerPolicy="no-referrer"
+                allow="camera 'none'; microphone 'none'; geolocation 'none'; clipboard-read 'none'; clipboard-write 'none'; payment 'none'; serial 'none'; usb 'none'"
+                className={`absolute inset-0 block h-full w-full border-0 bg-transparent ${shown ? "" : "pointer-events-none opacity-0"}`}
+                style={{ colorScheme: scheme }}
+              />
+            );
+          })}
+        </div>
       ) : (
-        <div aria-hidden="true" style={{ height }} />
+        <div key="reserve" aria-hidden="true" style={{ height }} />
       )}
       {status === "loading" ? (
         <div
-          className={`pointer-events-none absolute inset-x-0 bottom-0 ${toolbar ? "top-8" : "top-0"} flex items-center justify-center bg-[color-mix(in_oklab,var(--bg-primary)_90%,transparent)]`}
+          className={`pointer-events-none absolute inset-x-0 bottom-0 ${toolbar ? "top-8" : "top-0"} flex items-center justify-center ${chromeless ? "" : "bg-[color-mix(in_oklab,var(--bg-primary)_90%,transparent)]"}`}
         >
           <span className="inline-flex items-center gap-2 text-micro text-[var(--text-secondary)]">
             <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" />

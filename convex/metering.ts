@@ -202,7 +202,7 @@ async function addSchoolModelTokens(
 }
 
 /** Storage is a running balance, not a period: one "total" row per school. */
-async function schoolStorageRow(ctx: IdentityCtx, schoolId: Id<"schools">) {
+export async function schoolStorageRow(ctx: IdentityCtx, schoolId: Id<"schools">) {
   return ctx.db
     .query("schoolUsageTotals")
     .withIndex("by_school_period", (q) =>

@@ -10,6 +10,7 @@ import { isLocalCollaborativeDocumentChange } from "../editor/collaboration-chan
 import { applyDocumentStudioProjection } from "../editor/document-studio-projection";
 import Highlight from "@tiptap/extension-highlight";
 import TiptapLink from "@tiptap/extension-link";
+import { LinkOpener } from "../editor/link-opener";
 import Placeholder from "@tiptap/extension-placeholder";
 import { Table } from "@tiptap/extension-table";
 import { TableCell } from "@tiptap/extension-table-cell";
@@ -95,7 +96,7 @@ import {
 } from "../editor/ai-speculation-decoration";
 import { AiTextResolve } from "../editor/ai-text-resolve";
 import { Callout } from "../editor/callout-node";
-import { DocumentImage, NativeDocxImage } from "../editor/document-image";
+import { DocumentImage, NativeDocxImage, TEXT_COLUMN_EMU, resizedImageAttrs } from "../editor/document-image";
 import {
   bibliographyFromNavigator,
   bibliographyNode,
@@ -254,6 +255,24 @@ function pointsFromCssSize(value: unknown) {
 }
 
 /** `RRGGBB`, or null when the colour is not something Word can hold literally. */
+/** The width a picture takes on the page, as a whole percent of the text column. */
+function renderedImagePercent(editor: Editor | null, pos: number) {
+  if (!editor) return undefined;
+  try {
+    const dom = editor.view.nodeDOM(pos);
+    const image =
+      dom instanceof HTMLImageElement ? dom : dom instanceof HTMLElement ? dom.querySelector("img") : null;
+    const page = editor.view.dom as HTMLElement;
+    const style = getComputedStyle(page);
+    const column = page.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+    const width = image?.getBoundingClientRect().width ?? 0;
+    if (!width || !(column > 0)) return undefined;
+    return Math.max(1, Math.min(100, Math.round((width / column) * 100)));
+  } catch {
+    return undefined;
+  }
+}
+
 function wordHex(value: unknown) {
   if (typeof value !== "string") return null;
   const hex = value.trim().replace(/^#/, "");
@@ -1015,7 +1034,8 @@ export function DocumentStudio({
             ]
           : []),
         Underline,
-        TiptapLink.configure({ openOnClick: false, autolink: true }),
+        TiptapLink.configure({ openOnClick: false, autolink: true, defaultProtocol: "https" }),
+        LinkOpener,
         Table.extend({
           addAttributes() {
             return {
@@ -1303,6 +1323,29 @@ export function DocumentStudio({
       strictNative,
     ],
   );
+
+  // TipTap 3 no longer re-renders on every transaction, so the work bar read a
+  // stale selection: selecting a picture never opened the Image tab, and bold,
+  // alignment or the Table tab lagged a click behind. One render per frame keeps
+  // them current without re-rendering per keystroke burst.
+  const [, setSelectionTick] = useState(0);
+  useEffect(() => {
+    if (!editor) return;
+    let frame = 0;
+    const schedule = ({ transaction }: { transaction: { selectionSet: boolean; storedMarksSet: boolean; docChanged: boolean } }) => {
+      if (!transaction.selectionSet && !transaction.storedMarksSet && !transaction.docChanged) return;
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        setSelectionTick((tick) => tick + 1);
+      });
+    };
+    editor.on("transaction", schedule);
+    return () => {
+      editor.off("transaction", schedule);
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, [editor]);
 
   useStudioViewportReady(
     Boolean(editor && !editor.isDestroyed && editor.isInitialized && editor.view),
@@ -2951,8 +2994,13 @@ export function DocumentStudio({
       ...(Number(activeImage?.attrs.widthPercent)
         ? { width: Number(activeImage!.attrs.widthPercent) }
         : activeImage?.type === "nativeDocxImage" && Number(activeImage.attrs.widthEmu)
-          ? { width: Math.max(1, Math.min(100, Number(activeImage.attrs.widthEmu) / (8.27 * 914400) * 100)) }
-        : {}),
+          ? { width: Math.max(1, Math.min(100, Number(activeImage.attrs.widthEmu) / TEXT_COLUMN_EMU * 100)) }
+        : (() => {
+            // A picture never resized shows at its natural size: read that from the
+            // page instead of claiming it fills the column.
+            const shown = activeImage ? renderedImagePercent(editor, activeImage.pos) : undefined;
+            return shown ? { width: shown } : {};
+          })()),
       setWidth: (percent) =>
         withEdit(() =>
           editor!
@@ -2960,9 +3008,7 @@ export function DocumentStudio({
             .focus()
             .updateAttributes(
               activeImage?.type ?? "image",
-              activeImage?.type === "nativeDocxImage"
-                ? { widthPercent: percent, widthEmu: Math.round((percent / 100) * 8.27 * 914400) }
-                : { widthPercent: percent },
+              resizedImageAttrs(activeImage?.attrs ?? {}, percent, activeImage?.type === "nativeDocxImage"),
             )
             .run(),
         ),
@@ -2984,21 +3030,33 @@ export function DocumentStudio({
       ...(activeEquation
         ? {
             display:
-              activeEquation.attrs.display === "inline"
+              activeEquation.type === "inlineEquation" || activeEquation.attrs.display === "inline"
                 ? ("inline" as const)
                 : ("block" as const),
           }
         : {}),
       setDisplay: (display) =>
-        withEdit(() =>
-          editor!
+        withEdit(() => {
+          if (activeEquation?.type === "inlineEquation") {
+            // An equation in the sentence moves onto its own line after it.
+            if (display === "inline") return true;
+            const $at = editor!.state.doc.resolve(activeEquation.pos);
+            const after = $at.after($at.depth);
+            return editor!
+              .chain()
+              .focus()
+              .deleteRange({ from: activeEquation.pos, to: activeEquation.pos + 1 })
+              .insertContentAt(after - 1, { type: "equation", attrs: { latex: activeEquation.attrs.latex ?? "", display: "block", alignment: "center" } })
+              .run();
+          }
+          return editor!
             .chain()
             .focus()
             .updateAttributes("equation", {
               display: display === "inline" ? "inline" : "block",
             })
-            .run(),
-        ),
+            .run();
+        }),
       ...(typeof activeEquation?.attrs.alignment === "string"
         ? { alignment: activeEquation.attrs.alignment }
         : {}),

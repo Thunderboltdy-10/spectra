@@ -1,6 +1,6 @@
 "use client";
 
-import { forwardRef, useMemo } from "react";
+import { forwardRef, useCallback, useEffect, useMemo, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { AdaptiveBar, type BarCommand, type CollapseStep } from "@/components/ui/adaptive-bar";
 import { cn } from "@/lib/utils";
 import { followAiActor, useFollowAi } from "../collaboration/follow-ai";
@@ -28,6 +28,82 @@ function openWork(workId: string, regionId?: string) {
   void spectraBus.command("work.open", { workId, surface: "panel", ...(regionId ? { region: { id: regionId } } : {}) });
 }
 
+/* The card's size: smaller than a page by default, and the reader's own once
+   they drag an edge (top, left, right or a top corner; the bottom sits on the
+   island). Kept in this browser. */
+const SIZE_KEY = "spectra:island-thread-size";
+const DEFAULT_SIZE = { width: 560, height: 420 };
+const MIN_SIZE = { width: 380, height: 220 };
+
+function readSize() {
+  try {
+    const value = JSON.parse(window.localStorage.getItem(SIZE_KEY) ?? "null") as { width?: number; height?: number } | null;
+    if (value && Number.isFinite(value.width) && Number.isFinite(value.height))
+      return { width: Math.max(MIN_SIZE.width, value.width!), height: Math.max(MIN_SIZE.height, value.height!) };
+  } catch {
+    // Blocked storage: the default size.
+  }
+  return DEFAULT_SIZE;
+}
+
+type Edge = "top" | "left" | "right" | "top-left" | "top-right";
+const EDGES: Array<{ edge: Edge; className: string; cursor: string }> = [
+  { edge: "top", className: "inset-x-3 -top-1 h-2", cursor: "ns-resize" },
+  { edge: "left", className: "-left-1 top-3 bottom-3 w-2", cursor: "ew-resize" },
+  { edge: "right", className: "-right-1 top-3 bottom-3 w-2", cursor: "ew-resize" },
+  { edge: "top-left", className: "-left-1 -top-1 size-3.5", cursor: "nwse-resize" },
+  { edge: "top-right", className: "-right-1 -top-1 size-3.5", cursor: "nesw-resize" },
+];
+
+function useCardSize() {
+  const [size, setSize] = useState(DEFAULT_SIZE);
+  useEffect(() => setSize(readSize()), []);
+  const startResize = useCallback(
+    (edge: Edge, event: ReactPointerEvent<HTMLElement>) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const handle = event.currentTarget;
+      handle.setPointerCapture(event.pointerId);
+      const start = { x: event.clientX, y: event.clientY, ...size };
+      // The card is centred over the island, so a side edge grows both sides.
+      const horizontal = edge === "top" ? 0 : edge.endsWith("left") ? -2 : 2;
+      const vertical = edge.startsWith("top") ? -1 : 0;
+      let latest = size;
+      const move = (next: PointerEvent) => {
+        latest = {
+          width: Math.round(Math.min(window.innerWidth - 32, Math.max(MIN_SIZE.width, start.width + (next.clientX - start.x) * horizontal))),
+          height: Math.round(Math.min(window.innerHeight * 0.8, Math.max(MIN_SIZE.height, start.height + (next.clientY - start.y) * vertical))),
+        };
+        setSize(latest);
+      };
+      const end = () => {
+        handle.removeEventListener("pointermove", move);
+        handle.removeEventListener("pointerup", end);
+        handle.removeEventListener("pointercancel", end);
+        try {
+          window.localStorage.setItem(SIZE_KEY, JSON.stringify(latest));
+        } catch {
+          // Kept for this visit only.
+        }
+      };
+      handle.addEventListener("pointermove", move);
+      handle.addEventListener("pointerup", end);
+      handle.addEventListener("pointercancel", end);
+    },
+    [size],
+  );
+  const reset = useCallback(() => {
+    setSize(DEFAULT_SIZE);
+    try {
+      window.localStorage.removeItem(SIZE_KEY);
+    } catch {
+      // Nothing kept.
+    }
+  }, []);
+  return { size, startResize, reset };
+}
+
 const PLAN: CollapseStep[] = [
   { hideLabel: "follow" },
   { toMenu: "undo" },
@@ -52,6 +128,7 @@ export const ThreadView = forwardRef<
   }
 >(function ThreadView({ tab, engine, visible, offset, onOpenSide, onOpenPage, onReply, onMinimise, onPointerEnter, onPointerLeave }, ref) {
   const live = engine?.liveExchange?.runId === tab.runId ? engine.liveExchange : null;
+  const { size, startResize, reset } = useCardSize();
   const moving = tab.status === "working" || tab.state === "needs_input";
   const caption = live?.steps.at(-1)?.title.replace(/\*/g, "") ?? (live?.content?.trim() ? "Writing the answer" : tab.caption);
 
@@ -101,14 +178,29 @@ export const ThreadView = forwardRef<
         if ((event.target as Element).closest(CARD_CONTROLS) || window.getSelection()?.toString()) return;
         onReply();
       }}
-      style={{ transform: `translateX(${offset}px)` }}
+      style={{ transform: `translateX(${offset}px)`, "--island-thread-w": `${size.width}px`, "--island-thread-h": `${size.height}px` } as React.CSSProperties}
       className={cn(
-        "box-border flex max-h-[70vh] w-[min(680px,calc(100vw-var(--spectra-rail-width,0px)-var(--spectra-lead-width,0px)-var(--spectra-side-width,0px)-32px))] flex-col overflow-hidden rounded-surface border border-[var(--card-border)] bg-[var(--card-paper)] shadow-[var(--shadow-lg)]",
+        "relative box-border flex max-h-[80vh] w-[min(var(--island-thread-w),calc(100vw-var(--spectra-rail-width,0px)-var(--spectra-lead-width,0px)-var(--spectra-side-width,0px)-32px))] flex-col rounded-surface border border-[var(--card-border)] bg-[var(--card-paper)] shadow-[var(--shadow-lg)]",
         "transition-[opacity,transform] duration-200 ease-[var(--ease-standard)]",
         visible ? "opacity-100 delay-[110ms]" : "pointer-events-none opacity-0",
       )}
     >
-      <header className="flex items-center gap-3 border-b border-[var(--card-border-soft)] py-2.5 pl-4 pr-2">
+      {EDGES.map(({ edge, className, cursor }) => (
+        <span
+          key={edge}
+          aria-hidden
+          data-island-thread-resize={edge}
+          className={cn("absolute z-10 touch-none", className)}
+          style={{ cursor }}
+          onPointerDown={(event) => startResize(edge, event)}
+          onDoubleClick={(event) => {
+            event.stopPropagation();
+            reset();
+          }}
+          onClick={(event) => event.stopPropagation()}
+        />
+      ))}
+      <header className="flex items-center gap-3 rounded-t-[inherit] border-b border-[var(--card-border-soft)] py-2.5 pl-4 pr-2">
         <div key={tab.runId} className="min-w-0 flex-1 island-content-in">
           <div data-thread-title className="truncate font-display text-title font-medium leading-6 text-[var(--text-primary)]">
             {tab.title}
@@ -121,7 +213,7 @@ export const ThreadView = forwardRef<
         </div>
         <AdaptiveBar commands={commands} plan={PLAN} label="Thread commands" layer="toast" className="max-w-[60%] flex-none" />
       </header>
-      <div key={tab.threadId} className="island-content-in h-[min(560px,58vh)] min-h-0">
+      <div key={tab.threadId} className="island-content-in h-[min(var(--island-thread-h),72vh)] min-h-0 overflow-hidden rounded-b-[inherit]">
         <ThreadConversation threadId={tab.threadId} compact liveExchange={live} onOpenArtifact={openWork} />
       </div>
     </div>

@@ -9,6 +9,14 @@ import { fileKind, previewExtent, type TaskStatus, type WorkPreview } from "../a
 import { PageThumbnail } from "../whiteboard/page-thumbnail";
 import { sideClick } from "./side-open";
 import { GhostLines, WorkingMark } from "@/components/ui/skeleton";
+import dynamic from "next/dynamic";
+import { normalizePresentationContent } from "../presentation/model";
+
+/* The slide canvas loads only once a card has a deck to draw. */
+const SlideCanvas = dynamic(
+  () => import("./presentation-slide-canvas").then((module) => module.SlideCanvas),
+  { ssr: false },
+);
 
 /*
  * A work as an index card (LANGUAGE.md, "Cards"): a tab in its type's colour
@@ -202,6 +210,7 @@ function PreviewFace({ type, title, preview, summary, live }: { type: PresentedW
         </span>
       );
     case "slides":
+      if (preview.first) return <FirstSlide first={preview.first} fallback={preview.titles[0]} />;
       return (
         <span className="work-preview-slides">
           <span className="work-preview-slide">{preview.titles[0] ?? (preview.count === 1 ? "1 slide" : `${preview.count} slides`)}</span>
@@ -225,6 +234,20 @@ function PreviewFace({ type, title, preview, summary, live }: { type: PresentedW
         </span>
       );
   }
+}
+
+/** A deck's first slide, drawn by the canvas the studio draws it with. */
+function FirstSlide({ first, fallback }: { first: NonNullable<Extract<WorkPreview, { kind: "slides" }>["first"]>; fallback?: string }) {
+  const deck = normalizePresentationContent({ ...first, slides: [first.slide] });
+  const slide = deck.slides[0];
+  if (!slide) return <span className="work-preview-slides"><span className="work-preview-slide">{fallback ?? "1 slide"}</span></span>;
+  return (
+    <span className="work-preview-slides">
+      <span className="work-preview-slide work-preview-slide-drawn" data-ratio={deck.settings?.aspectRatio === "4:3" ? "4:3" : undefined}>
+        <SlideCanvas slide={slide} deck={deck} assets={[]} readOnly compact />
+      </span>
+    </span>
+  );
 }
 
 /** A sheet's corner, or a table in a document, drawn as rows and columns. */

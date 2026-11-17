@@ -641,6 +641,24 @@ export const create = mutation({
         return { embedId: removed._id, idempotent: true };
       }
     }
+    // A reply shows each work once: asking to show it again (a retried step,
+    // a second show_work) returns the card already there.
+    if (args.containerType === "thread" && args.containerRegionId.trim().startsWith("reply:")) {
+      const region = args.containerRegionId.trim().slice(0, 240);
+      const existing = await ctx.db
+        .query("artifactEmbeds")
+        .withIndex("by_source", (q) => q.eq("sourceArtifactId", args.sourceArtifactId))
+        .order("desc")
+        .take(50);
+      const same = existing.find(
+        (embed) =>
+          !embed.removedAt &&
+          embed.containerType === "thread" &&
+          embed.containerId === args.containerId.trim() &&
+          embed.containerRegionId === region,
+      );
+      if (same) return { embedId: same._id, idempotent: true };
+    }
     const embedId = await ctx.db.insert("artifactEmbeds", {
       containerType: args.containerType,
       containerId: args.containerId.trim(),

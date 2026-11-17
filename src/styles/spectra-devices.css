@@ -12,7 +12,13 @@
   align-items: start;
 }
 
-@media (min-width: 1280px) {
+/* Side by side only when the page itself is wide enough: an open side panel
+   narrows the page without changing the window, so this asks the page. */
+.devices-scroll {
+  container-type: inline-size;
+}
+
+@container (min-width: 940px) {
   .devices-columns {
     grid-template-columns: minmax(0, 1fr) minmax(420px, 38%);
   }
@@ -850,4 +856,120 @@
   font-size: 12px;
   line-height: 1.45;
   color: var(--text-secondary);
+}
+
+/* What a folder still has to move: one lane each way, an arrow in a small
+   chip saying which way, the count in words. Stuck files read in warning. */
+.device-folder-lanes {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 8px;
+}
+
+.device-folder-lane {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.device-folder-lane > svg,
+.device-browser-waiting,
+.device-browser-backlog-group h5 > svg {
+  flex-shrink: 0;
+  box-sizing: content-box;
+  padding: 2px;
+  border-radius: 999px;
+}
+
+.device-folder-lane[data-way="down"] > svg,
+.device-browser-waiting[data-way="toComputer"],
+.device-browser-backlog-group[data-way="toComputer"] h5 > svg {
+  color: var(--accent);
+  background: color-mix(in oklab, var(--accent) 14%, transparent);
+}
+
+.device-folder-lane[data-way="up"] > svg,
+.device-browser-waiting[data-way="toSpectra"],
+.device-browser-backlog-group[data-way="toSpectra"] h5 > svg {
+  color: var(--ink-green);
+  background: color-mix(in oklab, var(--ink-green) 16%, transparent);
+}
+
+.device-folder-lane[data-way="stuck"],
+.device-browser-backlog-group[data-way="conflict"] h5,
+.device-browser-backlog-group[data-way="problem"] h5 {
+  color: var(--warning);
+}
+
+.device-folder-lane[data-way="stuck"] > svg,
+.device-browser-waiting[data-way="conflict"],
+.device-browser-waiting[data-way="problem"],
+.device-browser-backlog-group[data-way="conflict"] h5 > svg,
+.device-browser-backlog-group[data-way="problem"] h5 > svg {
+  color: var(--warning);
+  background: color-mix(in oklab, var(--warning) 14%, transparent);
+}
+
+.device-browser-waiting {
+  display: inline-grid;
+  place-items: center;
+}
+
+.device-browser-insync {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.device-browser-backlog {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
+  gap: 10px 16px;
+  padding: 2px 0 8px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.device-browser-backlog-group h5 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.device-browser-backlog-count {
+  margin-left: auto;
+  color: var(--text-tertiary);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.device-browser-backlog-group ul {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-left: 22px;
+}
+
+.device-browser-backlog-group li {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.device-browser-backlog-group a:hover {
+  color: var(--text-primary);
+  text-decoration: underline;
+}
+
+.device-browser-backlog-more {
+  color: var(--text-tertiary);
 }

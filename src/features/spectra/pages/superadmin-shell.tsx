@@ -48,6 +48,7 @@ import {
 } from "@/features/spectra/administration/shared";
 import { auditActionWords } from "@/features/spectra/administration/audit-words";
 import { formatMeter, USAGE_METERS, UsageDayChart } from "@/features/spectra/administration/usage-chart";
+import { SpendEstimate } from "@/features/spectra/administration/spend-estimate";
 import { PlatformMessagesSurface, SchoolDetailDialog, type PlatformDraft } from "@/features/spectra/administration/platform-messages";
 
 type Tab =
@@ -373,7 +374,7 @@ function PlatformOverviewSurface({
               );
             })}
             <div>
-              <dt>Files stored</dt>
+              <dt>Files kept</dt>
               <dd>{formatBytes(data.storageBytes)}</dd>
             </div>
             <div>
@@ -1614,12 +1615,13 @@ function PlatformUsageSurface({
             <MetricCard
               key={item.key}
               label={item.label}
-              value={formatMeter(item.key === "storage_bytes" ? overview.storageBytes : totals[item.key], item.unit)}
+              value={formatMeter(totals[item.key], item.unit)}
               detail={item.detail}
             />
           ))}
         </TallySheet>
       </section>
+      <SpendEstimate totals={totals} storedBytes={overview.storageBytes} days={30} />
       <section>
         <AdminSectionHeader title="Day by day" />
         <UsageDayChart series={series} through={completeThrough} />

@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { query } from "./functions";
 import { internalMutation, mutation } from "./orgNodeMutation";
@@ -39,6 +39,34 @@ async function ownedWorks(ctx: QueryCtx, accountId: Id<"accounts">, perKind: num
       .order("desc")
       .take(perKind)));
   return pages.flat();
+}
+
+/**
+ * Works of this account that match, newest first per kind, until `limit`
+ * are found. Unlike a fixed window it looks past works that don't match (an
+ * Office file, one already moved), so a long run of those never hides older
+ * works still to move; the scan stops at `scanPerKind` to stay bounded.
+ */
+async function findOwnedWorks(
+  ctx: QueryCtx,
+  accountId: Id<"accounts">,
+  match: (row: Doc<"spectraArtifacts">) => boolean,
+  limit: number,
+  scanPerKind = 400,
+) {
+  const found: Doc<"spectraArtifacts">[] = [];
+  for (const blueprintKey of DEVICE_WORK_TYPES) {
+    let scanned = 0;
+    for await (const row of ctx.db
+      .query("spectraArtifacts")
+      .withIndex("by_account_blueprint", (q) => q.eq("ownerAccountId", accountId).eq("blueprintKey", blueprintKey as BlueprintKey))
+      .order("desc")) {
+      if (match(row)) found.push(row);
+      if (found.length >= limit || ++scanned >= scanPerKind) break;
+    }
+    if (found.length >= limit) break;
+  }
+  return found;
 }
 
 /** Backups addressed to a store by the computers its works moved from. */
@@ -118,13 +146,13 @@ export const movable = query({
   args: { limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
     const actor = await requireSpectraActor(ctx);
-    const rows = await ownedWorks(ctx, actor._id, 60);
-    return rows
-      .filter((row) =>
-        row.status !== "deleted" && row.storageHome !== "device" &&
-        row.resourceClass !== "resource" && !row.nativeFormat)
-      .slice(0, Math.min(50, args.limit ?? 20))
-      .map((row) => row._id);
+    const rows = await findOwnedWorks(
+      ctx,
+      actor._id,
+      (row) => row.status !== "deleted" && row.storageHome !== "device" && row.resourceClass !== "resource" && !row.nativeFormat,
+      Math.min(50, args.limit ?? 20),
+    );
+    return rows.map((row) => row._id);
   },
 });
 
@@ -151,11 +179,13 @@ export const onThisComputer = query({
   args: { storeId: v.string(), limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
     const actor = await requireSpectraActor(ctx);
-    const rows = await ownedWorks(ctx, actor._id, 60);
-    return rows
-      .filter((row) => row.status !== "deleted" && row.storageHome === "device" && row.storageStoreId === args.storeId)
-      .slice(0, Math.min(50, args.limit ?? 20))
-      .map((row) => row._id);
+    const rows = await findOwnedWorks(
+      ctx,
+      actor._id,
+      (row) => row.status !== "deleted" && row.storageHome === "device" && row.storageStoreId === args.storeId,
+      Math.min(50, args.limit ?? 20),
+    );
+    return rows.map((row) => row._id);
   },
 });
 

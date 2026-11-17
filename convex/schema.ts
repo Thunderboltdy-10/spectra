@@ -5294,6 +5294,8 @@ export default defineSchema({
     ),
     selected: v.optional(v.boolean()),
     hiddenAt: v.optional(v.number()),
+    /** The run on this tab last seen on any device; the tab is read while it is still the tab's run. */
+    seenRunId: v.optional(v.id("spectraAiRuns")),
     projectionVersion: v.optional(v.number()),
     threadTitle: v.optional(v.string()),
     runSummary: v.optional(

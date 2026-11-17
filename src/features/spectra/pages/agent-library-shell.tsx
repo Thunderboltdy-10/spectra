@@ -712,6 +712,7 @@ export function AgentLibraryShell({
                 <CatalogProgress catalog={agentCatalog} label="agents" />
               )}
               {!agentCatalog.isDone && agentCatalog.items.length > 0 ? <p role="status" className="text-micro text-[var(--text-secondary)]">More agents and filter choices are loading.</p> : null}
+              {agentCatalog.catchingUp && agentCatalog.isDone ? <p role="status" className="text-micro text-[var(--text-secondary)]">Spectra is still indexing older work, so some earlier agents may show up a little later.</p> : null}
               {publicError ? (
                 <ProblemState
                   compact

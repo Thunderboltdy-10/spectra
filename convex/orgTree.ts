@@ -1076,16 +1076,19 @@ export const workspaceTallies = query({
         { namespace: actor.accountId, bounds: { prefix: ["live-card", id] as [string, string] } },
         { namespace: actor.accountId, bounds: { prefix: ["live-card", id, "thread"] as [string, string, string] } },
         { namespace: actor.accountId, bounds: { prefix: ["live-card", id, "link"] as [string, string, string] } },
+        { namespace: actor.accountId, bounds: { prefix: ["live-card", id, "planner_task"] as [string, string, string] } },
       ]),
     );
     return Object.fromEntries(
       ids.map((id, index) => {
-        const all = counts[index * 3] ?? 0;
-        const threads = counts[index * 3 + 1] ?? 0;
-        const links = counts[index * 3 + 2] ?? 0;
-        return [id, { artifacts: Math.max(0, all - threads - links), threads }];
+        const all = counts[index * 4] ?? 0;
+        const threads = counts[index * 4 + 1] ?? 0;
+        const links = counts[index * 4 + 2] ?? 0;
+        // Tasks are counted on their own: a class with forty deadlines is not forty artifacts.
+        const tasks = counts[index * 4 + 3] ?? 0;
+        return [id, { artifacts: Math.max(0, all - threads - links - tasks), tasks, threads }];
       }),
-    ) as Record<string, { artifacts: number; threads: number }>;
+    ) as Record<string, { artifacts: number; tasks: number; threads: number }>;
   },
 });
 

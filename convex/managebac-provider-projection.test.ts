@@ -22,6 +22,9 @@ const copy = (bytes: Uint8Array) => bytes.buffer.slice(bytes.byteOffset, bytes.b
 beforeEach(() => {
   vi.stubEnv("SPECTRA_CONNECTOR_BRIDGE_KEY", bridgeKey);
   vi.useFakeTimers();
+  // The fixture's task is due 2026-10-24; tasks already past when first seen
+  // stay in ManageBac, so the clock sits before it.
+  vi.setSystemTime(Date.parse("2026-10-01T00:00:00Z"));
 });
 afterEach(() => {
   vi.useRealTimers();

@@ -26,7 +26,7 @@ vi.mock("./use-shell-notifications", () => ({
 }));
 vi.mock("@/features/spectra/administration/api", () => ({ getAdministration: async () => null }));
 const threadRows = vi.hoisted(() => ({ threads: [] as Array<Record<string, unknown>> }));
-vi.mock("@/features/spectra/data/api", () => ({ getSpectraThreads: async () => ({ threads: threadRows.threads }) }));
+vi.mock("@/features/spectra/data/api", () => ({ getSpectraThreads: async () => ({ threads: threadRows.threads }), keptSpectraThreads: () => null }));
 vi.mock("@/features/spectra/island/run-tabs", () => ({ useRunTabs: () => [], isActiveRunStatus: () => false }));
 vi.mock("@/features/spectra/data/use-catalog-pages", () => ({ useWorkspaceCatalog: () => ({ items: [] }) }));
 vi.mock("@/features/spectra/components/catalog-progress", () => ({ CatalogProgress: () => null }));

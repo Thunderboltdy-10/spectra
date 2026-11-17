@@ -25,6 +25,7 @@ import { useTreeActions, useTreePlacement } from "../organization/tree-client";
 import { setWorkSpeeds } from "../collaboration/work-speed";
 import { IslandComposer, type ComposerHandle, type ComposerSend } from "./composer";
 import { useIslandEngine } from "./engine";
+import { useSetupDue } from "../onboarding/setup-state";
 import { forgetThread, placeThread, useArrangement } from "./arrange";
 import { arrangeTabs, dropTab, isPendingTab, islandStatus, pendingRunTab, statusLight, stepTab, type IslandSide, type IslandTab } from "./island-model";
 import { IslandRail, RAIL_DONE, RailGhost, useRailSeat, type RailHandlers } from "./island-rail";
@@ -34,7 +35,7 @@ import { AnsweredCard, QuestionCard } from "./question-card";
 import { forgetAnswered, noteAnswered, useAnsweredNotes } from "../ai/answered-inputs";
 import { answerQuestion, pendingQuestions, questionAnswerLabel, type QuestionAnswer } from "./questions";
 import { refreshRunTabs, useRunTabs } from "./run-tabs";
-import { settleFirstVisit, useSeenRuns } from "./seen";
+import { markRunsSeen, settleFirstVisit, useSeenRuns } from "./seen";
 import { ThreadSwitcher } from "./thread-switcher";
 import { ThreadView } from "./thread-view";
 import { PEEK_LIFE_MS, PEEK_REST_MS, ReplyPeek, peekLine } from "./reply-peek";
@@ -118,6 +119,7 @@ export function Island() {
   const engine = slot?.engine ?? null;
   const router = useSpectraRouter();
   const { preferences } = useSpectraPreferences();
+  const inSetup = useSetupDue(preferences.integrations);
   const followingAi = useFollowAi().following;
   setWorkSpeeds({ speed: "fast", followSpeed: "fast", following: followingAi });
   const motion = useSpectraMotion();
@@ -197,6 +199,12 @@ export function Island() {
   useEffect(() => {
     held.current = reaching ? held.current ?? new Map(arrangedRef.current.map((tab) => [tab.runId, tab.side])) : null;
   }, [reaching]);
+
+  // Runs seen on another device are seen here too.
+  useEffect(() => {
+    const elsewhere = serverTabs.filter((tab) => tab.seenRunId && tab.seenRunId === tab.runId).map((tab) => tab.runId);
+    if (elsewhere.length) markRunsSeen(elsewhere, { fromServer: true });
+  }, [serverTabs]);
 
   // A first visit treats what already finished as seen.
   useEffect(() => {
@@ -826,6 +834,9 @@ export function Island() {
       openOnArrival.current = preferences.ai.openConversationAfterSend;
       const options = {
         ...(slot?.bindsThread ? {} : { threadId: focus?.threadId ?? null }),
+        // During Setup the island works, but Spectra's AI is off: the thread is
+        // real and answered with a practice note, and carries on after Setup.
+        ...(inSetup ? { practice: true } : {}),
         ...(message.references.length ? { references: message.references } : {}),
         ...(message.agentId !== undefined ? { agentId: message.agentId } : {}),
       };
@@ -835,7 +846,7 @@ export function Island() {
       if (steering) void engine.steer(steering, message.text, message.attachments);
       else void engine.run(message.text, message.attachments, options);
     },
-    [allTabs, engine, focus, islandHome, preferences.ai.openConversationAfterSend, receive, slot],
+    [allTabs, engine, focus, inSetup, islandHome, preferences.ai.openConversationAfterSend, receive, slot],
   );
 
   /* ------------------------------------------------------------ keyboard */
@@ -954,8 +965,10 @@ export function Island() {
   // the same caption its thread shows; given the keyboard, it asks for the next thing.
   const workingElsewhere = allTabs.find((tab) => tab.status === "working" && tab.threadId !== focus?.threadId);
   const liveCaption = workingElsewhere && live?.runId === workingElsewhere.runId ? live.steps.at(-1)?.title : undefined;
+  // The tab's title as it is now: a reply's first words stand in until the thread is named.
+  const focusTitle = focus ? allTabs.find((tab) => tab.threadId === focus.threadId)?.title ?? focus.title : "";
   const placeholder = focus
-    ? `Continue in ${shortTitle(focus.title)}`
+    ? `Continue in ${shortTitle(focusTitle)}`
     : workingElsewhere
       ? workingLine(liveCaption ?? workingElsewhere.caption)
       : "Ask Spectra anything";

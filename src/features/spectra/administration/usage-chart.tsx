@@ -10,10 +10,10 @@ import { formatBytes, formatCompact } from "./shared";
 export const USAGE_METERS = [
   { key: "model_input_tokens", label: "AI reading", unit: "tokens", detail: "Text the AI read to answer" },
   { key: "model_output_tokens", label: "AI writing", unit: "tokens", detail: "Text the AI wrote back" },
-  { key: "storage_bytes", label: "Files stored", unit: "bytes", detail: "Everything kept in Spectra" },
-  { key: "bandwidth_bytes", label: "Downloads", unit: "bytes", detail: "Files opened and shared" },
-  { key: "collaboration_bytes", label: "Live editing", unit: "bytes", detail: "Changes sent while people edit together" },
-  { key: "render_milliseconds", label: "Rendering", unit: "time", detail: "Time spent drawing previews and exports" },
+  { key: "storage_bytes", label: "Files added", unit: "bytes", detail: "Uploads and imports added, less files removed" },
+  { key: "bandwidth_bytes", label: "Files sent", unit: "bytes", detail: "Files opened, downloaded and shared" },
+  { key: "collaboration_bytes", label: "Live editing", unit: "bytes", detail: "Changes passed between people editing together" },
+  { key: "render_milliseconds", label: "Previews and exports", unit: "time", detail: "Time spent building previews and exported files" },
 ] as const;
 
 export type UsageMeter = (typeof USAGE_METERS)[number];
@@ -28,7 +28,7 @@ export function formatMeter(value: number | null | undefined, unit: UsageMeter["
   return formatCompact(value);
 }
 
-/** "storage_bytes" → "Files stored"; an unknown meter keeps its own words. */
+/** "storage_bytes" → "Files added"; an unknown meter keeps its own words. */
 export function meterLabel(key: string) {
   return USAGE_METERS.find((item) => item.key === key)?.label ?? key.replaceAll("_", " ").replace(/^\w/, (letter) => letter.toUpperCase());
 }

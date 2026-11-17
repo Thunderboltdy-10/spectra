@@ -11,7 +11,6 @@ import {
   bridgeStatus,
   clearBridgeSession,
   clearBridgeStatusCache,
-  disableBridgeDiscovery,
   discoverBridge,
   loadBridgeSession,
   loadBridgeStatusCache,
@@ -200,10 +199,11 @@ export function useBridgeHealth() {
     discovery,
     online,
     reachability,
+    // Discovery stays on: a signed-in account always looks for Bridge, and
+    // turning it off left a removed computer's running Bridge unseen until a reload.
     forgetSession: () => {
       clearBridgeSession();
       clearBridgeStatusCache();
-      disableBridgeDiscovery();
       setStatus(null);
     },
     /** An explicit check now, which also resets the backoff. */

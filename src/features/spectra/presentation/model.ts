@@ -769,6 +769,7 @@ export function normalizePresentationContent(
   const settings = record(input.settings);
   const canvasHeight = settings.aspectRatio === "4:3" ? 750 : 562.5;
   const incomingSlides = Array.isArray(input.slides) ? input.slides : [];
+  const nativeDeck = record(input.nativeBinding).version === 1;
   const occupiedSlideIds = new Set<string>();
   const occupiedObjectIds = new Set<string>();
   const occupiedComponentIds = new Set<string>();
@@ -830,12 +831,15 @@ export function normalizePresentationContent(
           occupiedObjectIds,
         ),
         type,
-        x: bounded(object.x, 100 + objectIndex * 20, 0, 1_000 - width),
+        // A native PowerPoint deck keeps shapes where the file has them (the
+        // lens bounds only the origin); pulling them inside the slide would
+        // read as an edit the file's readback refuses.
+        x: bounded(object.x, 100 + objectIndex * 20, 0, nativeDeck ? 1_000 : 1_000 - width),
         y: bounded(
           object.y,
           100 + objectIndex * 20,
           0,
-          canvasHeight - height,
+          nativeDeck ? canvasHeight : canvasHeight - height,
         ),
         width,
         height,

@@ -101,8 +101,8 @@ export function ArtifactStatusControl({
             <Icon name={status.glyph} size={20} accent={status.hue} animate={status.running} />
           </span>
           <div className="min-w-0">
-            <p className="text-caption font-semibold text-[var(--text-primary)]">{(status.name ?? STATE_NAME[status.state])}</p>
-            <p className="text-micro leading-4 text-[var(--text-secondary)]">{status.sentence}</p>
+            <p className="spectra-status-title">{(status.name ?? STATE_NAME[status.state])}</p>
+            <p className="spectra-status-sentence">{status.sentence}</p>
           </div>
         </div>
         {status.facts.length ? (

@@ -53,6 +53,7 @@ vi.mock("next/navigation", () => ({
 vi.mock("convex/react", () => ({
   useConvexAuth: () => ({ isAuthenticated: false, isLoading: false }),
   useQuery: () => undefined,
+  useMutation: () => vi.fn(),
 }));
 vi.mock("next/dynamic", () => ({
   default: () => () => null,

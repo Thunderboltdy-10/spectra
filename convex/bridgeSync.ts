@@ -3,7 +3,7 @@ import { query } from "./functions";
 import { internal } from "./_generated/api";
 import { internalMutation, mutation } from "./orgNodeMutation";
 import type { Doc, Id } from "./_generated/dataModel";
-import type { MutationCtx } from "./_generated/server";
+import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { getActorForAccountId, getAuthenticatedActor } from "./identityShared";
 import { createFolderNode, placeSourceNode, purgeNode, purgeSourceNodes, trashNode, findPrimaryNode, moveNode, renameNode, restoreTrashedNode, ensureGeneralNode, artifactSummaryFor, ARTIFACT_SUMMARY_READ_MODEL_VERSION } from "./orgTreeShared";
 import { z } from "zod";
@@ -189,6 +189,30 @@ async function ensureFolderPath(ctx: Parameters<typeof createFolderNode>[0], acc
  * computer, brought in before by a Bridge since reinstalled, keeps its Library
  * folder; a new one goes into the class it is named for, or the top level.
  */
+/**
+ * The same folder selected on another of this account's computers. The root
+ * key is a hash of the folder's full path, so a OneDrive (or Dropbox, iCloud)
+ * folder at the same place on two computers is one folder: its files are one
+ * set of works with a copy on each computer, never brought in twice.
+ */
+async function twinMounts(ctx: QueryCtx | MutationCtx, accountId: Id<"accounts">, mount: { deviceId: Id<"bridgeDevices">; rootKey?: string; selectedFile?: string; _id?: Id<"bridgeMounts"> }) {
+  const rootKey = mount.rootKey;
+  if (!rootKey) return [];
+  const devices = await ctx.db.query("bridgeDevices")
+    .withIndex("by_account_state", (q) => q.eq("accountId", accountId).eq("state", "active"))
+    .take(20);
+  const twins: Doc<"bridgeMounts">[] = [];
+  for (const other of devices) {
+    if (other._id === mount.deviceId) continue;
+    const twin = await ctx.db.query("bridgeMounts")
+      .withIndex("by_device_root_key", (q) => q.eq("deviceId", other._id).eq("rootKey", rootKey))
+      .unique();
+    if (twin && twin._id !== mount._id && twin.state !== "revoked" && twin.selectedFile === mount.selectedFile && twin.accountId === accountId)
+      twins.push(twin);
+  }
+  return twins;
+}
+
 async function mountRootFor(
   ctx: MutationCtx,
   actor: { accountId: Id<"accounts">; schoolId: Id<"schools"> },
@@ -414,7 +438,15 @@ export const registerMount = mutation({
       }
       return existing._id;
     }
-    const { rootNodeId, earlier } = await mountRootFor(ctx, actor, input.rootLabel, input.rootKey, input.selectedFile);
+    const twin = input.selectedFile ? undefined : (await twinMounts(ctx, actor.accountId, { deviceId: device._id, rootKey: input.rootKey }))
+      .find((candidate) => candidate.rootOrgNodeId);
+    const twinRoot = twin?.rootOrgNodeId ? await ctx.db.get(twin.rootOrgNodeId) : null;
+    let placement: { rootNodeId: Id<"orgNodes">; earlier?: Doc<"bridgeMounts"> };
+    if (twinRoot && twinRoot.accountId === actor.accountId) {
+      if (twinRoot.deletedAt !== undefined) await restoreTrashedNode(ctx, twinRoot);
+      placement = { rootNodeId: twinRoot._id };
+    } else placement = await mountRootFor(ctx, actor, input.rootLabel, input.rootKey, input.selectedFile);
+    const { rootNodeId, earlier } = placement;
     const mountId = await ctx.db.insert("bridgeMounts", { accountId: actor.accountId, deviceId: device._id, rootLabel: input.rootLabel, selectedFile: input.selectedFile, grantId: input.grantId, rootKey: input.rootKey, rootOrgNodeId: rootNodeId, state: "active", fileCount: input.fileCount, doubleSyncRisk: input.doubleSyncRisk, lastScanAt: now, lastScanId: input.scanId, createdAt: now, updatedAt: now });
     if (earlier) {
       // The earlier files move to this mount, so the scan finds each unchanged
@@ -672,7 +704,11 @@ async function discoverResourceForMount(
   actor: BridgeActor,
   mount: Doc<"bridgeMounts"> & { rootOrgNodeId: Id<"orgNodes"> },
   input: z.infer<typeof discoveredResourceSchema>,
-) {
+  depth = 0,
+): Promise<
+  | { skipped: true; reason: string; workId?: undefined; replicaId?: undefined; revision?: undefined; payloadHash?: undefined; needsPayload?: undefined }
+  | { skipped?: undefined; reason?: undefined; workId: Id<"spectraArtifacts">; replicaId: Id<"workReplicas">; revision: string; payloadHash: string | undefined; needsPayload: boolean }
+> {
     if (!isOfficeFormat(input.nativeFormat)) return { skipped: true as const, reason: "filtered" as const };
     if (mount.selectedFile && input.relativePath !== mount.selectedFile) throw new Error("BRIDGE_FILE_SELECTION_PATH_NOT_ALLOWED");
     const isOfficeOwnerLock = input.relativePath.replaceAll("\\", "/").split("/").pop()?.startsWith("~$") ?? false;
@@ -879,6 +915,36 @@ async function discoverResourceForMount(
         needsPayload: nativePayloadAllowed && ["docx", "docm", "dotx", "dotm", "xlsx", "xlsm", "xltx", "xltm", "xlam", "pptx", "pptm", "potx", "potm", "ppsx", "ppsm", "ppam", "spectra-pkg"].includes(input.nativeFormat) &&
           (!existingReplica.payloadRef || input.contentHash !== existingReplica.contentHash),
       };
+    }
+    // The same file already in Spectra from this folder on another computer:
+    // this computer's copy joins that work, then is handled like any copy.
+    if (!depth) {
+      for (const twin of await twinMounts(ctx, actor.accountId, mount)) {
+        const twinReplica = (await ctx.db.query("workReplicas")
+          .withIndex("by_device_mount_path", (q) => q.eq("deviceId", twin.deviceId).eq("mountId", twin._id).eq("relativePath", input.relativePath))
+          .take(5))[0];
+        const work = twinReplica ? await ctx.db.get(twinReplica.workId) : null;
+        if (!twinReplica || !work || work.status === "deleted" || !(await hasArtifactModify(ctx, actor, work._id))) continue;
+        const now = Date.now();
+        await ctx.db.insert("workReplicas", {
+          accountId: actor.accountId,
+          workId: work._id,
+          kind: "local",
+          deviceId: device._id,
+          mountId: mount._id,
+          localResourceId: input.localResourceId,
+          relativePath: input.relativePath,
+          nativeFormat: input.nativeFormat,
+          revision: twinReplica.revision,
+          ...(twinReplica.baseRevision ? { baseRevision: twinReplica.baseRevision } : {}),
+          ...(twinReplica.contentHash ? { contentHash: twinReplica.contentHash } : {}),
+          ...(twinReplica.payloadRef ? { payloadRef: twinReplica.payloadRef } : {}),
+          state: "current",
+          lastVerifiedAt: now,
+          updatedAt: now,
+        });
+        return discoverResourceForMount(ctx, device, actor, mount, input, depth + 1);
+      }
     }
     let discoveryRequest = await ctx.db.query("syncDiscoveryRequests")
       .withIndex("by_device_resource", (q) => q.eq("deviceId", device._id).eq("localResourceId", input.localResourceId))

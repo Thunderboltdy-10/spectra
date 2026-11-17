@@ -10,9 +10,10 @@ import { useEffect, useState } from "react";
 
 export type NetworkPermission = "granted" | "denied" | "prompt" | "unknown";
 
-const NAMES = ["local-network-access", "loopback-network"];
+// Bridge answers on loopback: newer Chrome asks about that apart from the wider local network.
+const NAMES = ["loopback-network", "local-network-access"];
 
-async function queryPermission(): Promise<NetworkPermission> {
+export async function queryPermission(): Promise<NetworkPermission> {
   if (typeof navigator === "undefined" || !navigator.permissions?.query) return "unknown";
   for (const name of NAMES) {
     try {

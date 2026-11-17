@@ -5,6 +5,7 @@ import { BridgeInstallSteps } from "./bridge-install-steps";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useConvexAuth, useMutation } from "convex/react";
 import { useQuery } from "@/features/spectra/data/use-kept-query";
+import { useSyncBacklog } from "./sync-backlog";
 import type { BarCommand, CollapseStep } from "@/components/ui/adaptive-bar";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -19,7 +20,6 @@ import {
   bridgeReachabilityCopy,
   bridgeRemovedHere,
   DEVICES_HREF,
-  pairingFailureMessage,
   setBridgeRemovedHere,
   unpairBridge,
   type BridgeFile,
@@ -36,6 +36,7 @@ import { DeviceCard } from "./device-card";
 import { runLocalDeviceAction } from "./device-actions";
 import { devicesModel, nativeWritesChoice, nativeWritesPlan, type CloudOverview, type DeviceView, type NativeWrites } from "./devices-model";
 import { NativeWritesChoice } from "./native-writes-choice";
+import { NewFilesChoice, newFilesPolicy } from "./new-files-choice";
 import { WorkHomeChoice } from "./work-home-choice";
 import { SubscriptionSetup } from "../ai/provider-setup";
 import { PairingPanel, THIS_COMPUTER_LIFE_KEY } from "./pairing-panel";
@@ -70,6 +71,7 @@ export function DevicesPage() {
   const cloudEnabled = local.online && isAuthenticated;
   const cloud = useQuery(api.bridge.overview, cloudEnabled ? {} : "skip") as CloudOverview | null | undefined;
   const policy = useQuery(api.syncPolicy.effective, cloudEnabled ? {} : "skip");
+  const backlog = useSyncBacklog(cloudEnabled);
   const requestPairing = useMutation(api.bridge.requestPairing);
   const revokeDevice = useMutation(api.bridge.revokeDevice);
   const overridePolicy = useMutation(api.syncPolicy.overrideAccount);
@@ -117,6 +119,11 @@ export function DevicesPage() {
       if (state.phase === "paired") firstTipMoment("bridge");
     });
   }, [pairing, requestPairing]);
+
+  /** Look again at once (no backoff), then join: Bridge resumes this computer or pairs it afresh. */
+  const reconnect = useCallback(() => {
+    void local.refresh().finally(connect);
+  }, [connect, local]);
 
   // The command bar, Spectra AI and ?connect=1 ask this page to connect.
   useEffect(() => {
@@ -191,10 +198,31 @@ export function DevicesPage() {
     const plan = nativeWritesPlan(choice, policy?.contentDirection);
     try {
       if (plan.preset)
-        await overridePolicy({ values: POLICY_PRESETS[plan.preset], idempotencyKey: `devices:native-writes:${choice}:${Date.now()}` });
+        await overridePolicy({
+          // A preset carries its own discovery and structure; the new-files choice is kept.
+          values: { ...POLICY_PRESETS[plan.preset], ...(policy ? { discovery: policy.discovery, structure: policy.structure } : {}) },
+          idempotencyKey: `devices:native-writes:${choice}:${Date.now()}`,
+        });
       if (!accountStorageMatches(revision)) return;
       if (plan.permission) update("ai", permissionChoicePatch(stored, "bridge_files", plan.permission));
       setNotice(choice === "never" ? "Desktop files stay as they are." : choice === "ask" ? "Spectra AI asks before it changes a desktop file." : "Spectra saves changes to your desktop files.");
+    } catch (error) {
+      if (accountStorageMatches(revision)) setNotice(failureSentence(error));
+    }
+  }
+
+  const newFilesBothWays = policy?.discovery === "auto" && policy?.structure === "mirror-both";
+
+  async function chooseNewFiles(on: boolean) {
+    if (!policy) return;
+    const revision = accountStorageRevision();
+    try {
+      await overridePolicy({
+        values: newFilesPolicy(policy, on),
+        idempotencyKey: `devices:new-files:${on}:${Date.now()}`,
+      });
+      if (accountStorageMatches(revision))
+        setNotice(on ? "New files and folders now sync both ways." : "New files wait for you to bring them in.");
     } catch (error) {
       if (accountStorageMatches(revision)) setNotice(failureSentence(error));
     }
@@ -213,7 +241,12 @@ export function DevicesPage() {
         if (!accountStorageMatches(revision)) return;
         setNotice(outcome.message);
       } else if (confirm.device.id) {
-        await revokeDevice({ deviceId: confirm.device.id as Id<"bridgeDevices">, removeFiles });
+        try {
+          await revokeDevice({ deviceId: confirm.device.id as Id<"bridgeDevices">, removeFiles });
+        } catch (error) {
+          // Already gone from Spectra (removed elsewhere, or replaced by a new pairing): finish the job here.
+          if (!/BRIDGE_DEVICE_INVALID/.test(String(error))) throw error;
+        }
         if (!accountStorageMatches(revision)) return;
         if (confirm.device.isThisComputer) {
           setBridgeRemovedHere(true);
@@ -229,7 +262,14 @@ export function DevicesPage() {
         );
       }
     } catch (error) {
-      if (accountStorageMatches(revision)) setNotice(confirm.kind === "remove-device" ? pairingFailureMessage(error, local.discovery, local.online) : failureSentence(error));
+      if (accountStorageMatches(revision))
+        setNotice(
+          confirm.kind === "remove-device"
+            ? local.online
+              ? `Couldn't remove ${confirm.device.isThisComputer ? "this computer" : confirm.device.name}. Try again in a moment.`
+              : "You're offline. Connect to the internet, then remove it again."
+            : failureSentence(error),
+        );
     } finally {
       if (accountStorageMatches(revision)) {
         setBusy(null);
@@ -241,6 +281,18 @@ export function DevicesPage() {
   }
 
   const connecting = pairingState.phase !== "idle" && pairingState.phase !== "paired";
+  // Bridge reports to Spectra from a computer like this one, yet this browser
+  // can't reach any Bridge: most likely this computer, blocked from the browser.
+  const likelyHere =
+    !here && platform !== "other" && bridgeMissing(local.reachability)
+      ? model.others.find((device) => device.online && device.platformLabel === (platform === "macos" ? "Mac" : "Windows"))
+      : undefined;
+  const likelyHereHint = likelyHere ? (
+    <p className="device-problem-hint" data-likely-here>
+      {likelyHere.name} is connected to Spectra. If that&apos;s this computer, this browser can&apos;t reach its Bridge:{" "}
+      {permission === "denied" ? NETWORK_PERMISSION_FIX : "allow Spectra to reach apps on this device when the browser asks, then try again."}
+    </p>
+  ) : null;
   // Read on each render: removing and pairing again both change it.
   const removedHere = bridgeRemovedHere();
   const selecting = busy === "add_folder" || busy === "add_files";
@@ -267,7 +319,7 @@ export function DevicesPage() {
             label: "Reconnect this computer",
             pinned: true,
             render: () => (
-              <Button variant="primary" size="sm" disabled={!isAuthenticated} onClick={connect}>
+              <Button variant="primary" size="sm" disabled={!isAuthenticated} onClick={reconnect}>
                 Reconnect this computer
               </Button>
             ),
@@ -286,13 +338,15 @@ export function DevicesPage() {
       lifeKey={device.isThisComputer ? THIS_COMPUTER_LIFE_KEY : `device:${device.id}`}
       onAction={(request) => void act(request)}
       onRemove={() => setConfirm({ kind: "remove-device", device })}
+      onReconnect={device.isThisComputer && !connecting && isAuthenticated ? reconnect : undefined}
       downloadUrl={local.reachability === "not-running" ? downloadUrl : null}
+      backlog={backlog}
     />
   );
 
   return (
     <div className="spectra-wave-y relative isolate flex h-full min-h-0 flex-1" data-spectra-app-surface="true" data-devices-page>
-      <div className="min-w-0 flex-1 overflow-y-auto">
+      <div className="devices-scroll min-w-0 flex-1 overflow-y-auto">
         <PageBody>
           <PageHeader
             title="Devices"
@@ -335,23 +389,26 @@ export function DevicesPage() {
                   <p className="max-w-xl text-ui leading-6 text-[var(--text-secondary)]">
                     Bridge keeps the files and folders you choose on this computer in sync with Spectra. Download it, then:
                   </p>
+                  {likelyHereHint}
                   <BridgeInstallSteps platform={platform} />
                   <div className="flex flex-wrap items-center gap-2">
-                    <Button asChild variant="primary" size="sm">
+                    <Button asChild variant={likelyHere ? "ghost" : "primary"} size="sm">
                       <a href={downloadUrl} rel="noopener" onClick={connect}>
                         <Icon name="download" size={16} />
                         Download for {platform === "macos" ? "Mac" : "Windows"}
                       </a>
                     </Button>
-                    <Button variant="ghost" size="sm" onClick={connect}>
-                      I already have it
+                    <Button variant={likelyHere ? "primary" : "ghost"} size="sm" onClick={reconnect}>
+                      {likelyHere ? "Try again" : "I already have it"}
                     </Button>
                   </div>
                 </div>
               ) : !connecting ? (
                 <div className="device-connect">
                   <p className="max-w-xl text-ui leading-6 text-[var(--text-secondary)]">
-                    {isAuthenticated && removedHere && local.discovery.kind === "running"
+                    {isAuthenticated && local.discovery.kind === "running" && local.discovery.health.disconnectedHere
+                      ? "This computer was disconnected. Spectra Bridge is still running here; connect it again to use its files."
+                      : isAuthenticated && removedHere && local.discovery.kind === "running"
                       ? "You removed this computer. Spectra Bridge is still running here; pair it again to use its files."
                       : isAuthenticated
                       ? // Pairing is per browser: Bridge can be running, even paired, while this browser isn't connected to it.
@@ -373,6 +430,7 @@ export function DevicesPage() {
               <SubscriptionSetup />
               <WorkHomeChoice />
               <NativeWritesChoice value={nativeWrites} disabled={!policy} onChange={chooseNativeWrites} />
+              <NewFilesChoice on={newFilesBothWays} disabled={!policy} onChange={(on) => void chooseNewFiles(on)} />
             </aside>
           </div>
         </PageBody>

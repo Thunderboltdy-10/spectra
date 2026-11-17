@@ -254,6 +254,21 @@ function NativeLine({ appearance }: { appearance: NativeAppearance }) {
  * SmartArt diagram: PowerPoint's own picture of it when the file has one,
  * otherwise what it is and, for SmartArt, its words.
  */
+type SmartArtShape = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation?: number;
+  fill?: string;
+  line?: string;
+  geometry?: string;
+  text?: string;
+  fontSizePt?: number;
+  color?: string;
+  align?: "left" | "center" | "right";
+};
+
 function NativeObjectCard({
   object,
   asset,
@@ -262,7 +277,34 @@ function NativeObjectCard({
   asset?: SpectraArtifactAsset;
 }) {
   const content = object.content as Record<string, unknown>;
-  const native = content.nativeObject as { kind?: string; label?: string; name?: string; items?: string[] };
+  const native = content.nativeObject as { kind?: string; label?: string; name?: string; items?: string[]; drawing?: SmartArtShape[] };
+  // A SmartArt drawn from the layout PowerPoint saved with it.
+  if (native.drawing?.length)
+    return (
+      <div className="presentation-smartart" role="img" aria-label={object.altText || native.items?.join(", ") || "SmartArt"}>
+        {native.drawing.map((shape, index) => (
+          <div
+            key={index}
+            className="presentation-native-shape presentation-smartart-shape"
+            data-native-shape={shape.geometry}
+            style={{
+              left: `${shape.x * 100}%`,
+              top: `${shape.y * 100}%`,
+              width: `${shape.width * 100}%`,
+              height: `${shape.height * 100}%`,
+              ...(shape.rotation ? { transform: `rotate(${shape.rotation}deg)` } : {}),
+              ...(shape.fill ? { background: shape.fill } : {}),
+              ...(shape.line ? { border: `max(1px, 0.1cqw) solid ${shape.line}` } : {}),
+              ...(shape.color ? { color: shape.color } : {}),
+              textAlign: shape.align ?? "center",
+              fontSize: `calc(min(0.1cqw, 1px) * ${shape.fontSizePt ?? 14})`,
+            }}
+          >
+            {shape.text ? <span>{shape.text}</span> : null}
+          </div>
+        ))}
+      </div>
+    );
   if (asset?.downloadUrl)
     return (
       // eslint-disable-next-line @next/next/no-img-element
@@ -341,7 +383,16 @@ function PresentationObjectView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [object.content, object.type],
   );
-  const textFontSize = Number(styleValue(object, "fontSize", 42));
+  // A PowerPoint box often sizes only its runs. The box's own size sets the
+  // height of every line, so without one it follows the smallest run (one of
+  // the deck's points is one canvas unit) instead of a 42-unit default that
+  // spread 17pt bullets two lines apart.
+  const runSizes = paragraphs.flatMap((paragraph) =>
+    paragraph.runs.flatMap((run) => (typeof run.fontSizePt === "number" && run.fontSizePt > 0 ? [run.fontSizePt] : [])),
+  );
+  const textFontSize = Number(
+    styleValue(object, "fontSize", runSizes.length ? Math.min(...runSizes) : 42),
+  );
   const textPreset =
     textFontSize >= 44
       ? "title"
@@ -351,7 +402,8 @@ function PresentationObjectView({
           ? "body"
           : "caption";
   useEffect(() => {
-    if (object.type !== "text" || compact || object.hidden) {
+    // An empty box (a PowerPoint line or band) has no words to overflow.
+    if (object.type !== "text" || compact || object.hidden || !presentationObjectText(object).trim()) {
       setTextOverflow(false);
       return;
     }
@@ -414,11 +466,13 @@ function PresentationObjectView({
       data-selected={selected || undefined}
       data-locked={object.locked || undefined}
       data-overflow={textOverflow || undefined}
+      // An opened PowerPoint's empty boxes stay quiet until chosen, as in PowerPoint.
+      data-native-text={nativeText && object.type === "text" ? "" : undefined}
       // A text box has no frame of its own, so while it is being written the
       // stage draws one: dashed when the box is empty, and on hover otherwise.
       data-text-frame={
         object.type === "text" && !compact && !readOnly
-          ? presentationObjectText(object).trim() ? "hover" : "empty"
+          ? presentationObjectText(object).trim() || appearance || nativeText ? "hover" : "empty"
           : undefined
       }
       data-animation={
@@ -466,18 +520,21 @@ function PresentationObjectView({
       ) : object.type === "text" ? (
         // Written in place with the field every editor shares (EDITORS.md,
         // Shared rich content), storing the deck's own paragraphs and runs.
+        // A PowerPoint shape keeps its fill and outline while it is edited,
+        // and an empty one is a drawn band, not a box waiting for words.
         <SlideTextField
           hostRef={textRef}
-          className="presentation-object-text"
+          className={appearance ? "presentation-object-text presentation-native-shape" : "presentation-object-text"}
           data-text-preset={textPreset}
+          data-native-shape={appearance?.geometry}
           data-ai-region={aiRegionAttr(aiActive)}
           {...(path ? targetAttrs(`${path}/text`) : {})}
           paragraphs={paragraphs}
           editable={!object.locked}
           autoFocus={focusText}
-          placeholder="Write here"
+          placeholder={appearance ? "" : "Write here"}
           native={nativeText}
-          style={textStyle}
+          style={{ ...textStyle, ...nativeFrameStyle(appearance) }}
           onFocus={onTextFocus}
           onBlur={onTextBlur}
           onChange={onTextChange}

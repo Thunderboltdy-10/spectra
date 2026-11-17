@@ -12,6 +12,7 @@ import { PlaceInMenu } from "./place-in-menu";
 import { useLifeArrival, useLifeDeparture, useLifeJoin } from "../life/use-life";
 import type { LocalDeviceRequest } from "./actions";
 import { timeAgo, type DeviceTone, type DeviceView, type FolderView } from "./devices-model";
+import { EMPTY_BACKLOG, files as fileCount, type FolderBacklog, type SyncBacklog } from "./sync-backlog";
 
 export const TONE_GLYPH: Record<DeviceTone, IconName> = {
   ok: "done",
@@ -39,7 +40,9 @@ export function DeviceCard({
   lifeKey,
   onAction,
   onRemove,
+  onReconnect,
   downloadUrl,
+  backlog,
 }: {
   device: DeviceView;
   now: number;
@@ -49,8 +52,12 @@ export function DeviceCard({
   lifeKey: string;
   onAction: (request: LocalDeviceRequest) => void;
   onRemove: () => void;
+  /** Look for this computer's Bridge again and rejoin it; offered while it isn't connected. */
+  onReconnect?: () => void;
   /** Where to get Bridge, offered while this computer's Bridge is not running. */
   downloadUrl?: string | null;
+  /** What each folder still has to move, both ways. */
+  backlog?: SyncBacklog;
 }) {
   const ref = useRef<HTMLElement>(null);
   const [browsing, setBrowsing] = useState<string | null>(null);
@@ -97,9 +104,19 @@ export function DeviceCard({
                 onAction={onAction}
                 browsing={browsing === folder.id}
                 onBrowse={() => setBrowsing((current) => (current === folder.id ? null : folder.id))}
+                backlog={backlog?.byFolder.get(folder.id) ?? EMPTY_BACKLOG}
+                computer={device.isThisComputer ? "this computer" : device.name}
               />
               {browsing === folder.id && folder.rootNodeId && folder.kind !== "file" ? (
-                <DeviceFolderBrowser key={folder.rootNodeId} rootNodeId={folder.rootNodeId} name={folder.name} onClose={() => setBrowsing(null)} />
+                <DeviceFolderBrowser
+                  key={folder.rootNodeId}
+                  rootNodeId={folder.rootNodeId}
+                  name={folder.name}
+                  onClose={() => setBrowsing(null)}
+                  backlog={backlog?.byFolder.get(folder.id) ?? EMPTY_BACKLOG}
+                  waiting={backlog?.byWork}
+                  computer={device.isThisComputer ? "this computer" : device.name}
+                />
               ) : null}
             </Fragment>
           ))}
@@ -121,6 +138,11 @@ export function DeviceCard({
           ) : null}
         </ul>
         {!device.folders.length && !local ? <p className="device-card-quiet">No files or folders yet.</p> : null}
+        {!device.folders.length && local ? (
+          <p className="device-card-quiet">
+            Nothing syncs from this computer yet. Folders synced here before come back when you add them again: each file finds the artifact it already has, so nothing comes in twice.
+          </p>
+        ) : null}
         {!local ? (
           <p className="device-card-quiet">
             {device.isThisComputer ? "Connect this computer to change what syncs." : "Change what syncs in Spectra on that computer."}
@@ -157,6 +179,11 @@ export function DeviceCard({
         {device.isThisComputer && (local || device.updateRequired) ? (
           <Button variant={device.updateRequired ? "primary" : "ghost"} size="sm" disabled={busy === "update"} onClick={() => onAction({ action: "update" })}>
             {busy === "update" ? "Checking…" : device.updateRequired ? "Update Bridge" : "Check for update"}
+          </Button>
+        ) : null}
+        {device.isThisComputer && !local && !device.updateRequired && onReconnect ? (
+          <Button variant="primary" size="sm" onClick={onReconnect}>
+            Try again
           </Button>
         ) : null}
         {device.isThisComputer && !local && !device.updateRequired && downloadUrl ? (
@@ -216,6 +243,8 @@ function FolderTile({
   onAction,
   browsing,
   onBrowse,
+  backlog,
+  computer,
 }: {
   folder: FolderView;
   ink: string;
@@ -224,6 +253,9 @@ function FolderTile({
   onAction: (request: LocalDeviceRequest) => void;
   browsing: boolean;
   onBrowse: () => void;
+  backlog: FolderBacklog;
+  /** "this computer", or the other computer's name. */
+  computer: string;
 }) {
   const act = local && folder.actionable;
   const isFile = folder.kind === "file";
@@ -256,7 +288,7 @@ function FolderTile({
             <span style={{ width: `${percent(progress)}%` }} />
           </span>
           <span className="device-folder-count">
-            {percent(progress)}%, {(progress.total - progress.synced).toLocaleString()} file{progress.total - progress.synced === 1 ? "" : "s"} left
+            {percent(progress)}%, {fileCount(progress.total - progress.synced)} left to bring into Spectra
           </span>
           {act && folder.syncing && !folder.paused ? (
             <button type="button" className="device-folder-cancel" disabled={working} onClick={() => onAction({ action: "pause_folder", grantId: folder.id })}>
@@ -265,6 +297,7 @@ function FolderTile({
           ) : null}
         </span>
       ) : null}
+      <SyncLanes backlog={backlog} computer={computer} single={isFile} />
       {folder.rootNodeId && !isFile ? (
         <button type="button" className="device-folder-browse" aria-expanded={browsing} onClick={onBrowse}>
           {browsing ? "Hide files" : "See files"}
@@ -296,5 +329,43 @@ function FolderTile({
         </span>
       ) : null}
     </li>
+  );
+}
+
+/*
+ * What is still on its way, each way, said as two lanes with arrows: down to
+ * the computer, up to Spectra, and what needs a person (changed on both
+ * sides, or a write that failed). Nothing waiting: one quiet line saying so.
+ */
+function SyncLanes({ backlog, computer, single }: { backlog: FolderBacklog; computer: string; single: boolean }) {
+  const down = backlog.toComputer.length;
+  const up = backlog.toSpectra.length;
+  const stuck = backlog.conflict.length + backlog.problem.length;
+  const names = (list: FolderBacklog[keyof FolderBacklog]) =>
+    list.slice(0, 6).map((file) => file.path.split("/").pop() || file.path).join(", ") + (list.length > 6 ? ", and more" : "");
+  if (!down && !up && !stuck) return null;
+  return (
+    <span className="device-folder-lanes" aria-label="Still to sync">
+      {down ? (
+        <span className="device-folder-lane" data-way="down" title={names(backlog.toComputer)}>
+          <Icon name="arrowDown" size={12} />
+          <span className="min-w-0 truncate">{single ? "Going" : fileCount(down)} to {computer}</span>
+        </span>
+      ) : null}
+      {up ? (
+        <span className="device-folder-lane" data-way="up" title={names(backlog.toSpectra)}>
+          <Icon name="arrowUp" size={12} />
+          <span className="min-w-0 truncate">{single ? "Going" : fileCount(up)} to Spectra</span>
+        </span>
+      ) : null}
+      {stuck ? (
+        <span className="device-folder-lane" data-way="stuck" title={names([...backlog.conflict, ...backlog.problem])}>
+          <Icon name="problem" size={12} />
+          <span className="min-w-0 truncate">
+            {backlog.conflict.length ? `${single ? "Changed" : fileCount(backlog.conflict.length) + " changed"} on both sides` : `${single ? "Couldn't" : fileCount(backlog.problem.length) + " couldn't"} sync`}
+          </span>
+        </span>
+      ) : null}
+    </span>
   );
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import { ImageViewerHost } from "@/features/spectra/files/image-viewer-host";
 import { Toaster } from "sonner";
 import { CookieConsentManager } from "@/components/cookie-consent-manager";
 import { QuietReturnFocus } from "@/components/quiet-return-focus";
@@ -54,6 +55,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
         <LocalComputeCacheController />
         <CookieConsentManager />
         <QuietReturnFocus />
+        <ImageViewerHost />
         <Toaster
           theme="system"
           position="bottom-right"

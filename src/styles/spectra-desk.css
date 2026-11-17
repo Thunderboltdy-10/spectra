@@ -375,6 +375,18 @@
   height: 112px;
 }
 
+/* A drawn slide fills the face edge to edge; the canvas keeps its own ratio. */
+.work-preview-slide.work-preview-slide-drawn {
+  display: block;
+  overflow: hidden;
+  padding: 0;
+  pointer-events: none;
+}
+
+.work-preview-slide.work-preview-slide-drawn[data-ratio="4:3"] {
+  aspect-ratio: 4 / 3;
+}
+
 .work-preview-slide {
   display: grid;
   width: min(82%, 200px);

@@ -22,6 +22,7 @@ import {
 } from "./authorityShared";
 import { releaseSnapshotObject } from "./artifactSnapshots";
 import { lastRunEventSequence, RUN_TAB_PROJECTION_VERSION } from "./spectraRunProjection";
+import { isActiveRunStatus } from "./spectraRunLifecycle";
 
 const vOrigin = v.union(
   v.literal("chat"),
@@ -1264,6 +1265,52 @@ export const agentHistory = query({
           ...(message.role === "assistant" && Array.isArray(message.metadata?.carriedReads) ? { carriedReads: message.metadata.carriedReads } : {}),
         })),
     };
+  },
+});
+
+/** Messages a rewind may take back in one go; a longer tail is refused rather than half removed. */
+const REWIND_MESSAGE_LIMIT = 400;
+
+/**
+ * Takes a thread back to just before one of its own questions, so it can be
+ * asked again (edited) and answered from there. That question and everything
+ * after it leave the thread; the works earlier replies made stay where they
+ * are. Refused while a reply is still being written.
+ */
+export const rewindThread = mutation({
+  args: { threadId: v.id("spectraThreads"), messageId: v.id("spectraMessages") },
+  handler: async (ctx, args) => {
+    const { thread } = await requireOwnedThread(ctx, args.threadId);
+    const message = await ctx.db.get(args.messageId);
+    if (!message || message.threadId !== thread._id || message.role !== "user")
+      throw new Error("That message is not one of your questions in this thread.");
+    if (thread.lastRunId) {
+      const last = await ctx.db.get(thread.lastRunId);
+      if (last && isActiveRunStatus(last.status))
+        throw new Error("Spectra is still answering here. Stop it first, then edit the message.");
+    }
+    const tail = await ctx.db
+      .query("spectraMessages")
+      .withIndex("by_thread_created", (q) => q.eq("threadId", thread._id).gte("createdAt", message.createdAt))
+      .take(REWIND_MESSAGE_LIMIT + 1);
+    if (tail.length > REWIND_MESSAGE_LIMIT) throw new Error("Too much follows that message to take back at once.");
+    for (const row of tail) await ctx.db.delete(row._id);
+    const kept = await ctx.db
+      .query("spectraMessages")
+      .withIndex("by_thread_created", (q) => q.eq("threadId", thread._id))
+      .order("desc")
+      .first();
+    // Notes that already folded in what was taken back would bring it back: start them again.
+    const notesReachBack = (thread.summaryThrough ?? 0) >= message.createdAt;
+    await ctx.db.patch(thread._id, {
+      messageCount: Math.max(0, (thread.messageCount ?? tail.length) - tail.length),
+      previewText: kept ? previewContent(kept.content) : undefined,
+      lastMessageAt: kept?.createdAt,
+      lastRunId: kept?.runId,
+      ...(notesReachBack ? { summaryLong: undefined, summaryThrough: undefined } : {}),
+      updatedAt: Date.now(),
+    });
+    return { removed: tail.length, prompt: message.content };
   },
 });
 

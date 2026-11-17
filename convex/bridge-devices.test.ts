@@ -120,6 +120,17 @@ describe("Bridge device health", () => {
     ).rejects.toThrow("BRIDGE_CREDENTIAL_INVALID");
   });
 
+  it("forgets a computer disconnected from its own Bridge, once", async () => {
+    const t = setupTest();
+    const { deviceId } = await seedDevice(t);
+    expect(await t.mutation(api.bridge.disconnectSelf, { credential })).toEqual({ disconnected: true });
+    expect((await t.run((ctx) => ctx.db.get(deviceId)))?.state).toBe("revoked");
+    expect((await t.withIdentity(identity).query(api.bridge.overview, {}))?.devices).toEqual([]);
+    // Already gone, or a key Spectra never knew: nothing to do, and nothing to leak.
+    expect(await t.mutation(api.bridge.disconnectSelf, { credential })).toEqual({ disconnected: false });
+    expect(await t.mutation(api.bridge.disconnectSelf, { credential: "unknown-bridge-devices-credential-0000001" })).toEqual({ disconnected: false });
+  });
+
   it("refuses malformed problem codes", async () => {
     const t = setupTest();
     await seedDevice(t);

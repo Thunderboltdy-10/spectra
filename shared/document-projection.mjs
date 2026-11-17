@@ -270,6 +270,9 @@ export function docxRichInlineToJson(content, binding, nativeReadOnly = false) {
           mediaType: item.mediaType,
           alt: item.altText,
           ...(item.widthEmu ? { widthEmu: item.widthEmu } : {}),
+          ...(authored && item.widthEmu
+            ? { widthPercent: Math.round(Math.max(1, Math.min(100, (item.widthEmu / TEXT_COLUMN_EMU) * 100))) }
+            : {}),
           ...(item.heightEmu ? { heightEmu: item.heightEmu } : {}),
           placement: item.placement,
           ...(item.crop ? { crop: item.crop } : {}),
@@ -318,6 +321,28 @@ function cellJsonFromRichContent(content, binding, nativeReadOnly) {
 }
 
 const ALIGNED = new Set(["center", "right", "justify"]);
+
+/**
+ * The text column an image width percentage is measured against: an A4 page
+ * less Word's normal one-inch margins. Measuring against the whole page made
+ * a "100%" picture spill past the right margin in Word.
+ */
+export const TEXT_COLUMN_EMU = Math.round(6.27 * 914400);
+
+/** The paragraph alignment a lone picture shows in the editor. */
+export function imageParagraphAlignment(node) {
+  if (node?.type !== "paragraph") return undefined;
+  const children = Array.isArray(node.content) ? node.content : [];
+  const images = children.filter((child) => child?.type === "image" || child?.type === "nativeDocxImage");
+  if (!images.length) return undefined;
+  if (children.some((child) => child?.type !== "image" && child?.type !== "nativeDocxImage" &&
+    !(child?.type === "text" && !String(child.text ?? "").trim()) && child?.type !== "hardBreak"))
+    return undefined;
+  const wraps = new Set(images.map((image) => image.attrs?.wrap ?? "inline"));
+  if (wraps.size !== 1) return undefined;
+  const [wrap] = wraps;
+  return wrap === "break" ? "center" : wrap === "right" ? "right" : undefined;
+}
 
 /** A paragraph format as the editor's node attributes. Defaults write nothing. */
 export function paragraphAttrsFromFormat(value) {
@@ -728,7 +753,7 @@ function imageFromJsonNode(node) {
     altText,
     ...(Number.isSafeInteger(widthEmu) && widthEmu > 0 ? { widthEmu } : {}),
     ...(Number.isFinite(widthPercent) && widthPercent > 0 && !(Number.isSafeInteger(widthEmu) && widthEmu > 0)
-      ? { widthEmu: Math.round((widthPercent / 100) * 8.27 * 914400) }
+      ? { widthEmu: Math.round((Math.min(100, widthPercent) / 100) * TEXT_COLUMN_EMU) }
       : {}),
     ...(Number.isSafeInteger(heightEmu) && heightEmu > 0 ? { heightEmu } : {}),
     placement: attrs.placement === "anchored" ? "anchored" : "inline",
@@ -872,6 +897,15 @@ function tableRichRows(node) {
   );
 }
 
+/** Column widths the writer dragged, in editor pixels; unset columns are null. */
+function tableColumnWidths(node) {
+  const widths = (node.content?.[0]?.content ?? []).map((cell) => {
+    const width = Number(Array.isArray(cell?.attrs?.colwidth) ? cell.attrs.colwidth[0] : NaN);
+    return Number.isFinite(width) && width > 0 ? Math.round(width) : null;
+  });
+  return widths.some((width) => width !== null) ? { columnWidths: widths } : {};
+}
+
 function unsupportedTableStructure(node) {
   const containsTable = (child) => child?.type === "table" || (child?.content ?? []).some(containsTable);
   const rows = node.content ?? [];
@@ -912,6 +946,7 @@ export function documentBlocksFromJson(json) {
           : {}),
         attrs: {
           headerRow: Boolean(node.content?.[0]?.content?.length && node.content[0].content.every((cell) => cell.type === "tableHeader")),
+          ...tableColumnWidths(node),
           ...(node.attrs?.nativeReadOnly === true ? { nativeReadOnly: true } : {}),
           ...(unsupportedTableStructure(node) ? { unsupportedTableStructure: true } : {}),
         },
@@ -1019,10 +1054,16 @@ export function documentBlocksFromJson(json) {
   });
 }
 
+/** The Word paragraph format a node carries, or nothing for a plain one. */
+export function paragraphFormatForNode(node) {
+  return carriedParagraphFormat(node).paragraphFormat;
+}
+
 /** Only a node that has formatting says so; a plain paragraph's block stays plain. */
 function carriedParagraphFormat(node) {
   const attrs = record(node?.attrs);
-  const format = paragraphFormatFromAttrs(attrs);
+  const imageAlignment = ALIGNED.has(attrs.textAlign) ? undefined : imageParagraphAlignment(node);
+  const format = paragraphFormatFromAttrs(imageAlignment ? { ...attrs, textAlign: imageAlignment } : attrs);
   return Object.keys(paragraphAttrsFromFormat(format)).length
     ? { paragraphFormat: format }
     : {};

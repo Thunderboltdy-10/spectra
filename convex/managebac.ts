@@ -47,6 +47,8 @@ import {
   type SchoolSyncKind,
 } from "../shared/school-sync";
 
+/** A task due within the last day is still current enough to bring in. */
+const PAST_TASK_FIRST_SEEN_GRACE_MS = 24 * 60 * 60_000;
 const EMPTY_COUNTS = {
   fetched: 0,
   created: 0,
@@ -4478,6 +4480,16 @@ export const commitNormalizedPage = mutation({
       // Only a stored row can be taken for one that vanished, so only those
       // are recorded as seen; a row this pass writes is newer than the pass.
       if (existing) seenKeys.push(seen);
+      // A task already past when Spectra first sees it stays in ManageBac: old
+      // tasks come in only when the student brings a range back on purpose.
+      // One Spectra already kept while it was current carries on as before.
+      if (taskRoute && !restoring && !existing) {
+        const due = taskDueAt(input.normalized);
+        if (due !== undefined && due < now - PAST_TASK_FIRST_SEEN_GRACE_MS) {
+          counts.skipped += 1;
+          continue;
+        }
+      }
       // The student's modes decide what a personal record may become, on
       // every page: Off never stores, and a job stores only its own kind.
       const syncKind = mappedAccountId ? await kindOf(mappedAccountId, input) : undefined;

@@ -43,7 +43,9 @@ const FACE_BLOCKS = 12;
 const FACE_CACHE = "spectra-work-faces-v1";
 const FACE_CACHE_ENTRIES = 500;
 // Word faces used to cache serialized AST identity instead of their words.
-const faceUrl = (work: PreviewSource) => `/__work-face/${encodeURIComponent(work._id)}${fileFace(work) === "document" ? "?format=2" : ""}`;
+// Deck faces used to keep only their titles; they now keep the first slide.
+const faceUrl = (work: PreviewSource) =>
+  `/__work-face/${encodeURIComponent(work._id)}${fileFace(work) === "document" ? "?format=2" : work.blueprintKey === "presentation" ? "?slides=2" : ""}`;
 
 async function keptFace(work: PreviewSource): Promise<WorkPreview | null> {
   if (typeof caches === "undefined") return null;

@@ -9,6 +9,10 @@ import { validateArtifactContent } from "@/features/spectra/artifacts/registry";
 import { MAX_IMPORT_REQUEST_BYTES } from "../../../../../shared/intake-limits";
 import { encodeArtifactContentForStorage } from "../../../../../shared/sheet-cells";
 import { normalizeMediaType } from "../../../../../shared/intake-integrity";
+import { ensureImportedNativePayload } from "@/features/spectra/lenses/native-payload-server";
+import type { Id } from "../../../../../convex/_generated/dataModel";
+
+const officeTypeKeys = new Set(["presentation", "sheets", "document"]);
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -265,10 +269,16 @@ export async function POST(request: NextRequest) {
       });
       if (status === "imported") {
         try {
+          const importedArtifactId = await convexQuery<{ jobId: string }, { artifactId: string }>("artifactImports:getForOwner", { jobId: text(body.jobId, "job_id") }).then((job) => job.artifactId);
           const committed = await convexMutation<{ artifactId: string; importJobId: string }, { versionId: string; reused?: boolean }>("changeGroups:commitImport", {
-            artifactId: await convexQuery<{ jobId: string }, { artifactId: string }>("artifactImports:getForOwner", { jobId: text(body.jobId, "job_id") }).then((job) => job.artifactId),
+            artifactId: importedArtifactId,
             importJobId: text(body.jobId, "job_id"),
           });
+          // Pictures, charts and media of an opened Office file are read from
+          // its original; adopt it as the cloud copy now rather than at the
+          // first save, or a deck of pictures shows nothing until then.
+          if (body.importedContent !== undefined && officeTypeKeys.has(typeKey))
+            await ensureImportedNativePayload(importedArtifactId as Id<"spectraArtifacts">).catch(() => undefined);
           return NextResponse.json({ ok: true, ...result, status: "imported", ...committed });
         } catch (error) {
           if (isDurableContentRef(sanitizedContent)) throw error;

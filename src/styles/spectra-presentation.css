@@ -212,6 +212,28 @@
   pointer-events: none;
 }
 
+/* A SmartArt drawn from the layout PowerPoint saved with it. */
+.presentation-smartart {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.presentation-smartart-shape {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  padding: 0.6cqw 1cqw;
+  line-height: 1.1;
+  white-space: pre-line;
+}
+
+.presentation-smartart-shape > span {
+  width: 100%;
+}
+
 /* An OLE object or SmartArt the file keeps and a browser can't draw. */
 .presentation-native-object {
   display: flex;

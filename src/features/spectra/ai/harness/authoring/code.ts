@@ -2,6 +2,7 @@ import {
   inferRuntime,
   languageForPath,
   normalizeCodeContent,
+  unescapeFlattenedSource,
   normalizeCodePath,
   preferredEntry,
   reconcileLineIds,
@@ -56,7 +57,7 @@ function findFile(files: CodeFile[], ref: string | undefined, label: string, fie
 }
 
 function withSource(file: CodeFile, source: string): CodeFile {
-  const next = source.replaceAll("\r\n", "\n");
+  const next = unescapeFlattenedSource(source.replaceAll("\r\n", "\n"));
   return { ...file, source: next, lineIds: reconcileLineIds(file.source, file.lineIds, next) };
 }
 
@@ -83,7 +84,7 @@ export function applyCodeEdits(content: unknown, ops: CodeEditOp[], ids: IdFacto
         else {
           let id = ids("file");
           while (files.some((entry) => entry.id === id)) id = ids("file");
-          const source = op.source.replaceAll("\r\n", "\n");
+          const source = unescapeFlattenedSource(op.source.replaceAll("\r\n", "\n"));
           files.push({
             id,
             path: target,

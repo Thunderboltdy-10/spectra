@@ -66,7 +66,7 @@ export default function RootLayout({
         <script
           dangerouslySetInnerHTML={{
             __html:
-              'try{if(localStorage.getItem("spectra:sidebar-collapsed")==="true")document.documentElement.dataset.spectraSidebarCollapsed="true"}catch{}',
+              'try{var d=document.documentElement;if(localStorage.getItem("spectra:sidebar-collapsed")==="true")d.dataset.spectraSidebarCollapsed="true";var w=Number(localStorage.getItem("spectra:sidebar-width"));if(w>=200&&w<=400)d.style.setProperty("--spectra-rail-expanded-width",w+"px");var p=location.pathname;if(p==="/"||["landing","sign-in","sign-up","join","request-access","legal","public","school-data"].indexOf(p.split("/")[1])>=0){d.dataset.spectraPublic="";d.style.colorScheme="light"}}catch{}',
           }}
         />
       </head>

@@ -37,7 +37,11 @@ const FALLBACK_ATTEMPTS = 2;
 const STREAM_IDLE_TIMEOUT_MS = 90_000;
 
 export type ModelRequest = {
-  runtime?: RuntimeTarget & { provider?: unknown };
+  runtime?: RuntimeTarget & {
+    provider?: unknown;
+    /** The run's order after its own runtime: a side call moves on the same way the run does. */
+    then?: readonly string[];
+  };
   messages: HarnessMessage[];
   tools?: ProviderToolSpec[];
   toolChoice?: "auto" | "none";
@@ -229,6 +233,18 @@ export async function callSpectraModel(request: ModelRequest): Promise<ModelTurn
             title: request.title,
             purpose: request.purpose,
             small: request.small,
+          }).catch((error: unknown) => {
+            // The run itself moves to Spectra's model when the subscription can't be
+            // reached; its side calls (the thread's name, notes) follow, or they
+            // would fail silently and leave every thread unnamed.
+            if (
+              error instanceof ProviderUnavailableError &&
+              !request.signal.aborted &&
+              !process.env.SPECTRA_AI_RUNTIME &&
+              request.runtime?.then?.includes("spectra")
+            )
+              return callOpenRouter(request);
+            throw error;
           })
         : callOpenRouter(request),
   );

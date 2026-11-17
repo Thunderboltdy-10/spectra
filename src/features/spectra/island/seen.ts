@@ -1,11 +1,13 @@
 "use client";
 
 import { useCallback, useSyncExternalStore } from "react";
+import { sendSeenRuns } from "./seen-sync";
 
 /*
  * Which finished runs the user has seen: a seen thread leaves the in-play side
- * of the island and stops marking the prism. Kept per browser; the first
- * visit treats everything already finished as seen, so nothing floods in.
+ * of the island and stops marking the prism. Kept per browser and on the
+ * server (a run seen on another device arrives as `seenRunId` on its tab);
+ * the first visit treats everything already finished as seen.
  */
 
 const KEY = "spectra.island.seen.v1";
@@ -36,12 +38,14 @@ function save() {
   }
 }
 
-export function markRunsSeen(runIds: readonly string[]) {
+/** Marks runs seen here; unless the marks came from the server, it is told too, for the user's other devices. */
+export function markRunsSeen(runIds: readonly string[], options: { fromServer?: boolean } = {}) {
   const set = load();
   const fresh = runIds.filter((id) => !set.has(id));
   if (!fresh.length) return;
   seen = new Set([...set, ...fresh]);
   save();
+  if (!options.fromServer) sendSeenRuns(fresh);
   listeners.forEach((listener) => listener());
 }
 
@@ -50,7 +54,8 @@ export function settleFirstVisit(finishedRunIds: readonly string[]) {
   load();
   if (!firstVisit) return false;
   firstVisit = false;
-  markRunsSeen(finishedRunIds);
+  // Settling a first visit is this browser catching up, not the user reading.
+  markRunsSeen(finishedRunIds, { fromServer: true });
   if (!finishedRunIds.length) save();
   return true;
 }

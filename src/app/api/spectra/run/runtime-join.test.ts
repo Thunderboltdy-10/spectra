@@ -14,10 +14,16 @@ let agentRuntime: unknown = { agentId: "agent-1" };
 
 vi.mock("@/lib/auth-server", () => ({ requireActor: async () => ({ clerkId: "user_1" }) }));
 
-vi.mock("@/features/spectra/compute/files/attachment-preprocessor", () => ({
-  prepareAttachments: async (input: Array<{ name?: string }> | undefined) =>
-    (input ?? []).map((row) => ({ name: row.name ?? "file", mimeType: "text/plain", size: 5, handling: "text", text: "notes" })),
-}));
+vi.mock("@/features/spectra/compute/files/attachment-preprocessor", () => {
+  const prepareAttachments = async (input: Array<{ name?: string }> | undefined) =>
+    (input ?? []).map((row) => ({ name: row.name ?? "file", mimeType: "text/plain", size: 5, handling: "text", text: "notes" }));
+  return {
+    prepareAttachments,
+    prepareAttachmentsKeepingFailures: async (input: Array<{ name?: string }> | undefined) => ({
+      prepared: await prepareAttachments(input), kept: input ?? [], failed: [],
+    }),
+  };
+});
 
 vi.mock("./harness/attachments", () => ({
   persistRunAttachments: async (runId: string, executionId: string, input: unknown[] | undefined, prepared: unknown[], options: unknown) => {

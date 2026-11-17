@@ -434,6 +434,7 @@ export function EmbedFace({ embed }: { embed: SpectraArtifactEmbed }) {
           compact={compact}
           resources={embed.runtimeResources}
           allowInteraction={allowInteraction}
+          chromeless
         />
       ) : (
         <LiveCodeRuntime
@@ -443,6 +444,7 @@ export function EmbedFace({ embed }: { embed: SpectraArtifactEmbed }) {
           compact={compact}
           allowInteraction={allowInteraction}
           resources={embed.runtimeResources}
+          chromeless
         />
       );
       // Controls that look live but do nothing here say so, and point to where they work.

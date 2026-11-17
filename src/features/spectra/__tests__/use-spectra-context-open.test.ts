@@ -6,6 +6,7 @@ import { useSpectraContextStore } from "@/stores/spectra-context-store";
 import type { SpectraArtifact } from "../data/api";
 
 vi.mock("../data/api", () => ({
+  keptSpectraThreads: () => null,
   getSpectraThreads: vi.fn(async () => ({ threads: [{ _id: "thread-1", title: "Biology chat" }] })),
   getSpectraThread: vi.fn(async () => ({ thread: { _id: "thread-1", title: "Biology chat" } })),
   postSpectra: vi.fn(async () => ({})),

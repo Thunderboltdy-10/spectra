@@ -1015,6 +1015,19 @@ pub async fn report_health(
     .await
 }
 
+/// This computer is leaving: Spectra forgets it, as if it were removed on the
+/// Devices page. A Spectra too old to know the call refuses it; that is fine,
+/// as the key is forgotten here either way.
+pub async fn disconnect_self(deployment_url: &str, credential: &str) -> anyhow::Result<()> {
+    let _: serde_json::Value = mutation(
+        deployment_url,
+        "bridge:disconnectSelf",
+        serde_json::json!({ "credential": credential }),
+    )
+    .await?;
+    Ok(())
+}
+
 /// Explicit legacy migration only; normal editing never needs this cloud read.
 pub async fn owned_stored_works(
     deployment_url: &str,

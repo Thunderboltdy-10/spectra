@@ -180,9 +180,9 @@ export function ArtifactEmbed({
   const [nearViewport, setNearViewport] = useState(
     () => typeof window !== "undefined" && !("IntersectionObserver" in window),
   );
-  const [pageVisible, setPageVisible] = useState(
-    () => typeof document === "undefined" || document.visibilityState !== "hidden",
-  );
+  // Once a code runtime has come on screen it stays mounted (see
+  // shouldMountArtifactEmbedRuntime): no reload on scroll or alt-tab.
+  const [runtimeMounted, setRuntimeMounted] = useState(false);
   /* A drag on the native resize grip is the only thing that may persist a size.
      Reading the box on any pointer-up would save a size the reader never chose
      — a plain click, a text selection, or a pane resize would silently pin the
@@ -191,9 +191,9 @@ export function ArtifactEmbed({
   const dragOriginRef = useRef<{ width: number; height: number } | null>(null);
   const motionLevel = useSpectraMotion();
 
-  // A running visualisation pauses off screen and in a hidden tab.
+  // A visualisation waits until it nears the viewport for its first run.
   useEffect(() => {
-    if (!isCode) return;
+    if (!isCode || runtimeMounted) return;
     const element = rootRef.current;
     if (!element || typeof IntersectionObserver === "undefined") {
       setNearViewport(true);
@@ -205,15 +205,11 @@ export function ArtifactEmbed({
     );
     observer.observe(element);
     return () => observer.disconnect();
-  }, [embed.embedId, isCode]);
+  }, [embed.embedId, isCode, runtimeMounted]);
 
   useEffect(() => {
-    if (!isCode) return;
-    const update = () => setPageVisible(document.visibilityState !== "hidden");
-    update();
-    document.addEventListener("visibilitychange", update);
-    return () => document.removeEventListener("visibilitychange", update);
-  }, [isCode]);
+    if (isCode && nearViewport && !runtimeMounted) setRuntimeMounted(true);
+  }, [isCode, nearViewport, runtimeMounted]);
 
   const status = statusOf(embed);
   if (status) {
@@ -449,12 +445,10 @@ export function ArtifactEmbed({
                   Its contents stay on that computer, so they don&apos;t show here. Open it there to read it.
                 </span>
               </p>
-            ) : shouldMountArtifactEmbedRuntime({ sourceType: source.blueprintKey, nearViewport, pageVisible }) ? (
+            ) : shouldMountArtifactEmbedRuntime({ sourceType: source.blueprintKey, nearViewport, mounted: runtimeMounted }) ? (
               <EmbedFace embed={embed} />
             ) : (
-              <p className="work-embed-empty" aria-label="Published runtime paused">
-                Paused until it is back on screen.
-              </p>
+              <div className="work-embed-waiting" aria-hidden />
             )}
           </motion.div>
         )}

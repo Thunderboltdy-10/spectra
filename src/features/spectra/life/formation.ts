@@ -1,6 +1,7 @@
 import type { FieldLattice } from "./field-sim";
 import { resample, strokeColourAt, type Figure } from "./figure";
 import type { Rgb } from "./spectrum";
+import type { Rect } from "./engine";
 
 /*
  * A formation: a figure made of dots.
@@ -85,6 +86,8 @@ export class Formation {
   hold = false;
   /** A held formation breathes light along its strokes (loading). */
   shimmer = false;
+  /** Drawn only inside this rect: the visible part of the element it stands for. */
+  clip: Rect | null = null;
   age = 0;
   formedAt = -1;
   private exit: Exit | null = null;
@@ -161,6 +164,29 @@ export class Formation {
       this.seed[i] = Math.random() * 1000;
       this.state[i] = Bead.Moving;
     }
+  }
+
+  /** Moves the whole figure with its element (a scroll, a resize): every dot, seated or still flying, and its targets. */
+  shift(dx: number, dy: number) {
+    for (let i = 0; i < this.n; i += 1) {
+      this.x[i] += dx;
+      this.y[i] += dy;
+      this.tx[i] += dx;
+      this.ty[i] += dy;
+    }
+    if (this.home && this.homeY)
+      for (let i = 0; i < this.n; i += 1) {
+        this.home[i] += dx;
+        this.homeY[i] += dy;
+      }
+    const move = (points: number[]) => {
+      for (let i = 0; i < points.length; i += 2) {
+        points[i] += dx;
+        points[i + 1] += dy;
+      }
+    };
+    if (this.fill) move(this.fill.points);
+    for (const stroke of this.figure.strokes) move(stroke.points);
   }
 
   /** Shows the figure already whole: something on screen that is about to change. */

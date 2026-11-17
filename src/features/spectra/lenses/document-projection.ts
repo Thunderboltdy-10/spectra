@@ -670,6 +670,9 @@ export function docxOperationsBetween(
           rows: block.rows ?? rowsFor(block),
           ...(block.richRows ? { richRows: block.richRows } : {}),
           ...(block.attrs?.headerRow !== undefined ? { headerRow: block.attrs.headerRow } : {}),
+          ...(Array.isArray(block.attrs?.columnWidths) && block.attrs.columnWidths.length === (block.rows ?? rowsFor(block))[0]?.length
+            ? { columnWidths: block.attrs.columnWidths }
+            : {}),
         }));
         return;
       }
@@ -951,6 +954,39 @@ function untouchedAfterEditorTrip(base: DocxProjection) {
   }
 }
 
+/**
+ * Quotes, code blocks and callouts have no block kind in Word's projection.
+ * Written as ordinary paragraphs that look like them (an indented quote with a
+ * rule, monospace code on a tint, a boxed callout) they reach Word instead of
+ * refusing the whole save.
+ */
+function wordRepresentableBlocks(value: unknown) {
+  if (!value || typeof value !== "object" || !Array.isArray((value as { blocks?: unknown }).blocks)) return value;
+  const format = (extra: Record<string, unknown>) => ({ ...paragraphFormatFromAttrs({}), ...extra });
+  const blocks = ((value as { blocks: unknown[] }).blocks).map((entry) => {
+    const block = entry as { id?: unknown; type?: unknown; text?: unknown; inlineContent?: unknown };
+    if (block?.type !== "quote" && block?.type !== "code" && block?.type !== "callout") return entry;
+    const text = typeof block.text === "string" ? block.text : "";
+    const inlineContent = block.type === "code"
+      ? [{ kind: "text", text, format: { fontFamily: "Consolas" } }]
+      : Array.isArray(block.inlineContent) ? block.inlineContent : undefined;
+    return {
+      id: block.id,
+      type: "paragraph",
+      text,
+      ...(inlineContent ? { inlineContent } : {}),
+      attrs: {
+        paragraphFormat: block.type === "quote"
+          ? format({ indentLevel: 1, border: "left" })
+          : block.type === "code"
+            ? format({ shading: "F2F2F2" })
+            : format({ border: "all", shading: "EEF3FB" }),
+      },
+    };
+  });
+  return { ...(value as Record<string, unknown>), blocks };
+}
+
 export function docxProjectionFromContent(
   value: unknown,
   base: DocxProjection,
@@ -975,7 +1011,7 @@ export function docxProjectionFromContent(
           ),
         }
       : value;
-  const parsedContent = documentContentSchema.parse(withUntouched);
+  const parsedContent = documentContentSchema.parse(wordRepresentableBlocks(withUntouched));
   const parsed = { ...parsedContent, blocks: expandNewDocxListBlocks(parsedContent.blocks,
     parsedContent.tiptap, new Set(base.blocks.map((block) => block.id))) };
   const mergeBlock = (incoming: DocxProjection["blocks"][number]) => {

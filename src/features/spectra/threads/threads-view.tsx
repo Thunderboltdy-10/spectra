@@ -6,7 +6,7 @@ import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { SearchField } from "@/components/ui/search-field";
 import { formatRelativeTime } from "../components/spectra-view-model";
-import { getSpectraThreads, type SpectraThread } from "../data/api";
+import { getSpectraThreads, keptSpectraThreads, type SpectraThread } from "../data/api";
 import { spectraBus } from "../events";
 import { isActiveRunStatus, useRunTabs } from "../island/run-tabs";
 import { useLifeArrival, useLifeDeparture } from "../life/use-life";
@@ -85,6 +85,12 @@ export const ThreadsBrowser = forwardRef<
       .catch(() => setFailed(true));
   }, []);
   useEffect(() => {
+    // The list as last read shows at once; the fresh page replaces it.
+    const kept = keptSpectraThreads();
+    if (kept) {
+      setThreads((current) => (current.length ? current : kept.threads));
+      setLoaded(true);
+    }
     load();
     return spectraBus.on("threads.changed", load);
   }, [load]);

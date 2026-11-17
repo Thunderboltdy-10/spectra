@@ -59,7 +59,7 @@ export const AUTHORING_FORMATS: Record<AuthoredType, { create: string; edit: str
   },
   code: {
     create:
-      '{"files": [{"path": "index.html", "source": "..."}], "runtime"?: "browser"|"react"|"python"|"none", "entry"?: "index.html", "title"?, "description"?}',
+      '{"files": [{"path": "index.html", "source": "..."}], "runtime"?: "browser"|"react"|"python"|"none", "entry"?: "index.html", "title"?, "description"?}. It sits straight on the thread or page: leave the page background transparent (no body/page fill or outer card) and use the theme colours var(--spectra-ink), var(--spectra-muted), var(--spectra-line), var(--spectra-violet), var(--spectra-cyan), var(--spectra-mint), var(--spectra-orange) so it reads in light and dark mode.',
     edit: "replace {file, find, replace, all?} or {file, from, to, replace}: from and to quote only the first and last lines of a passage, and all of it is replaced | write_file {path, source} | delete_file {path} | rename_file {path, to} | set_entry {path} | set_accessibility {title, description, reducedMotion?} (required metadata before publishing a visualisation; HTML labels alone do not set it)",
     read: "file, and from/to line numbers",
   },

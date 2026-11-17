@@ -96,5 +96,14 @@ export function normalizePptxProjectionForReadback(requested: PptxProjection, be
 /** Shared native readback content; transition is a primary authored field.
  * Object keys are ordered so the digest compares meaning, not field order. */
 export function pptxSemanticContent(projection: Pick<PptxProjection, "slides"> & Partial<Pick<PptxProjection, "nativeBinding">>) {
-  return ordered(projection.slides.map(({ id, title, text, objects, hidden, speakerNotes, transition }: PptxSlideProjection) => ({ id, title, text, objects: projection.nativeBinding ? objects.map((object, index) => pptxImageReadbackObject(object, index, projection.nativeBinding!)) : objects, hidden, speakerNotes, ...(transition ? { transition } : {}) })));
+  return ordered(projection.slides.map(({ id, title, text, objects, hidden, speakerNotes, transition }: PptxSlideProjection) => ({ id, title, text, objects: projection.nativeBinding ? objects.map((object, index) => pptxImageReadbackObject(onFileGrid(object, projection.nativeBinding!.canvasWidthEmu ?? 12192000), index, projection.nativeBinding!)) : objects, hidden, speakerNotes, ...(transition ? { transition } : {}) })));
+}
+
+/** The file stores geometry in whole EMUs and rotation in 1/60000 degrees, so
+ * a requested position reads back a hair away from what was asked (431.98 →
+ * 431.97999). Both sides of the comparison snap to that grid. */
+function onFileGrid(object: PresentationObject, canvasWidthEmu: number): PresentationObject {
+  const snap = (value: number) => Math.round((value * canvasWidthEmu) / 1000) * 1000 / canvasWidthEmu;
+  const geometry = { x: snap(object.x), y: snap(object.y), width: snap(object.width), height: snap(object.height) };
+  return { ...object, ...geometry, ...(typeof object.rotation === "number" ? { rotation: Math.round(object.rotation * 60000) / 60000 } : {}) };
 }

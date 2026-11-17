@@ -1,5 +1,33 @@
 import { Image } from "@tiptap/extension-image";
 import { Node, mergeAttributes } from "@tiptap/core";
+import { TEXT_COLUMN_EMU } from "../../../../shared/document-projection.mjs";
+
+export { TEXT_COLUMN_EMU };
+
+/**
+ * The attributes a width change writes. A picture that already carries Word's
+ * size (imported, or a retained native drawing) gets a new Word size too, with
+ * its height scaled by the same factor: changing only the percentage left the
+ * old Word size winning on save, and changing only the width stretched it.
+ */
+export function resizedImageAttrs(
+  attrs: Record<string, unknown>,
+  percent: number,
+  native = false,
+) {
+  const widthEmu = Number(attrs.widthEmu);
+  const heightEmu = Number(attrs.heightEmu);
+  const hasWordSize = Number.isFinite(widthEmu) && widthEmu > 0;
+  if (!hasWordSize && !native) return { widthPercent: percent };
+  const nextWidth = Math.round((Math.min(100, Math.max(1, percent)) / 100) * TEXT_COLUMN_EMU);
+  return {
+    widthPercent: percent,
+    widthEmu: nextWidth,
+    ...(hasWordSize && Number.isFinite(heightEmu) && heightEmu > 0
+      ? { heightEmu: Math.round((heightEmu * nextWidth) / widthEmu) }
+      : {}),
+  };
+}
 
 /**
  * The document image.

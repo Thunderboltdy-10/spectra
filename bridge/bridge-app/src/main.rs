@@ -5859,13 +5859,16 @@ fn main() {
         })
         .build(tauri::generate_context!())
         .expect("Spectra Bridge shell failed")
-        .run(move |_app, event| {
-            if matches!(
-                event,
-                tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. }
-            ) {
+        .run(move |_app, event| match event {
+            // `code: None` means the last window closed. Bridge lives in the
+            // tray and its only windows are the pickers' one-pixel owners
+            // (`PickerOwner`), so closing one must not end the app. An
+            // explicit exit (Quit Bridge's `app.exit(0)`) carries a code.
+            tauri::RunEvent::ExitRequested { code: None, api, .. } => api.prevent_exit(),
+            tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. } => {
                 shutdown_wake.shutdown();
             }
+            _ => {}
         });
 }
 

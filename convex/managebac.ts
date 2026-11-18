@@ -47,6 +47,7 @@ import {
   OLD_TASK_RESTORE_LIMIT, OLD_TASK_RESTORE_MAX_RANGE_MS, PAST_TASK_KEEP_MS, TASK_KEPT_INDEFINITELY, isTaskRecordType, taskDueAt, taskExpiresAt,
   type SchoolSyncKind,
 } from "../shared/school-sync";
+import { headForIdentity, settledAt, settleExternalRecord } from "./externalRecordHeads";
 
 /** A task due within the last day is still current enough to bring in. */
 const PAST_TASK_FIRST_SEEN_GRACE_MS = 24 * 60 * 60_000;
@@ -3682,7 +3683,7 @@ async function ensureSourceRelations(
   integration: Doc<"schoolIntegrations">,
   source: Doc<"externalRecords">,
 ) {
-  if (!source.providerClassId || source.recordType === "class") return;
+  if (!source.providerClassId || source.recordType === "class") return true;
   const providerClassId = source.providerClassId;
   const matches = (item: Doc<"externalRecords">) =>
     item.integrationId === integration._id &&
@@ -3724,7 +3725,8 @@ async function ensureSourceRelations(
     classRecordsByPage.set(ctx, classCandidates);
     target = classCandidates.find(matches);
   }
-  if (!target) return;
+  // The class row may come on a later page: not settled until it does.
+  if (!target) return false;
   const relationType =
     source.recordType === "assessment"
       ? ("assessment_for" as const)
@@ -3744,7 +3746,7 @@ async function ensureSourceRelations(
     (item) =>
       item.targetRecordId === target._id && item.relationType === relationType,
   );
-  if (existing) return;
+  if (existing) return true;
   await ctx.db.insert("externalRecordRelations", {
     integrationId: integration._id,
     schoolId: integration.schoolId,
@@ -3753,6 +3755,7 @@ async function ensureSourceRelations(
     relationType,
     createdAt: Date.now(),
   });
+  return true;
 }
 
 /** Non-planner source projections. Planner content is provider-owned only
@@ -4447,6 +4450,35 @@ export const commitNormalizedPage = mutation({
         counts.skipped += 1;
         continue;
       }
+      // Unchanged and already settled for this student: counted without reading the record.
+      if (!restoring) {
+        const head = await headForIdentity(ctx.db, integration._id, integration.schoolId, canonicalKey);
+        const settled = head ? settledAt(head, syncRun.accountId, input.sourceHash) : undefined;
+        if (head && settled !== undefined && now - settled <= RECORD_SEEN_STAMP_MS &&
+            head.sourceHash === input.sourceHash && !head.tombstone && head.sourceState === "available" &&
+            head.sourceStateReason === undefined && now - (head.sourceStateAt ?? 0) <= RECORD_SEEN_STAMP_MS) {
+          const headKind = mappedAccountId ? await kindOf(mappedAccountId, input) : undefined;
+          const headKeepUntil = expiresAt === undefined ? undefined : Math.max(
+            expiresAt,
+            head.expiresAt !== undefined && head.expiresAt < TASK_KEPT_INDEFINITELY ? head.expiresAt : 0,
+          );
+          const admitted = !mappedAccountId || await admitPersonalRecord(ctx, {
+            preferences: await kindOf.preferences(mappedAccountId),
+            runKind: syncRun.syncKind,
+            trigger: runTrigger,
+            recordType: capability.recordType,
+            syncKind: headKind,
+            providerClassId: input.providerClassId,
+            // Only its presence and kind are read here.
+            existing: { syncKind: head.syncKind } as Doc<"externalRecords">,
+          }) === "store";
+          if (admitted && head.syncKind === headKind && head.expiresAt === headKeepUntil) {
+            seenKeys.push(seen);
+            counts.unchanged += 1;
+            continue;
+          }
+        }
+      }
       const canonicalMatches = await ctx.db
         .query("externalRecords")
         .withIndex("by_source_identity", (q) =>
@@ -4516,6 +4548,7 @@ export const commitNormalizedPage = mutation({
         restoring ? now + PAST_TASK_KEEP_MS : 0,
         existing?.expiresAt !== undefined && existing.expiresAt < TASK_KEPT_INDEFINITELY ? existing.expiresAt : 0,
       );
+      const conflictsBefore = counts.conflicts;
       let source: Doc<"externalRecords">;
       if (existing?.sourceHash === input.sourceHash && !existing.tombstone) {
         counts.unchanged += 1;
@@ -4649,11 +4682,14 @@ export const commitNormalizedPage = mutation({
         source = (await ctx.db.get(id))!;
         counts.created += 1;
       }
-      await ensureSourceRelations(ctx, integration, source);
+      const related = await ensureSourceRelations(ctx, integration, source);
       // An older task brought back is for reading: it puts nothing back on the planner or Calendar.
       if (expired) continue;
       const projection = await projectRecord(ctx, integration, syncRun, source);
       if (projection.projected) counts.projected += projection.created ? 1 : 0;
+      // Fully handled at this hash for this student, with no conflict left open.
+      if (related && !restoring && source.sourceState === "available" && !source.tombstone && counts.conflicts === conflictsBefore)
+        await settleExternalRecord(ctx.db, source, syncRun.accountId, now);
     }
     const capabilityRun = (
       await ctx.db

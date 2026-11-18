@@ -21,6 +21,7 @@ vi.mock("../life/life", () => ({
       return field.on;
     },
     form: field.form,
+    pin: <T,>(formed: T) => formed,
     travel: field.travel,
     unform: field.unform,
     wake: field.wake,

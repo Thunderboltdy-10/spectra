@@ -10,6 +10,13 @@ import { syncRetryAt } from "../shared/sync-retry-policy";
 import { nativeOperationId, type NativeSaveReceipt } from "../shared/native-office-contract";
 import { enqueueStructureRequest } from "./bridgeStructure";
 import { findPrimaryNode } from "./orgTreeShared";
+import { readProjectionBase } from "./replicaProjectionBase";
+
+/** A replica as stored, with its projection base from the sidecar. */
+async function replicaWithBase(ctx: { db: import("./_generated/server").DatabaseReader }, id: import("./_generated/dataModel").Id<"workReplicas">) {
+  const replica = await ctx.db.get(id);
+  return replica ? { ...replica, ...(await readProjectionBase(ctx.db, replica)) } : null;
+}
 
 const modules = import.meta.glob("./**/*.ts");
 const credential = "bridge-batch-test-credential-00000001";
@@ -609,7 +616,7 @@ describe("Bridge write acknowledgement after native observation", () => {
       ...f.firstClaim, outcome: "verified", actualRevision: f.targetHash,
     })).toEqual({ state: "verified" });
     const after = await f.t.run(async ctx => ({
-      local: await ctx.db.get(f.replicaId), request: await ctx.db.get(f.requestId), operation: await ctx.db.get(f.operationId),
+      local: await replicaWithBase(ctx, f.replicaId), request: await ctx.db.get(f.requestId), operation: await ctx.db.get(f.operationId),
     }));
     expect(after.local).toMatchObject({
       revision: f.targetHash, projectionBaseRevision: f.targetHash, projectionBaseContent: f.projection,
@@ -619,7 +626,7 @@ describe("Bridge write acknowledgement after native observation", () => {
     expect(after.request?.nativeReceipt).toMatchObject({ basePayloadHash: f.baseHash, state: "applied", preservedPartNames: ["word/vbaProject.bin"] });
     expect(after.operation?.state).toBe("verified");
     await f.t.mutation(api.bridgeSync.completeWrite, { ...f.firstClaim, outcome: "waiting", errorCode: "office-locked" });
-    expect(await f.t.run(ctx => ctx.db.get(f.replicaId))).toEqual(after.local);
+    expect(await f.t.run(ctx => replicaWithBase(ctx, f.replicaId))).toEqual(after.local);
   });
 
   it("recovers a legacy write without an Office receipt after its upload echo", async () => {

@@ -19,6 +19,13 @@ import { POLICY_PRESETS } from "../shared/sync-policy";
 import { shouldActivateExternalNativeRevision } from "../src/features/spectra/lenses/native-reconciliation";
 import type { QueueMaterializationArgs, CloudMaterializationArgs, queueMaterializationInTransaction,
   commitCloudMaterializationInTransaction } from "./replicaMaterialization";
+import { deleteReplica, patchReplica, readProjectionBase } from "./replicaProjectionBase";
+
+/** A replica as stored, with its projection base from the sidecar. */
+async function replicaWithBase(ctx: { db: import("./_generated/server").DatabaseReader }, id: import("./_generated/dataModel").Id<"workReplicas">) {
+  const replica = await ctx.db.get(id);
+  return replica ? { ...replica, ...(await readProjectionBase(ctx.db, replica)) } : null;
+}
 
 const nativeBridgeKey = "native-materialization-test-key-0000000001";
 beforeEach(() => vi.stubEnv("SPECTRA_COLLAB_BRIDGE_KEY", nativeBridgeKey));
@@ -512,8 +519,8 @@ describe("Bridge materialization receipt replay", () => {
         }));
       }
       const snapshot = () => t.run(async (ctx) => ({
-        work: await ctx.db.get(fixture.workId), local: await ctx.db.get(fixture.localId),
-        cloud: await ctx.db.get(fixture.cloudId),
+        work: await ctx.db.get(fixture.workId), local: await replicaWithBase(ctx, fixture.localId),
+        cloud: await replicaWithBase(ctx, fixture.cloudId),
         request: await ctx.db.get(requireWriteRequestId(a.requestId)),
       }));
       const before = await snapshot();
@@ -868,8 +875,8 @@ describe("replica truth machine", () => {
 
     expect(replay.requestId).toBe(first.requestId);
     const truth = await t.run(async (ctx) => ({
-      cloud: await ctx.db.get(fixture.cloudId),
-      local: await ctx.db.get(fixture.localId),
+      cloud: await replicaWithBase(ctx, fixture.cloudId),
+      local: await replicaWithBase(ctx, fixture.localId),
       requests: await ctx.db.query("bridgeWriteRequests").collect(),
       operations: await ctx.db.query("syncOperations").collect(),
     }));
@@ -1024,8 +1031,8 @@ describe("replica truth machine", () => {
       actualRevision: nextHash,
     });
     const truth = await t.run(async (ctx) => ({
-      cloud: await ctx.db.get(fixture.cloudId),
-      local: await ctx.db.get(fixture.localId),
+      cloud: await replicaWithBase(ctx, fixture.cloudId),
+      local: await replicaWithBase(ctx, fixture.localId),
     }));
     expect(truth.cloud).toMatchObject({
       projectionBaseRevision: nextHash,
@@ -1053,15 +1060,15 @@ describe("replica truth machine", () => {
 
     const first = await t.mutation(api.bridgeSync.commitPayloadUpload, input);
     const afterFirst = await t.run(async (ctx) => ({
-      cloud: await ctx.db.get(fixture.cloudId),
-      local: await ctx.db.get(fixture.localId),
+      cloud: await replicaWithBase(ctx, fixture.cloudId),
+      local: await replicaWithBase(ctx, fixture.localId),
       operations: await ctx.db.query("syncOperations").collect(),
       conflicts: await ctx.db.query("syncConflicts").collect(),
     }));
     const replay = await t.mutation(api.bridgeSync.commitPayloadUpload, input);
     const afterReplay = await t.run(async (ctx) => ({
-      cloud: await ctx.db.get(fixture.cloudId),
-      local: await ctx.db.get(fixture.localId),
+      cloud: await replicaWithBase(ctx, fixture.cloudId),
+      local: await replicaWithBase(ctx, fixture.localId),
       operations: await ctx.db.query("syncOperations").collect(),
       conflicts: await ctx.db.query("syncConflicts").collect(),
     }));
@@ -1128,8 +1135,8 @@ describe("replica truth machine", () => {
     });
 
     const truth = await t.run(async (ctx) => ({
-      cloud: await ctx.db.get(fixture.cloudId),
-      local: await ctx.db.get(fixture.localId),
+      cloud: await replicaWithBase(ctx, fixture.cloudId),
+      local: await replicaWithBase(ctx, fixture.localId),
       operations: await ctx.db.query("syncOperations").collect(),
       conflicts: await ctx.db.query("syncConflicts").collect(),
     }));
@@ -1703,7 +1710,7 @@ describe("replica truth machine", () => {
     const afterRevocation = await t.run(async (ctx) => ({
       request: await ctx.db.get(requestId),
       local: await ctx.db.get(seeded.localId),
-      cloud: await ctx.db.get(fixture.cloudId),
+      cloud: await replicaWithBase(ctx, fixture.cloudId),
     }));
     expect(afterRevocation.request).toMatchObject({
       state: "failed",
@@ -1853,7 +1860,7 @@ describe("replica truth machine", () => {
     const truth = await t.run(async (ctx) => ({
       request: await ctx.db.get(ids.requestId),
       operation: await ctx.db.get(ids.operationId),
-      local: await ctx.db.get(fixture.localId),
+      local: await replicaWithBase(ctx, fixture.localId),
     }));
     expect(truth.request).toMatchObject({
       state: "failed",
@@ -1953,7 +1960,7 @@ describe("replica truth machine", () => {
     expect(completed.state).toBe("verified");
     const truth = await t.run(async (ctx) => ({
       transition: await ctx.db.get(transition.transitionId),
-      cloud: await ctx.db.get(fixture.cloudId),
+      cloud: await replicaWithBase(ctx, fixture.cloudId),
       local: await ctx.db
         .query("workReplicas")
         .withIndex("by_work_kind", (q) =>
@@ -1986,8 +1993,8 @@ describe("replica truth machine", () => {
       toPreset: "device",
     });
     const afterDevice = await t.run(async (ctx) => ({
-      cloud: await ctx.db.get(fixture.cloudId),
-      local: await ctx.db.get(fixture.localId),
+      cloud: await replicaWithBase(ctx, fixture.cloudId),
+      local: await replicaWithBase(ctx, fixture.localId),
       payload: await ctx.db.get(fixture.basePayloadId),
     }));
     expect(afterDevice.cloud).toMatchObject({
@@ -2011,8 +2018,8 @@ describe("replica truth machine", () => {
     expect(transition.state).toBe("verified");
     const truth = await t.run(async (ctx) => ({
       transition: await ctx.db.get(transition.transitionId),
-      cloud: await ctx.db.get(fixture.cloudId),
-      local: await ctx.db.get(fixture.localId),
+      cloud: await replicaWithBase(ctx, fixture.cloudId),
+      local: await replicaWithBase(ctx, fixture.localId),
     }));
     expect(truth.transition).toMatchObject({
       state: "verified",
@@ -2068,8 +2075,8 @@ describe("replica truth machine", () => {
     });
     const truth = await t.run(async (ctx) => ({
       transition: await ctx.db.get(transition.transitionId),
-      cloud: await ctx.db.get(fixture.cloudId),
-      local: await ctx.db.get(fixture.localId),
+      cloud: await replicaWithBase(ctx, fixture.cloudId),
+      local: await replicaWithBase(ctx, fixture.localId),
     }));
     expect(truth.transition).toMatchObject({
       state: "verified",
@@ -2191,8 +2198,8 @@ describe("replica truth machine", () => {
     );
     expect(transition.state).toBe("verified");
     const truth = await t.run(async (ctx) => ({
-      cloud: await ctx.db.get(fixture.cloudId),
-      local: await ctx.db.get(fixture.localId),
+      cloud: await replicaWithBase(ctx, fixture.cloudId),
+      local: await replicaWithBase(ctx, fixture.localId),
     }));
     expect(truth.cloud).toMatchObject({
       state: "unavailable",
@@ -2233,7 +2240,7 @@ describe("replica truth machine", () => {
     const [truth, policy] = await Promise.all([
       t.run(async (ctx) => ({
         transition: await ctx.db.get(transition.transitionId),
-        cloud: await ctx.db.get(fixture.cloudId),
+        cloud: await replicaWithBase(ctx, fixture.cloudId),
       })),
       asUser.query(api.syncPolicy.effective, {
         itemId: String(fixture.workId),
@@ -2309,8 +2316,8 @@ describe("replica truth machine", () => {
     );
     expect(result.state).toBe("complete");
     const truth = await t.run(async (ctx) => ({
-      cloud: await ctx.db.get(fixture.cloudId),
-      local: await ctx.db.get(fixture.localId),
+      cloud: await replicaWithBase(ctx, fixture.cloudId),
+      local: await replicaWithBase(ctx, fixture.localId),
       conflicts: await ctx.db.query("syncConflicts").collect(),
     }));
     expect(truth.cloud).toMatchObject({
@@ -2387,7 +2394,7 @@ describe("replica truth machine", () => {
       const forkId = result.workId as Id<"spectraArtifacts">;
       return {
         fork: await ctx.db.get(forkId),
-        local: await ctx.db.get(fixture.localId),
+        local: await replicaWithBase(ctx, fixture.localId),
         forkCloud: await ctx.db
           .query("workReplicas")
           .withIndex("by_work_kind", (q) =>
@@ -2496,7 +2503,7 @@ describe("replica truth machine", () => {
     const truth = await t.run(async (ctx) => ({
       relevant: await ctx.db.get(conflicts.relevant),
       unrelated: await ctx.db.get(conflicts.unrelated),
-      cloud: await ctx.db.get(fixture.cloudId),
+      cloud: await replicaWithBase(ctx, fixture.cloudId),
     }));
     expect(truth.relevant).toMatchObject({ state: "open" });
     expect(truth.unrelated).toMatchObject({ state: "open" });
@@ -2655,8 +2662,8 @@ describe("replica truth machine", () => {
       payloadRef: String(wordPayloadId),
     });
     const truth = await t.run(async (ctx) => ({
-      cloud: await ctx.db.get(fixture.cloudId),
-      local: await ctx.db.get(fixture.localId),
+      cloud: await replicaWithBase(ctx, fixture.cloudId),
+      local: await replicaWithBase(ctx, fixture.localId),
       conflicts: await ctx.db.query("syncConflicts").collect(),
       requests: await ctx.db.query("bridgeWriteRequests").collect(),
     }));
@@ -2741,7 +2748,7 @@ describe("replica truth machine", () => {
     const truth = await t.run(async (ctx) => ({
       first: await ctx.db.get(requireWriteRequestId(first.requestId)),
       next: await ctx.db.get(requireWriteRequestId(queued.requestId)),
-      local: await ctx.db.get(fixture.localId),
+      local: await replicaWithBase(ctx, fixture.localId),
       work: await ctx.db.get(fixture.workId),
     }));
     expect(truth.first).toMatchObject({
@@ -3141,7 +3148,7 @@ describe("replica truth machine", () => {
     const truth = await t.run(async (ctx) => ({
       work: await ctx.db.get(fixture.workId),
       request: await ctx.db.get(requireWriteRequestId(queued.requestId)),
-      local: await ctx.db.get(fixture.localId),
+      local: await replicaWithBase(ctx, fixture.localId),
     }));
     expect(queued.state).toBe("pending");
     expect(truth.work?.content).toEqual({ blocks: [] });
@@ -3173,8 +3180,8 @@ describe("replica truth machine", () => {
     const truth = await t.run(async (ctx) => ({
       work: await ctx.db.get(fixture.workId),
       request: await ctx.db.get(requireWriteRequestId(queued.requestId)),
-      local: await ctx.db.get(fixture.localId),
-      cloud: await ctx.db.get(fixture.cloudId),
+      local: await replicaWithBase(ctx, fixture.localId),
+      cloud: await replicaWithBase(ctx, fixture.cloudId),
     }));
 
     expect(queued.state).toBe("pending");
@@ -3250,7 +3257,7 @@ describe("replica truth machine", () => {
         (operation) => operation.revisionAfter === nextHash,
       ),
       second: await ctx.db.get(requireWriteRequestId(second.requestId)),
-      local: await ctx.db.get(fixture.localId),
+      local: await replicaWithBase(ctx, fixture.localId),
     }));
 
     expect(second.requestId).not.toBe(first.requestId);
@@ -3313,8 +3320,8 @@ describe("replica truth machine", () => {
     });
     const truth = await t.run(async (ctx) => ({
       work: await ctx.db.get(fixture.workId),
-      cloud: await ctx.db.get(fixture.cloudId),
-      local: await ctx.db.get(fixture.localId),
+      cloud: await replicaWithBase(ctx, fixture.cloudId),
+      local: await replicaWithBase(ctx, fixture.localId),
       request: await ctx.db.get(requireWriteRequestId(queued.requestId)),
       externalOperation: await ctx.db.get(externalOperationId),
     }));
@@ -3416,7 +3423,7 @@ describe("replica truth machine", () => {
     const truth = await t.run(async (ctx) => ({
       work: await ctx.db.get(fixture.workId),
       request: await ctx.db.get(requestId),
-      local: await ctx.db.get(fixture.localId),
+      local: await replicaWithBase(ctx, fixture.localId),
     }));
     expect(truth.work?.content).toEqual(newer);
     expect(truth.request).toMatchObject({
@@ -3508,8 +3515,8 @@ describe("replica truth machine", () => {
 
     const beforeLateAcks = await t.run(async (ctx) => ({
       request: await ctx.db.get(secondRequestId),
-      local: await ctx.db.get(fixture.localId),
-      cloud: await ctx.db.get(fixture.cloudId),
+      local: await replicaWithBase(ctx, fixture.localId),
+      cloud: await replicaWithBase(ctx, fixture.cloudId),
     }));
     for (const outcome of ["waiting", "failed", "verified"] as const) {
       const late = await t.mutation(api.bridgeSync.completeWrite, {
@@ -3525,8 +3532,8 @@ describe("replica truth machine", () => {
     }
     const afterLateAcks = await t.run(async (ctx) => ({
       request: await ctx.db.get(secondRequestId),
-      local: await ctx.db.get(fixture.localId),
-      cloud: await ctx.db.get(fixture.cloudId),
+      local: await replicaWithBase(ctx, fixture.localId),
+      cloud: await replicaWithBase(ctx, fixture.cloudId),
     }));
     expect(afterLateAcks.request).toMatchObject({ state: "verified", targetRevision: thirdHash });
     expect(afterLateAcks.local).toMatchObject({ state: "current", revision: thirdHash, contentHash: thirdHash });
@@ -3564,8 +3571,8 @@ describe("replica truth machine", () => {
     if (!secondClaim.request) throw new Error("expected reclaimed claim");
     const before = await t.run(async (ctx) => ({
       request: await ctx.db.get(requestId),
-      local: await ctx.db.get(fixture.localId),
-      cloud: await ctx.db.get(fixture.cloudId),
+      local: await replicaWithBase(ctx, fixture.localId),
+      cloud: await replicaWithBase(ctx, fixture.cloudId),
     }));
     const stale = await t.mutation(api.bridgeSync.completeWrite, {
       credential: bridgeCredential,
@@ -3578,8 +3585,8 @@ describe("replica truth machine", () => {
     expect(stale).toMatchObject({ state: "pending", ignored: true, reason: "stale-claim" });
     const after = await t.run(async (ctx) => ({
       request: await ctx.db.get(requestId),
-      local: await ctx.db.get(fixture.localId),
-      cloud: await ctx.db.get(fixture.cloudId),
+      local: await replicaWithBase(ctx, fixture.localId),
+      cloud: await replicaWithBase(ctx, fixture.cloudId),
     }));
     expect(after).toEqual(before);
     expect(after.request).toMatchObject({
@@ -3614,5 +3621,33 @@ describe("an open artifact in another tab (F17)", () => {
     expect((await user.query(api.replicas.forWork, { workId: fixture.workId }))?.trashedNodeId).toBe(nodeId);
     await t.run((ctx) => ctx.db.patch(nodeId, { deletedAt: undefined, trashedRootId: undefined, isTrashRoot: undefined }));
     expect((await user.query(api.replicas.forWork, { workId: fixture.workId }))?.trashedNodeId).toBeUndefined();
+  });
+});
+
+describe("projection bases beside the replica", () => {
+  it("reads legacy inline bases, moves them out, merges partial patches and goes with the replica", async () => {
+    const t = setupTest();
+    const fixture = await seedWork(t);
+    const base = { blocks: [{ type: "paragraph", text: "Saved projection" }] };
+    // A row written before the sidecar holds its base inline.
+    await t.run((ctx) => ctx.db.patch(fixture.cloudId, { projectionBaseContent: base, projectionBaseTextIndex: "Saved projection" }));
+    expect(await t.run((ctx) => replicaWithBase(ctx, fixture.cloudId))).toMatchObject({ projectionBaseContent: base });
+
+    await t.mutation(internal.replicas.moveProjectionBasesMigration, {});
+    const moved = await t.run(async (ctx) => ({
+      row: await ctx.db.get(fixture.cloudId),
+      merged: await replicaWithBase(ctx, fixture.cloudId),
+      sidecars: await ctx.db.query("replicaProjectionBases").collect(),
+    }));
+    expect(moved.row?.projectionBaseContent).toBeUndefined();
+    expect(moved.merged).toMatchObject({ projectionBaseContent: base, projectionBaseTextIndex: "Saved projection" });
+    expect(moved.sidecars).toHaveLength(1);
+
+    // A patch that sets only the text index keeps the content.
+    await t.run((ctx) => patchReplica(ctx.db, fixture.cloudId, { projectionBaseTextIndex: "Edited", updatedAt: Date.now() }));
+    expect(await t.run((ctx) => replicaWithBase(ctx, fixture.cloudId))).toMatchObject({ projectionBaseContent: base, projectionBaseTextIndex: "Edited" });
+
+    await t.run((ctx) => deleteReplica(ctx.db, fixture.cloudId));
+    expect(await t.run((ctx) => ctx.db.query("replicaProjectionBases").collect())).toEqual([]);
   });
 });

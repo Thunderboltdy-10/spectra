@@ -168,6 +168,18 @@
    from a wrapper element that a copy would lose.
    --------------------------------------------------------------------------- */
 
+/* A Word list item's level: Word indents each level by half an inch. */
+.spectra-document-studio .ProseMirror :is(ul, ol)[data-list-level] { margin-left: calc(var(--list-level, 0) * 12.7mm); }
+.spectra-document-studio .ProseMirror :is(ul, ol)[data-list-level="1"] { --list-level: 1; }
+.spectra-document-studio .ProseMirror :is(ul, ol)[data-list-level="2"] { --list-level: 2; }
+.spectra-document-studio .ProseMirror :is(ul, ol)[data-list-level="3"] { --list-level: 3; }
+.spectra-document-studio .ProseMirror :is(ul, ol)[data-list-level="4"] { --list-level: 4; }
+.spectra-document-studio .ProseMirror :is(ul, ol)[data-list-level="5"] { --list-level: 5; }
+.spectra-document-studio .ProseMirror :is(ul, ol)[data-list-level="6"] { --list-level: 6; }
+.spectra-document-studio .ProseMirror :is(ul, ol)[data-list-level="7"] { --list-level: 7; }
+.spectra-document-studio .ProseMirror :is(ul, ol)[data-list-level="8"] { --list-level: 8; }
+.spectra-document-studio .ProseMirror ul[data-list-level="1"] > li { list-style-type: circle; }
+.spectra-document-studio .ProseMirror ul[data-list-level="2"] > li { list-style-type: square; }
 .spectra-document-studio .ProseMirror [data-indent="1"] { margin-left: 12.7mm; }
 .spectra-document-studio .ProseMirror [data-indent="2"] { margin-left: 25.4mm; }
 .spectra-document-studio .ProseMirror [data-indent="3"] { margin-left: 38.1mm; }

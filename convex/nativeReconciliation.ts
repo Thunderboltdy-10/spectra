@@ -7,6 +7,7 @@ import { getActorForAccountId, getAuthenticatedActor } from "./identityShared";
 import { requireActorArtifactCapability } from "./authorityShared";
 import { appendRoomUpdate, appendRoomUpdateArgs, parseGatewayProjection } from "./collaborationGatewayStore";
 import { commitHumanCheckpoint, commitNativeReconciliationVersion } from "./changeGroups";
+import { patchReplica } from "./replicaProjectionBase";
 
 const nativeSchemas = { document: 2, sheets: 4, presentation: 1 } as const;
 function nativeType(format: string | undefined) {
@@ -268,9 +269,9 @@ export const commit = internalMutation({
       projectionBaseContentHash: updated.contentHash, projectionBaseTextIndex: updated.textIndex,
       projectionBaseFidelityMap: input.fidelityMap, baseRevision: local.revision,
       state: "current" as const, lastVerifiedAt: now, updatedAt: now };
-    await ctx.db.patch(cloud._id, { ...projectionBase, payloadRef: local.payloadRef,
+    await patchReplica(ctx.db, cloud._id, { ...projectionBase, payloadRef: local.payloadRef,
       revision: local.revision, contentHash: local.contentHash, fidelityMap: input.fidelityMap });
-    await ctx.db.patch(local._id, projectionBase);
+    await patchReplica(ctx.db, local._id, projectionBase);
     const committedReceipt = { versionId, roomId: room._id, sequence: appended.sequence,
       updateDigest: append.payloadDigest ?? Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", append.update)), b => b.toString(16).padStart(2, "0")).join(""),
       projectionHash: updated.contentHash!, localReplicaId: local._id, localPayloadRef: input.localPayloadRef,

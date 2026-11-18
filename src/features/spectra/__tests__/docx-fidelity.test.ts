@@ -87,4 +87,61 @@ describe("Word fidelity", () => {
     expect(xml).toMatch(/<w:pBdr><w:bottom /);
     expect(xml).toContain("☐ open");
   });
+
+  const wordShapes = [
+    { type: "orderedList", attrs: { start: 3 }, content: [li(p(t("three"))), li(p(t("four")), { type: "bulletList", content: [li(p(t("nested a"))), li(p(t("nested b")), { type: "orderedList", content: [li(p(t("deep 1")))] } as DocumentJsonNode)] } as DocumentJsonNode)] },
+    p(t("Between")),
+    { type: "pageBreak" },
+    p(t("After the break")),
+    blocks.find((node) => node.type === "table")!,
+  ] as DocumentJsonNode[];
+
+  it("keeps a list's start, nested levels and kinds, page breaks and merged cells through Word and back", async () => {
+    const { bytes } = await exportDocxCopy({ type: "doc", content: wordShapes });
+    const JSZip = (await import("jszip")).default;
+    const numbering = await (await JSZip.loadAsync(bytes)).file("word/numbering.xml")!.async("string");
+    expect(numbering).toMatch(/<w:lvl w:ilvl="0"><w:start w:val="3"\/><w:numFmt w:val="decimal"\/>/);
+    expect(numbering).toMatch(/<w:lvl w:ilvl="1"><w:start w:val="1"\/><w:numFmt w:val="bullet"\/>/);
+
+    const back = (await importDocxPayload(bytes)).json.content ?? [];
+    const summary = back.filter((node) => String(node.type).endsWith("List")).map((node) => [node.type, node.attrs?.start ?? null, node.attrs?.listLevel ?? 0]);
+    expect(summary).toEqual([
+      ["orderedList", 3, 0],
+      ["orderedList", 4, 0],
+      ["bulletList", null, 1],
+      ["bulletList", null, 1],
+      ["orderedList", 1, 2],
+    ]);
+    expect(back.map((node) => node.type)).toContain("pageBreak");
+    expect(back.some((node) => node.type === "paragraph" && !node.content?.length)).toBe(false);
+    const table = back.find((node) => node.type === "table")!;
+    expect(table.content?.map((row) => row.content?.map((cell) => [cell.attrs?.colspan ?? 1, cell.attrs?.rowspan ?? 1]))).toEqual([
+      [[2, 1]],
+      [[1, 2], [1, 1]],
+      [[1, 1]],
+    ]);
+  });
+
+  it("reads Word's merged cells and page breaks back without a change, and edits a merged table in place", async () => {
+    const { bytes } = await exportDocxCopy({ type: "doc", content: wordShapes });
+    const opened = await docxLens.open(bytes);
+    const tiptap = (await importDocxPayload(bytes)).json;
+    const unchanged = docxProjectionFromContent(
+      { tiptap, blocks: documentBlocksFromJson(tiptap), nativeProjectionComplete: true },
+      opened.projection,
+    );
+    expect(unchanged.operations).toEqual([]);
+
+    const edited = JSON.parse(JSON.stringify(tiptap).replace('"b2"', '"B two"')) as DocumentJsonNode;
+    const update = docxProjectionFromContent(
+      { tiptap: edited, blocks: documentBlocksFromJson(edited), nativeProjectionComplete: true },
+      opened.projection,
+    );
+    expect(update.operations).toEqual([expect.objectContaining({ kind: "edit-table-cell", row: 2, column: 1, text: "B two" })]);
+    const xml = await documentXml(await docxLens.materialize({ projection: update.projection, carry: opened.preservedCarry }));
+    expect(xml).toContain("B two");
+    expect(xml).toContain('<w:gridSpan w:val="2"/>');
+    expect(xml).toContain('<w:vMerge w:val="restart"/>');
+    expect(xml.match(/<w:br w:type="page"\/>/g)).toHaveLength(1);
+  });
 });

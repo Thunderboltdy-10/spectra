@@ -10,7 +10,7 @@ const field = vi.hoisted(() => ({
 }));
 
 vi.mock("../life/life", () => ({
-  life: { on: true, unform: field.unform, morph: field.morph },
+  life: { on: true, unform: field.unform, morph: field.morph, pin: <T,>(formed: T) => formed },
 }));
 
 vi.mock("../life/figure-dom", () => ({

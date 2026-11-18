@@ -15,7 +15,7 @@ const field = vi.hoisted(() => {
 });
 
 vi.mock("../life/life", () => ({
-  life: { on: true, ghost: field.ghost, unform: field.unform, morph: field.morph, form: field.form },
+  life: { on: true, ghost: field.ghost, unform: field.unform, morph: field.morph, form: field.form, pin: <T,>(formed: T) => formed },
 }));
 
 vi.mock("../life/figure-dom", () => ({

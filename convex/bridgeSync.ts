@@ -35,6 +35,7 @@ import { storageHasOtherBinding } from "./durableStorageBindings";
 import { normalizeSha256 } from "../shared/intake-integrity";
 import { bridgeWriteForTarget, settleRunNativeOutcome, syncOperationForBridgeWrite } from "./bridgeWriteOperations";
 import { platformStopped } from "./platformControls";
+import { deleteReplica, patchReplica, readProjectionBase } from "./replicaProjectionBase";
 
 type WriteCompletionState = "pending" | "verified" | "failed" | "conflicted";
 
@@ -454,7 +455,7 @@ async function failWriteForMissingWork(
   });
   if (operation) await ctx.db.patch(operation._id, { state: "failed", errorCode: DELETED_WORK_ERROR, updatedAt: now });
   if (replica) {
-    await ctx.db.patch(replica._id, {
+    await patchReplica(ctx.db, replica._id, {
       state: "unavailable",
       unavailableReason: DELETED_WORK_ERROR,
       errorCode: DELETED_WORK_ERROR,
@@ -562,7 +563,7 @@ export const registerMount = mutation({
           if (!cloud) {
             await ctx.db.patch(replica.workId, { status: "deleted", updatedAt: now });
             await purgeSourceNodes(ctx, "work", String(replica.workId));
-            await ctx.db.delete(replica._id);
+            await deleteReplica(ctx.db, replica._id);
           }
         }
       }
@@ -675,10 +676,8 @@ async function queueRestoreToDisk(
           idempotencyKey,
           regionIds: [],
           partNames: [],
-          projectionBaseContent: cloud.projectionBaseContent,
+          ...(await readProjectionBase(ctx.db, cloud)),
           projectionBaseContentHash: cloud.projectionBaseContentHash,
-          projectionBaseTextIndex: cloud.projectionBaseTextIndex,
-          projectionBaseFidelityMap: cloud.projectionBaseFidelityMap,
           state: "pending",
           retryAt: now,
           attemptCount: 0,
@@ -785,7 +784,7 @@ export const purgeNonOfficeResources = internalMutation({
         await purgeSourceNodes(ctx, "work", String(work._id));
         await ctx.db.delete(work._id);
       }
-      await ctx.db.delete(replica._id);
+      await deleteReplica(ctx.db, replica._id);
       removed += 1;
     }
     for (const parentId of parents) await removeEmptyImportedFolders(ctx, parentId);
@@ -920,7 +919,7 @@ async function discoverResourceForMount(
         if (!cloud) {
           await ctx.db.patch(replica.workId, { status: "deleted", updatedAt: Date.now() });
           await purgeSourceNodes(ctx, "work", String(replica.workId));
-          await ctx.db.delete(replica._id);
+          await deleteReplica(ctx.db, replica._id);
         }
       }
       return { skipped: true as const, reason: "office-lock" as const };
@@ -2205,7 +2204,7 @@ export const completeWrite = mutation({
         if (operation?.actorKind === "ai" && operation.runId) await settleRunNativeOutcome(ctx, operation.runId);
         return completion("failed", { ignored: true, reason: errorCode });
       }
-      await ctx.db.patch(request.replicaId, {
+      await patchReplica(ctx.db, request.replicaId, {
         payloadRef: request.payloadRef,
         baseRevision: request.targetRevision,
         revision: request.targetRevision,
@@ -2248,7 +2247,7 @@ export const completeWrite = mutation({
         });
       }
       if (cloud) {
-        await ctx.db.patch(cloud._id, {
+        await patchReplica(ctx.db, cloud._id, {
           ...(hasNewerWrite ? {} : { payloadRef: request.payloadRef }),
           baseRevision: request.targetRevision,
           ...(hasNewerWrite ? {} : { revision: request.targetRevision, contentHash: request.contentHash }),

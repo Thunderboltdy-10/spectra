@@ -1170,6 +1170,24 @@ export default defineSchema({
     .index("by_record", ["recordId"])
     .index("by_account_kind_class_created", ["mappedAccountId", "syncKind", "providerClassId", "recordCreatedAt"]),
 
+  // A record's small part, kept by a trigger: what a sync page compares (see externalRecordHeads.ts).
+  externalRecordHeads: defineTable({
+    recordId: v.id("externalRecords"),
+    integrationId: v.id("schoolIntegrations"),
+    schoolId: v.id("schools"),
+    sourceIdentityKey: v.optional(v.string()),
+    sourceHash: v.string(),
+    tombstone: v.boolean(),
+    syncKind: v.optional(vSchoolSyncKind),
+    sourceState: v.optional(externalRecordSourceState),
+    sourceStateAt: v.optional(v.number()),
+    sourceStateReason: v.optional(v.string()),
+    expiresAt: v.optional(v.number()),
+    settled: v.array(v.object({ account: v.string(), sourceHash: v.string(), at: v.number() })),
+  })
+    .index("by_record", ["recordId"])
+    .index("by_source_identity", ["integrationId", "sourceIdentityKey"]),
+
   externalRecordRelations: defineTable({
     integrationId: v.id("schoolIntegrations"),
     schoolId: v.id("schools"),
@@ -2918,6 +2936,20 @@ export default defineSchema({
     .index("by_storage_state", ["storageId", "state"])
     .index("by_state_verified", ["state", "verifiedAt"]),
 
+  // A replica's projection base, kept off the replica row so replica reads stay small
+  // (see replicaProjectionBase.ts).
+  replicaProjectionBases: defineTable({
+    replicaId: v.id("workReplicas"),
+    accountId: v.id("accounts"),
+    workId: v.id("spectraArtifacts"),
+    content: v.optional(v.any()),
+    textIndex: v.optional(v.string()),
+    fidelityMap: v.optional(v.any()),
+    updatedAt: v.number(),
+  })
+    .index("by_replica", ["replicaId"])
+    .index("by_work", ["workId"])
+    .index("by_account", ["accountId"]),
   replicaTruthMigrations: defineTable({
     key: v.string(),
     state: v.union(

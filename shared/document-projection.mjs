@@ -458,6 +458,28 @@ function withBlockFormatting(node, blockAttrs) {
   return node;
 }
 
+/**
+ * Word's merged cells (`attrs.cellSpans`, one entry per physical cell) as editor
+ * spans: the merge origin carries colspan/rowspan and a continued cell goes.
+ * A table whose spans don't fit its rows opens unmerged, as before.
+ */
+function withCellSpans(rows, cellSpans) {
+  if (!Array.isArray(cellSpans) || cellSpans.length !== rows.length) return rows;
+  const merged = rows.map((row, rowIndex) => ({
+    ...row,
+    content: row.content.flatMap((cell, columnIndex) => {
+      const span = record(cellSpans[rowIndex]?.[columnIndex]);
+      if (span.covered === true) return [];
+      const colspan = Math.max(1, Math.min(63, Math.round(Number(span.colspan) || 1)));
+      const rowspan = Math.max(1, Math.min(rows.length - rowIndex, Math.round(Number(span.rowspan) || 1)));
+      return [colspan > 1 || rowspan > 1
+        ? { ...cell, attrs: { ...(cell.attrs ?? {}), ...(colspan > 1 ? { colspan } : {}), ...(rowspan > 1 ? { rowspan } : {}) } }
+        : cell];
+    }),
+  }));
+  return merged.every((row) => row.content.length) ? merged : rows;
+}
+
 function withCellAlignment(rowIndex, columnIndex, content, alignments) {
   const row = Array.isArray(alignments) ? alignments[rowIndex] : undefined;
   const textAlign = Array.isArray(row) ? row[columnIndex] : undefined;
@@ -516,7 +538,7 @@ export function docxRichBlockToJson(value, binding) {
     return {
       type: "table",
       attrs: nativeAttrs,
-      content: block.richRows.map((row, rowIndex) => ({
+      content: withCellSpans(block.richRows.map((row, rowIndex) => ({
         type: "tableRow",
         content: row.map((cell, columnIndex) => {
           const expected = Array.isArray(block.rows?.[rowIndex])
@@ -539,7 +561,7 @@ export function docxRichBlockToJson(value, binding) {
           ),
           };
         }),
-      })),
+      })), attrs.cellSpans),
     };
 
   const inlineContent = Array.isArray(block.inlineContent)
@@ -578,8 +600,22 @@ export function docxRichBlockToJson(value, binding) {
   return withBlockFormatting({ type: "paragraph", attrs: nativeAttrs, content }, attrs);
 }
 
+// A Word paragraph holding only a page break is Spectra's page break, not an empty line.
+function isPageBreakBlock(blockValue) {
+  const block = record(blockValue);
+  return (
+    block.type === "paragraph" &&
+    record(record(block.attrs).paragraphFormat).pageBreak === true &&
+    !String(block.text ?? "").trim()
+  );
+}
+
 function blockToJson(blockValue, index, nativeBinding) {
   const attrs = record(record(blockValue).attrs);
+  if (isPageBreakBlock(blockValue)) {
+    const id = record(blockValue).id;
+    return { type: "pageBreak", attrs: { blockId: typeof id === "string" && id ? id : `block-${index + 1}` } };
+  }
   const node = plainOrRichBlockToJson(blockValue, index, nativeBinding);
   const formatted = withBlockFormatting(node, attrs);
   // Runs that came through as plain text still have the block's own format to wear.
@@ -673,7 +709,7 @@ function plainOrRichBlockToJson(blockValue, index, nativeBinding) {
         blockId: id,
         ...(attrs.nativeReadOnly === true ? { nativeReadOnly: true } : {}),
       },
-      content: (rows.length ? rows : [[""]]).map((row, rowIndex) => ({
+      content: withCellSpans((rows.length ? rows : [[""]]).map((row, rowIndex) => ({
         type: "tableRow",
         content: row.map((cell, columnIndex) => ({
           type: rowIndex === 0 && attrs.headerRow !== false ? "tableHeader" : "tableCell",
@@ -684,7 +720,7 @@ function plainOrRichBlockToJson(blockValue, index, nativeBinding) {
             attrs.cellAlignments,
           ),
         })),
-      })),
+      })), attrs.cellSpans),
     };
   }
   return {
@@ -911,12 +947,61 @@ function tableGrid(node) {
   return grid.map((row) => Array.from({ length: columns }, (_, index) => row[index] ?? null));
 }
 
+/**
+ * A Word table's cells as Word holds them: a horizontal merge is one cell, and a
+ * cell a vertical merge continues into is an empty one of the merge's width.
+ * Native table reads and edits address those cells, so a merged table read from
+ * Word mirrors back in the same shape. Other tables keep the regular grid.
+ */
+function physicalTableSlots(node) {
+  const rows = (node.content ?? []).filter((row) => row?.type === "tableRow");
+  const merged = rows.some((row) => (row.content ?? []).some((cell) =>
+    Number(cell?.attrs?.colspan) > 1 || Number(cell?.attrs?.rowspan) > 1));
+  if (!merged || !String(node.attrs?.blockId ?? "").startsWith("docx:")) return null;
+  const grid = rows.map(() => []);
+  rows.forEach((row, rowIndex) => {
+    let column = 0;
+    for (const cell of row.content ?? []) {
+      while (grid[rowIndex][column] !== undefined) column += 1;
+      const colspan = Math.max(1, Math.min(63, Math.round(Number(cell?.attrs?.colspan) || 1)));
+      const rowspan = Math.max(1, Math.min(rows.length - rowIndex, Math.round(Number(cell?.attrs?.rowspan) || 1)));
+      for (let r = rowIndex; r < rowIndex + rowspan; r += 1)
+        for (let c = column; c < column + colspan; c += 1)
+          grid[r][c] = { cell, row: rowIndex, column, colspan };
+      column += colspan;
+    }
+  });
+  const cellSpans = [];
+  const physical = grid.map((row, rowIndex) => {
+    const slots = [];
+    const spans = [];
+    cellSpans.push(spans);
+    for (let column = 0; column < row.length; ) {
+      const slot = row[column];
+      if (!slot) { column += 1; continue; }
+      slots.push(slot.row === rowIndex ? slot.cell : null);
+      spans.push(slot.row === rowIndex
+        ? { ...(slot.colspan > 1 ? { colspan: slot.colspan } : {}), ...(Number(slot.cell?.attrs?.rowspan) > 1 ? { rowspan: Math.round(Number(slot.cell.attrs.rowspan)) } : {}) }
+        : { covered: true });
+      column = slot.column + slot.colspan;
+    }
+    return slots;
+  });
+  return Object.assign(physical, { cellSpans });
+}
+
+/** The Word merges of a table read from Word, for `attrs.cellSpans`. */
+function tableCellSpans(node) {
+  const physical = physicalTableSlots(node);
+  return physical ? { cellSpans: physical.cellSpans } : {};
+}
+
 function tableRows(node) {
-  return tableGrid(node).map((row) => row.map((cell) => (cell ? documentNodeText(cell).trim() : "")));
+  return (physicalTableSlots(node) ?? tableGrid(node)).map((row) => row.map((cell) => (cell ? documentNodeText(cell).trim() : "")));
 }
 
 function tableRichRows(node) {
-  return tableGrid(node).map((row) => row.map((cell) => (cell ? documentRichInlineFromJson(cell) : [])));
+  return (physicalTableSlots(node) ?? tableGrid(node)).map((row) => row.map((cell) => (cell ? documentRichInlineFromJson(cell) : [])));
 }
 
 /** Column widths the writer dragged, in editor pixels; unset columns are null. */
@@ -973,6 +1058,7 @@ export function documentBlocksFromJson(json) {
         attrs: {
           headerRow: Boolean(node.content?.[0]?.content?.length && node.content[0].content.every((cell) => cell.type === "tableHeader")),
           ...tableColumnWidths(node),
+          ...tableCellSpans(node),
           ...(node.attrs?.nativeReadOnly === true ? { nativeReadOnly: true } : {}),
           ...(unsupportedTableStructure(node) ? { unsupportedTableStructure: true } : {}),
         },
@@ -1214,7 +1300,7 @@ export function documentContentToProseMirrorJson(contentValue) {
         if (!referenceNodes.has(node)) {
           // One block with no node here must not cost the others their structure:
           // a mirror cannot describe a list's items, so a rebuild would run them together.
-          if (node && !duplicateIds.has(block.id) && blockMirrorsNode(block, node)) return node;
+          if (node && !duplicateIds.has(block.id) && (blockMirrorsNode(block, node) || (node.type === "pageBreak" && isPageBreakBlock(block)))) return node;
           return blockToJson(block, index, content.nativeBinding);
         }
         if (emittedReferenceIds.has(block.id))
@@ -1255,6 +1341,7 @@ export function documentContentToProseMirrorJson(contentValue) {
         const block =
           typeof blockId === "string" ? byId.get(blockId) : undefined;
         if (referenceNodes.has(node)) return retainCanonicalReference(node, block);
+        if (node?.type === "pageBreak" && block && isPageBreakBlock(block)) return node;
         // A mirror that is exactly this node's own projection says nothing
         // new. Rebuilding from it would drop what the mirror cannot carry
         // (an inline code mark beside an equation, a colour, a task state).
@@ -1328,8 +1415,11 @@ export function numberWordLists(blocks, nodes) {
   const counters = new Map();
   return nodes.map((node, index) => {
     const list = record(record(blocks[index]?.attrs).list);
-    if (node?.type !== "bulletList" || list.isBullet !== false || typeof list.numId !== "string") return node;
+    if (node?.type !== "bulletList" || typeof list.numId !== "string") return node;
     const level = Math.max(0, Math.min(8, Number(list.level) || 0));
+    // The paragraph keeps its own block (and its Word paragraph); its depth shows as an indent.
+    if (list.isBullet !== false)
+      return level ? { ...node, attrs: { ...(node.attrs ?? {}), listLevel: level } } : node;
     const levels = counters.get(list.numId) ?? [];
     const start = Number.isFinite(Number(list.start)) ? Number(list.start) : 1;
     levels[level] = levels[level] === undefined ? start : levels[level] + 1;
@@ -1339,7 +1429,7 @@ export function numberWordLists(blocks, nodes) {
     return {
       ...node,
       type: "orderedList",
-      attrs: { ...(node.attrs ?? {}), start: levels[level], ...(type ? { type } : {}) },
+      attrs: { ...(node.attrs ?? {}), start: levels[level], ...(type ? { type } : {}), ...(level ? { listLevel: level } : {}) },
     };
   });
 }

@@ -43,6 +43,7 @@ import {
   commitCloudMaterializationInTransaction,
 } from "./replicaMaterialization";
 import { platformStopped } from "./platformControls";
+import { deleteReplica, insertReplica, moveInlineBase, patchReplica, readProjectionBase } from "./replicaProjectionBase";
 
 const strategyPreset = v.union(v.literal("spectra"), v.literal("device"), v.literal("both"), v.literal("linked"));
 
@@ -796,10 +797,8 @@ export const payloadForWork = query({
       fidelityMap: selected.fidelityMap,
       projectionBasePayloadRef: selected.projectionBasePayloadRef,
       projectionBaseRevision: selected.projectionBaseRevision,
-      projectionBaseContent: selected.projectionBaseContent,
+      ...(await readProjectionBase(ctx.db, selected)),
       projectionBaseContentHash: selected.projectionBaseContentHash,
-      projectionBaseTextIndex: selected.projectionBaseTextIndex,
-      projectionBaseFidelityMap: selected.projectionBaseFidelityMap,
       compatibilityProfile: selected.compatibilityProfile ?? work.compatibilityProfile ?? "strict-native",
     };
   },
@@ -907,7 +906,7 @@ export const activateLens = mutation({
         : work.textIndex),
       updatedAt: now,
     });
-    await ctx.db.patch(cloud._id, {
+    await patchReplica(ctx.db, cloud._id, {
       fidelityMap: args.fidelityMap,
       projectionBasePayloadRef: cloud.payloadRef,
       projectionBaseRevision: cloud.revision,
@@ -932,7 +931,7 @@ export const activateLens = mutation({
     });
     await Promise.all(matchingLocals
       .filter((replica) => replica.contentHash === input.payloadHash && replica.payloadRef)
-      .map((replica) => ctx.db.patch(replica._id, {
+      .map((replica) => patchReplica(ctx.db, replica._id, {
         projectionBasePayloadRef: replica.payloadRef,
         projectionBaseRevision: replica.revision,
         projectionBaseContent: args.content,
@@ -1258,7 +1257,7 @@ export const attachPortablePayload = mutation({
         await ctx.db.patch(cloud._id, { state: "diverged", updatedAt: now });
         return { state: "conflicted" as const, replicaId: cloud._id };
       }
-      await ctx.db.patch(cloud._id, {
+      await patchReplica(ctx.db, cloud._id, {
         payloadRef: input.payloadRef,
         baseRevision: cloud.revision,
         revision: input.contentHash,
@@ -1275,7 +1274,7 @@ export const attachPortablePayload = mutation({
       });
       return { state: "attached" as const, replicaId: cloud._id };
     }
-    const replicaId = await ctx.db.insert("workReplicas", { accountId: actor.accountId, workId: args.workId, kind: "cloud", payloadRef: input.payloadRef, nativeFormat: input.nativeFormat, revision: input.contentHash, contentHash: input.contentHash, projectionBasePayloadRef: input.payloadRef, projectionBaseRevision: input.contentHash, projectionBaseContent: baseContent, projectionBaseContentHash: baseContentHash, projectionBaseTextIndex: work.textIndex, state: "current", lastVerifiedAt: now, updatedAt: now });
+    const replicaId = await insertReplica(ctx.db, { accountId: actor.accountId, workId: args.workId, kind: "cloud", payloadRef: input.payloadRef, nativeFormat: input.nativeFormat, revision: input.contentHash, contentHash: input.contentHash, projectionBasePayloadRef: input.payloadRef, projectionBaseRevision: input.contentHash, projectionBaseContent: baseContent, projectionBaseContentHash: baseContentHash, projectionBaseTextIndex: work.textIndex, state: "current", lastVerifiedAt: now, updatedAt: now });
     return { state: "attached" as const, replicaId };
   },
 });
@@ -1949,7 +1948,7 @@ async function reconcileWorkReplicaTruth(
         await ctx.db.insert("syncConflicts", { accountId: work.ownerAccountId, workId: work._id, replicaIds: cloud ? [cloud._id] : [], regionIds: [], partNames: [], localRevision: duplicate.revision, spectraRevision: cloud?.revision ?? "missing", localPayloadRef: duplicate.payloadRef, spectraPayloadRef: cloud?.payloadRef, state: "open", createdAt: now, updatedAt: now });
         conflicts += 1;
       }
-      await ctx.db.delete(duplicate._id);
+      await deleteReplica(ctx.db, duplicate._id);
       repaired += 1;
     }
   }
@@ -2092,3 +2091,33 @@ export const reconcileReplicaTruthMigration = internalMutation({
   },
 });
 
+
+/** One-time, automatic move of inline projection bases into `replicaProjectionBases`. */
+export const moveProjectionBasesMigration = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    if (await platformStopped(ctx, "background")) return { state: "running" as const, scanned: 0, moved: 0 };
+    const key = "projection-base-sidecar-v1";
+    let migration = await ctx.db.query("replicaTruthMigrations").withIndex("by_key", (q) => q.eq("key", key)).unique();
+    if (migration?.state === "complete") return { state: "complete" as const, scanned: 0, moved: 0 };
+    const now = Date.now();
+    if (!migration) {
+      const id = await ctx.db.insert("replicaTruthMigrations", { key, state: "running", scanned: 0, repaired: 0, conflicts: 0, createdAt: now, updatedAt: now });
+      migration = await ctx.db.get(id);
+    }
+    if (!migration) throw new Error("PROJECTION_BASE_MIGRATION_MISSING");
+    const page = await ctx.db.query("workReplicas").paginate({ cursor: migration.cursor ?? null, numItems: 20 });
+    let moved = 0;
+    for (const replica of page.page) if (await moveInlineBase(ctx.db, replica)) moved += 1;
+    await ctx.db.patch(migration._id, {
+      state: page.isDone ? "complete" : "running",
+      cursor: page.isDone ? undefined : page.continueCursor,
+      scanned: migration.scanned + page.page.length,
+      repaired: migration.repaired + moved,
+      updatedAt: Date.now(),
+    });
+    // The cron only starts it; once running, it carries itself to the end.
+    if (!page.isDone) await ctx.scheduler.runAfter(2_000, internal.replicas.moveProjectionBasesMigration, {});
+    return { state: page.isDone ? "complete" as const : "running" as const, scanned: page.page.length, moved };
+  },
+});

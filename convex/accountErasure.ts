@@ -9,6 +9,7 @@ import { purgeNode, purgeSourceNodes, sharesWithWorkspace } from "./orgTreeShare
 import { releasePayloadIfUnreferenced } from "./payloadLifecycle";
 import { scheduleDeletion } from "./spectraArtifactDeletion";
 import { enqueueSemanticItem } from "./semanticQueue";
+import { deleteReplica } from "./replicaProjectionBase";
 
 /**
  * Erasure of one account after its identity was deleted at the IdP.
@@ -448,7 +449,7 @@ const ACCOUNT_TABLES: TableStep[] = [
     // work; the device copy is the account's.
     async (ctx, row, job) => {
       if (row.kind !== "local") return NONE;
-      await ctx.db.delete(row._id);
+      await deleteReplica(ctx.db, row._id);
       const released = await releaseRefs(ctx, [row.payloadRef, row.pendingPayloadRef, row.projectionBasePayloadRef], job.accountId, String(row._id));
       return { deletedRows: 1, deletedStorageObjects: released };
     },

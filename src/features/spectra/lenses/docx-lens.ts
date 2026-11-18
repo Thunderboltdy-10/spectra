@@ -935,6 +935,40 @@ function noteBodyMap(notes: readonly WordNote[]) {
   return new Map(notes.map((note) => [`${note.type}:${note.id}`, note] as const));
 }
 
+/**
+ * Word's merges, one entry per physical cell (`w:tc`): how many grid columns it
+ * spans (`w:gridSpan`) and rows (`w:vMerge` restart and the continues below
+ * it). A continued cell is `covered`. Kept only when the table merges cells.
+ */
+function cellSpansOf(table: NativeTable) {
+  const read = tableRows(table).map((row) => {
+    let column = 0;
+    return tableCells(row).map((cell) => {
+      const properties = cell.find(WML_NAMESPACE, "tcPr");
+      const span = Math.max(1, Number.parseInt(properties?.find(WML_NAMESPACE, "gridSpan")?.getAttributeNs(WML_NAMESPACE, "val") ?? "1", 10) || 1);
+      const merge = properties?.find(WML_NAMESPACE, "vMerge");
+      const vMerge = merge ? (merge.getAttributeNs(WML_NAMESPACE, "val") === "restart" ? "restart" : "continue") : null;
+      const entry = { column, span, vMerge };
+      column += span;
+      return entry;
+    });
+  });
+  if (!read.some((row) => row.some((cell) => cell.span > 1 || cell.vMerge))) return {};
+  const cellSpans = read.map((row, rowIndex) =>
+    row.map((cell) => {
+      if (cell.vMerge === "continue" && rowIndex > 0) return { covered: true as const };
+      let rowspan = 1;
+      if (cell.vMerge === "restart")
+        while (read[rowIndex + rowspan]?.some((below) => below.column === cell.column && below.vMerge === "continue")) rowspan += 1;
+      return {
+        ...(cell.span > 1 ? { colspan: cell.span } : {}),
+        ...(rowspan > 1 ? { rowspan } : {}),
+      };
+    }),
+  );
+  return { cellSpans };
+}
+
 /** How each table cell lines up, read once and kept only when one isn't left-aligned. */
 function cellAlignmentsOf(
   document: Document,
@@ -3394,6 +3428,7 @@ async function projectDocument(
             })(),
             ...(readOnly ? { nativeReadOnly: true } : {}),
             ...cellAlignmentsOf(document, table),
+            ...cellSpansOf(table),
           },
         });
         fidelityEntries.push({

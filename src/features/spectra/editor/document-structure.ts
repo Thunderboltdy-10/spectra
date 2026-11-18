@@ -143,6 +143,22 @@ export const ParagraphFrame = Extension.create({
   addGlobalAttributes() {
     return [
       {
+        // A Word list paragraph opens as its own one-item list; its Word level
+        // (`w:ilvl`) shows as the nesting indent it has in Word.
+        types: ["bulletList", "orderedList"],
+        attributes: {
+          listLevel: {
+            default: null,
+            parseHTML: (element) => {
+              const value = Number(element.getAttribute("data-list-level"));
+              return Number.isInteger(value) && value > 0 && value <= 8 ? value : null;
+            },
+            renderHTML: (attributes) =>
+              attributes.listLevel ? { "data-list-level": String(attributes.listLevel) } : {},
+          },
+        },
+      },
+      {
         types: [...FRAMED_TYPES],
         attributes: {
           frameBorder: {

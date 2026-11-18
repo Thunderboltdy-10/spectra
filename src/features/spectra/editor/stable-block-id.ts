@@ -20,6 +20,8 @@ const REGION_NODE_TYPES = [
   "callout",
   "image",
   "equation",
+  "pageBreak",
+  "horizontalRule",
 ] as const;
 
 function createBlockId() {

@@ -11,6 +11,7 @@ import { bridgeWriteForTarget, settleRunNativeOutcome, syncOperationForBridgeWri
 import { nativeSaveReceiptValidator } from "./nativeOfficeValidators";
 import { validateNativeSaveReceipt, type NativeSaveReceipt } from "../shared/native-office-contract";
 import { BRIDGE_WRITE_EXPIRES_MS, deriveSyncIdempotencyKey, localMaterializationTarget } from "../shared/replica-truth";
+import { patchReplica } from "./replicaProjectionBase";
 
 const RETRYABLE_MATERIALIZATION_FAILURES = new Set([
   "write-expired",
@@ -387,7 +388,7 @@ export async function commitCloudMaterializationInTransaction(
   if (cloud.revision !== args.baseRevision || cloud.contentHash !== receipt.basePayloadHash)
     throw new Error("MATERIALIZATION_BASE_STALE");
   const now = Date.now();
-  await ctx.db.patch(cloud._id, {
+  await patchReplica(ctx.db, cloud._id, {
     payloadRef: args.payloadRef, contentHash: args.contentHash, revision: args.contentHash,
     baseRevision: args.baseRevision, projectionBasePayloadRef: args.payloadRef,
     projectionBaseRevision: args.contentHash, projectionBaseContent: args.projectionContent,

@@ -48,10 +48,15 @@ import {
 } from "./calendarReadModels";
 import { applySemanticTrigger, SEMANTIC_TRIGGERS } from "./semanticSources";
 import { syncSchoolRecordSummary } from "./schoolRecordSummaries";
+import { syncExternalRecordHead, unsettleForProjection } from "./externalRecordHeads";
 
 const triggers = new Triggers<DataModel>();
 triggers.register("externalRecords", async (ctx, change) => {
   await syncSchoolRecordSummary({ db: ctx.innerDb }, change.id, change.oldDoc, change.newDoc);
+  await syncExternalRecordHead(ctx.innerDb, change.id, change.oldDoc, change.newDoc);
+});
+triggers.register("externalProjections", async (ctx, change) => {
+  await unsettleForProjection(ctx.innerDb, change.oldDoc, change.newDoc);
 });
 for (const table of ["spectraArtifacts", "spectraArtifactVersions", "artifactSnapshotObjects", "artifactImportJobs", "changeGroups", "workReplicas", "bridgeWriteRequests", "syncConflicts", "collaborationUpdates", "collaborationSnapshots"] as const) {
   triggers.register(table, async (ctx, change) => {

@@ -25,6 +25,7 @@ import {
   isSurvivingPinnedEmbed,
 } from "./artifactEmbedOwnership";
 import { normalizeMediaType, normalizeSha256 } from "../shared/intake-integrity";
+import { deleteReplica } from "./replicaProjectionBase";
 
 const PAGE = 40;
 const CURSOR_VERSION = DELETION_CURSOR_VERSION;
@@ -262,7 +263,7 @@ async function processLinksPage(ctx: MutationCtx, job: Job, state: State): Promi
 async function processReplicasPage(ctx: MutationCtx, job: Job, state: State): Promise<PageResult> {
   const rows = await ctx.db.query("workReplicas").withIndex("by_work", (q) => q.eq("workId", job.artifactId)).paginate({ numItems: PAGE, cursor: state.cursor ?? null });
   let released = 0;
-  for (const row of rows.page) { const refs = [...new Set([row.payloadRef, row.pendingPayloadRef, row.projectionBasePayloadRef].filter((ref): ref is string => Boolean(ref)))]; await ctx.db.delete(row._id); for (const ref of refs) released += await releasePayloadIfUnreferenced(ctx, ref, { schoolId: job.schoolId, accountId: job.ownerAccountId, sourceId: String(row._id) }); }
+  for (const row of rows.page) { const refs = [...new Set([row.payloadRef, row.pendingPayloadRef, row.projectionBasePayloadRef].filter((ref): ref is string => Boolean(ref)))]; await deleteReplica(ctx.db, row._id); for (const ref of refs) released += await releasePayloadIfUnreferenced(ctx, ref, { schoolId: job.schoolId, accountId: job.ownerAccountId, sourceId: String(row._id) }); }
   return resultBase(stateFor(job, rows.isDone ? "syncOperations" : "replicas", rows.isDone ? null : rows.continueCursor), { done: false, scanned: rows.page.length, changed: rows.page.length, retained: 0, terminal: 0, released });
 }
 

@@ -14,6 +14,7 @@ import type { MutationCtx } from "./_generated/server";
 import { BRIDGE_CLAIM_REDRIVE_MS } from "../shared/replica-truth";
 import { evaluateAccessForActor } from "./authorityShared";
 import { syncRetryAt } from "../shared/sync-retry-policy";
+import { patchReplica } from "./replicaProjectionBase";
 
 async function digest(value: string) {
   const bytes = new TextEncoder().encode(value);
@@ -46,7 +47,7 @@ async function failDeletedStructureRequest(
   });
   const replica = await ctx.db.get(request.replicaId);
   if (replica) {
-    await ctx.db.patch(replica._id, {
+    await patchReplica(ctx.db, replica._id, {
       state: "unavailable",
       unavailableReason: DELETED_WORK_ERROR,
       errorCode: DELETED_WORK_ERROR,

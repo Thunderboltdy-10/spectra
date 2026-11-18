@@ -6,6 +6,7 @@ import aggregateTest from "@convex-dev/aggregate/test";
 import schema from "./schema";
 import { api } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
+import { unsettleForProjection } from "./externalRecordHeads";
 
 const modules = import.meta.glob("./**/*.ts");
 const bridgeKey = "managebac-isolation-test-key-012345678901234567890";
@@ -1586,6 +1587,33 @@ describe("ManageBac account isolation", () => {
     expect(state.projections.map((row) => row.projectionType).sort()).toEqual(["planner_task", "timetable_event"]);
     expect(state.run?.counts.fetched).toBe(2);
     expect(state.run?.counts.unchanged).toBe(1);
+  });
+
+  it("skips an unchanged settled record, and checks it again once its projection goes", async () => {
+    const t = setupTest();
+    const fixture = await seedFixture(t);
+    const run = await insertSyncRun(t, fixture, fixture.aliceId);
+    const key = `account:${fixture.aliceId}:assignment:settled-id`;
+    await commitPage(t, fixture, alice, run, key, "Settled source", "settled-hash", "page-1");
+    const head = await t.run((ctx) => ctx.db.query("externalRecordHeads").collect());
+    expect(head).toHaveLength(1);
+    expect(head[0].settled).toEqual([expect.objectContaining({ account: String(fixture.aliceId), sourceHash: "settled-hash" })]);
+
+    await commitPage(t, fixture, alice, run, key, "Settled source", "settled-hash", "page-2");
+    expect((await t.run((ctx) => ctx.db.get(run)))?.counts.unchanged).toBe(1);
+
+    // The student's planner copy goes: the next identical page puts it back.
+    const projections = () => t.run((ctx) => ctx.db.query("externalProjections")
+      .withIndex("by_account_updated", (q) => q.eq("accountId", fixture.aliceId)).collect());
+    const planner = (await projections()).find((row) => row.projectionType === "planner_task")!;
+    await t.run(async (ctx) => {
+      await ctx.db.delete(planner._id);
+      // A raw test write skips triggers: unsettle as the projection trigger does.
+      await unsettleForProjection(ctx.db, planner, null);
+    });
+    expect((await t.run((ctx) => ctx.db.query("externalRecordHeads").collect()))[0].settled).toEqual([]);
+    await commitPage(t, fixture, alice, run, key, "Settled source", "settled-hash", "page-3");
+    expect((await projections()).map((row) => row.projectionType).sort()).toEqual(["planner_task", "timetable_event"]);
   });
 
   it("does not stamp archive retention on still-selected classes", async () => {

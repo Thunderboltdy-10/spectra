@@ -728,19 +728,57 @@ function textColumnEmu(setup: DocxPageSetup | undefined) {
   return Math.round(((pageWidth - 2 * margin - gap) / columns) * 635);
 }
 
-function listItemParagraphs(
-  list: DocumentJsonNode,
-  level: number,
-): { paragraph: DocumentJsonNode; level: number }[] {
+type ListSource = { paragraph: DocumentJsonNode; level: number; ordered: boolean; start: number };
+
+function listItemParagraphs(list: DocumentJsonNode, level: number): ListSource[] {
+  const ordered = list.type === "orderedList";
+  const start = ordered ? Math.max(0, Math.round(Number(list.attrs?.start) || 1)) : 1;
   return (list.content ?? []).flatMap((item) =>
     (item.content ?? []).flatMap((child) =>
       child.type === "bulletList" || child.type === "orderedList"
         ? listItemParagraphs(child, Math.min(8, level + 1))
         : child.type === "paragraph" || child.type === "heading"
-          ? [{ paragraph: child, level }]
+          ? [{ paragraph: child, level, ordered, start }]
           : [],
     ),
   );
+}
+
+/**
+ * One numbering definition holds a whole nested list, so a level whose kind
+ * differs from the outer list (bullets inside a numbered list) is reshaped, and
+ * a numbered list starting above 1 says so with `w:start`.
+ */
+function shapeListLevels(document: Document, first: XmlElement | undefined, sources: readonly ListSource[], outerOrdered: boolean) {
+  const numId = first?.find(WML_NAMESPACE, "pPr")?.find(WML_NAMESPACE, "numPr")?.find(WML_NAMESPACE, "numId")?.getAttributeNs(WML_NAMESPACE, "val");
+  const numbering = document._internal().numbering();
+  const root = numbering?.doc.root;
+  if (!numId || !numbering || !root) return;
+  const num = root.findAll(WML_NAMESPACE, "num").find((entry) => entry.getAttributeNs(WML_NAMESPACE, "numId") === numId);
+  const abstractId = num?.find(WML_NAMESPACE, "abstractNumId")?.getAttributeNs(WML_NAMESPACE, "val");
+  const abstract = root.findAll(WML_NAMESPACE, "abstractNum").find((entry) => entry.getAttributeNs(WML_NAMESPACE, "abstractNumId") === abstractId);
+  if (!abstract) return;
+  const shaped = new Set<number>();
+  let dirty = false;
+  for (const { level, ordered, start } of sources) {
+    if (shaped.has(level)) continue;
+    shaped.add(level);
+    const lvl = abstract.findAll(WML_NAMESPACE, "lvl").find((entry) => entry.getAttributeNs(WML_NAMESPACE, "ilvl") === String(level));
+    if (!lvl) continue;
+    if (ordered !== outerOrdered) {
+      lvl.find(WML_NAMESPACE, "numFmt")?.setAttributeNs(WML_NAMESPACE, "val", ordered ? (["decimal", "lowerLetter", "lowerRoman"][level % 3] ?? "decimal") : "bullet");
+      lvl.find(WML_NAMESPACE, "lvlText")?.setAttributeNs(WML_NAMESPACE, "val", ordered ? `%${level + 1}.` : "•");
+      // A bullet level's symbol font would turn digits into glyphs.
+      const runFormat = lvl.find(WML_NAMESPACE, "rPr");
+      if (ordered && runFormat) lvl.removeChild(runFormat);
+      dirty = true;
+    }
+    if (ordered && start !== 1) {
+      lvl.find(WML_NAMESPACE, "start")?.setAttributeNs(WML_NAMESPACE, "val", String(start));
+      dirty = true;
+    }
+  }
+  if (dirty) document._internal().markDirty(numbering);
 }
 
 /**
@@ -814,6 +852,7 @@ export async function exportDocxCopy(
           node.type === "bulletList"
             ? document.addBulletList(items)
             : document.addNumberedList(items);
+        shapeListLevels(document, paragraphs[0]?.element, sources, node.type === "orderedList");
         for (const [index, paragraph] of paragraphs.entries()) {
           clearParagraph(paragraph.element);
           const source = sources[index]?.paragraph;

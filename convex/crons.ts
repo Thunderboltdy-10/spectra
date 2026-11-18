@@ -42,6 +42,12 @@ crons.interval(
   {},
 );
 crons.interval(
+  "move-replica-projection-bases",
+  { hours: 6 },
+  internal.replicas.moveProjectionBasesMigration,
+  {},
+);
+crons.interval(
   "reconcile-legacy-replica-truth",
   { hours: 6 },
   internal.replicas.reconcileReplicaTruthMigration,

@@ -4223,6 +4223,7 @@ const PURGE_DEPENDENT_TABLES = [
   // references to a student's file bytes. They are keyed by the work, which
   // still exists during this stage, so ownership resolves through it.
   "workReplicas",
+  "replicaProjectionBases",
   "syncConflicts",
   "bridgeWriteRequests",
   "bridgeFsRequests",
@@ -4234,6 +4235,7 @@ const PURGE_DEPENDENT_TABLES = [
 
 const PURGE_WORK_DEPENDENT_TABLES = new Set<string>([
   "workReplicas",
+  "replicaProjectionBases",
   "syncConflicts",
   "bridgeWriteRequests",
   "bridgeFsRequests",

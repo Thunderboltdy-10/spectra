@@ -13,7 +13,10 @@ import schema from "./schema";
 import { api, internal } from "./_generated/api";
 import { internalAction } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
+import type { QueryCtx } from "./_generated/server";
 import { canReadManagebacRecord } from "./managebacVisibility";
+import { tasks } from "./school";
+import { observeDatabase } from "../scripts/perf-read-ledger";
 
 const modules = import.meta.glob("./**/*.ts");
 const bridgeKey = "school-isolation-bridge-key-0123456789abcdef";
@@ -187,6 +190,48 @@ const titles = (rows: Array<{ title: string }>) => rows.map((row) => row.title).
 describe("School isolation", () => {
   beforeEach(() => { process.env.SPECTRA_CONNECTOR_BRIDGE_KEY = bridgeKey; });
   afterEach(() => { delete process.env.SPECTRA_CONNECTOR_BRIDGE_KEY; vi.useRealTimers(); });
+
+  it("switches legacy School lists to compact reads and keeps them in step with sync and purge", async () => {
+    const t = setup();
+    const f = await seed(t);
+    const user = t.withIdentity(alice);
+    const brief = "x".repeat(18_000);
+    await t.run(async (ctx) => {
+      const row = (await ctx.db.get(f.records.aliceCurrent))!;
+      await ctx.db.patch(row._id, { normalized: { ...row.normalized, description: brief } });
+    });
+    const handler = Reflect.get(tasks, "_handler") as (ctx: QueryCtx, args: { view: "all" }) => Promise<unknown>;
+    const measureTasks = () => user.run(async (ctx) => {
+      const observed = observeDatabase(ctx.db);
+      const result = await handler({ ...ctx, db: observed.db }, { view: "all" });
+      return { result, ...observed.snapshot() };
+    });
+    const before = await measureTasks();
+    const classes = await user.query(api.school.classes, {});
+    expect(await t.mutation(internal.schoolRecordSummaries.continueBackfill, {})).toEqual({ done: true });
+    const after = await measureTasks();
+    expect(after.result).toEqual(before.result);
+    expect(after.reads.some((read) => read.table === "externalRecords")).toBe(false);
+    expect(after.serializedDocumentBytes).toBeLessThan(before.serializedDocumentBytes / 3);
+    expect(await user.query(api.school.classes, {})).toEqual(classes);
+    expect((await user.query(api.school.task, { recordId: f.records.aliceCurrent }))?.brief).toBe(brief);
+
+    const started = await user.mutation(api.managebac.beginSync, { kind: "manual", syncKind: "current_tasks" });
+    await commitTasks(t, alice, {
+      integrationId: f.a.integrationId, capabilityId: f.a.capabilityId, syncRunId: started.syncRunId,
+      leaseToken: started.leaseToken!, selectionRevision: started.selectionRevision!, binding: "101",
+      tasks: [{ id: "1", classId: "101", title: "Updated lab report", dueAt: new Date(Date.now() + DAY).toISOString() }],
+    });
+    expect((await user.query(api.school.tasks, { view: "current" })).tasks)
+      .toMatchObject([{ recordId: f.records.aliceCurrent, title: "Updated lab report" }]);
+
+    await user.mutation(api.school.setClassOverride, { providerClassId: "101", kind: "current_tasks", mode: "off" });
+    expect((await user.query(api.school.tasks, { view: "current" })).tasks).toEqual([]);
+    expect(await t.run((ctx) => ctx.db.query("schoolRecordSummaries")
+      .withIndex("by_record", (q) => q.eq("recordId", f.records.aliceCurrent)).first())).toBeNull();
+    expect((await t.withIdentity(bob).query(api.school.tasks, { view: "all" })).tasks)
+      .toMatchObject([{ title: "Bob lab report" }]);
+  });
 
   it("never shows a student another student's tasks, grades, files or CAS", async () => {
     const t = setup();

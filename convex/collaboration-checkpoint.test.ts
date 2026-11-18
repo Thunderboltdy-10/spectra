@@ -157,6 +157,8 @@ describe("P5.I2 checkpoint projection and compaction", () => {
         versions: await ctx.db.query("spectraArtifactVersions").collect(),
       }));
       expect(after.group?.status).toBe("committed");
+      expect(after.group?.baseSnapshot).toBeUndefined();
+      expect(after.group?.finalSnapshot).toBeUndefined();
       expect(after.artifact?.title).toBe("Latest typed artifact");
       expect(after.versions).toHaveLength(1);
     } finally {

@@ -16,6 +16,12 @@ crons.interval(
   internal.spectraArtifacts.continueSummaryBackfill,
   {},
 );
+crons.interval(
+  "continue-school-record-summary-backfill",
+  { minutes: 30 },
+  internal.schoolRecordSummaries.continueBackfill,
+  {},
+);
 // Auto school syncs whose own wake-up failed run without waiting for a visit.
 crons.interval(
   "wake-overdue-school-syncs",

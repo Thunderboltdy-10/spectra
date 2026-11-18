@@ -47,8 +47,12 @@ import {
   deleteCalendarItemReadModel,
 } from "./calendarReadModels";
 import { applySemanticTrigger, SEMANTIC_TRIGGERS } from "./semanticSources";
+import { syncSchoolRecordSummary } from "./schoolRecordSummaries";
 
 const triggers = new Triggers<DataModel>();
+triggers.register("externalRecords", async (ctx, change) => {
+  await syncSchoolRecordSummary({ db: ctx.innerDb }, change.id, change.oldDoc, change.newDoc);
+});
 for (const table of ["spectraArtifacts", "spectraArtifactVersions", "artifactSnapshotObjects", "artifactImportJobs", "changeGroups", "workReplicas", "bridgeWriteRequests", "syncConflicts", "collaborationUpdates", "collaborationSnapshots"] as const) {
   triggers.register(table, async (ctx, change) => {
     if (change.oldDoc && change.newDoc && JSON.stringify([...durablePayloadReferences(change.oldDoc)].sort()) === JSON.stringify([...durablePayloadReferences(change.newDoc)].sort())) return;

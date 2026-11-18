@@ -116,6 +116,7 @@ import type * as replicas from "../replicas.js";
 import type * as retainedContentAccess from "../retainedContentAccess.js";
 import type * as retainedPinAccess from "../retainedPinAccess.js";
 import type * as school from "../school.js";
+import type * as schoolRecordSummaries from "../schoolRecordSummaries.js";
 import type * as schoolSyncSchema from "../schoolSyncSchema.js";
 import type * as schoolSyncShared from "../schoolSyncShared.js";
 import type * as schools from "../schools.js";
@@ -274,6 +275,7 @@ declare const fullApi: ApiFromModules<{
   retainedContentAccess: typeof retainedContentAccess;
   retainedPinAccess: typeof retainedPinAccess;
   school: typeof school;
+  schoolRecordSummaries: typeof schoolRecordSummaries;
   schoolSyncSchema: typeof schoolSyncSchema;
   schoolSyncShared: typeof schoolSyncShared;
   schools: typeof schools;

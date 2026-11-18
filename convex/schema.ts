@@ -14,6 +14,15 @@ import {
   artifactEmbedVersionPolicyValidator,
 } from "../shared/artifact-embed";
 
+const externalRecordAudience = v.union(
+  v.literal("mapped_user"), v.literal("class_members"),
+  v.literal("authorized_staff"), v.literal("school"),
+);
+const externalRecordSourceState = v.union(
+  v.literal("available"), v.literal("changed"), v.literal("temporarily_unavailable"),
+  v.literal("missing"), v.literal("removed"),
+);
+
 export default defineSchema({
   schools: defineTable({
     name: v.string(),
@@ -1107,12 +1116,7 @@ export default defineSchema({
       v.literal("school"),
       v.literal("public_resource"),
     ),
-    audienceScope: v.union(
-      v.literal("mapped_user"),
-      v.literal("class_members"),
-      v.literal("authorized_staff"),
-      v.literal("school"),
-    ),
+    audienceScope: externalRecordAudience,
     mappedAccountId: v.optional(v.id("accounts")),
     providerClassId: v.optional(v.string()),
     academicPeriodKey: v.optional(v.string()),
@@ -1122,15 +1126,7 @@ export default defineSchema({
     normalized: v.any(),
     payloadVersion: v.string(),
     sourceHash: v.string(),
-    sourceState: v.optional(
-      v.union(
-        v.literal("available"),
-        v.literal("changed"),
-        v.literal("temporarily_unavailable"),
-        v.literal("missing"),
-        v.literal("removed"),
-      ),
-    ),
+    sourceState: v.optional(externalRecordSourceState),
     sourceStateAt: v.optional(v.number()),
     sourceStateReason: v.optional(v.string()),
     sourceModifiedAt: v.optional(v.number()),
@@ -1144,14 +1140,35 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_type_expiry", ["recordType", "expiresAt"])
-    .index("by_integration_key", ["integrationId", "providerRecordKey"])
+    .index("by_integration_key", ["integrationId", "providerRecordKey", "sourceIdentityKey"])
     .index("by_source_identity", ["integrationId", "sourceIdentityKey"])
     .index("by_integration_type", ["integrationId", "recordType"])
     .index("by_account_type", ["mappedAccountId", "recordType"])
     .index("by_visibility_membership", ["integrationId", "providerClassId", "academicPeriodKey", "mappedAccountId", "recordType"])
     .index("by_class_type", ["providerClassId", "recordType"])
+    .index("by_integration_class_type_account", ["integrationId", "providerClassId", "recordType", "mappedAccountId"])
     .index("by_account_kind_class", ["mappedAccountId", "syncKind", "providerClassId"])
     .index("by_school_updated", ["schoolId", "updatedAt"]),
+
+  schoolRecordSummaries: defineTable({
+    recordId: v.id("externalRecords"),
+    recordCreatedAt: v.number(),
+    mappedAccountId: v.id("accounts"),
+    integrationId: v.id("schoolIntegrations"),
+    schoolId: v.id("schools"),
+    syncKind: vSchoolSyncKind,
+    recordType: v.string(),
+    providerClassId: v.optional(v.string()),
+    academicPeriodKey: v.optional(v.string()),
+    providerRecordId: v.string(),
+    audienceScope: externalRecordAudience,
+    sourceState: v.optional(externalRecordSourceState),
+    tombstone: v.boolean(),
+    provenanceUrl: v.optional(v.string()),
+    normalized: v.any(),
+  })
+    .index("by_record", ["recordId"])
+    .index("by_account_kind_class_created", ["mappedAccountId", "syncKind", "providerClassId", "recordCreatedAt"]),
 
   externalRecordRelations: defineTable({
     integrationId: v.id("schoolIntegrations"),
@@ -2815,7 +2832,7 @@ export default defineSchema({
     .index("by_device_state", ["deviceId", "state"])
     .index("by_device_state_retry", ["deviceId", "state", "retryAt"])
     .index("by_device_state_claimed", ["deviceId", "state", "claimedAt"])
-    .index("by_replica_state", ["replicaId", "state"])
+    .index("by_replica_state", ["replicaId", "state", "createdAt"])
     .index("by_work_created", ["workId", "createdAt"])
     .index("by_account_key", ["accountId", "idempotencyKey"])
     .index("by_account_key_replica", ["accountId", "idempotencyKey", "replicaId"])

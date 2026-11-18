@@ -1,5 +1,6 @@
 import { query } from "./functions";
 import { internalMutation, mutation } from "./orgNodeMutation";
+import { createSchoolRecordListReader } from "./schoolRecordSummaries";
 import { internal } from "./_generated/api";
 import { SYLLABUS_BUNDLE_VERSION } from "../shared/syllabus/catalog.generated";
 import { v } from "convex/values";
@@ -3034,16 +3035,11 @@ export async function ensurePlannerProjection(
     ) ??
     null;
   if (existing) {
-    if (existing.providerKey !== providerKey || existing.state !== "active")
-      await ctx.db.patch(existing._id, {
-        providerKey,
-        state: "active",
-        updatedAt: Date.now(),
-      });
-    return {
-      projection: (await ctx.db.get(existing._id))!,
-      created: false,
-    };
+    if (existing.providerKey === providerKey && existing.state === "active")
+      return { projection: existing, created: false };
+    const patch = { providerKey, state: "active" as const, updatedAt: Date.now() };
+    await ctx.db.patch(existing._id, patch);
+    return { projection: { ...existing, ...patch }, created: false };
   }
   const normalized = record(source.normalized);
   const now = Date.now();
@@ -3191,14 +3187,15 @@ async function ensureTimetableProjection(
   });
   const now = Date.now();
   if (existing) {
-    await patchIfChanged(ctx, existing, {
+    const patch = {
       projectionId: String(calendar.itemId),
       providerKey,
       sourceHash: source.sourceHash,
-      state: "active",
+      state: "active" as const,
       updatedAt: now,
-    });
-    return { projection: (await ctx.db.get(existing._id))!, created: calendar.created };
+    };
+    const changed = await patchIfChanged(ctx, existing, patch);
+    return { projection: changed ? { ...existing, ...patch } : existing, created: calendar.created };
   }
   const projectionId = await ctx.db.insert("externalProjections", {
       integrationId: integration._id,
@@ -3629,12 +3626,6 @@ async function ensureResourceProjection(
       q.eq("integrationId", integration._id).eq("providerKey", providerKey),
     )
     .collect();
-  const existingByRecord = await ctx.db
-    .query("externalProjections")
-    .withIndex("by_record_type", (q) =>
-      q.eq("recordId", source._id).eq("projectionType", "resource"),
-    )
-    .collect();
   const existing =
     existingByKey.find(
       (item) =>
@@ -3642,7 +3633,11 @@ async function ensureResourceProjection(
         item.accountId === accountId &&
         item.projectionType === "resource",
     ) ??
-    existingByRecord.find(
+    (await ctx.db.query("externalProjections")
+      .withIndex("by_record_type", (q) =>
+        q.eq("recordId", source._id).eq("projectionType", "resource"),
+      )
+      .collect()).find(
       (item) => item.schoolId === integration.schoolId && item.accountId === accountId,
     ) ??
     null;
@@ -3652,14 +3647,15 @@ async function ensureResourceProjection(
      the tree holds identities, and a provider resource has none here until it
      becomes a real artifact. */
   if (existing) {
-    await patchIfChanged(ctx, existing, {
+    const patch = {
       recordId: source._id,
       sourceHash: source.sourceHash,
       providerKey,
-      state: "active",
+      state: "active" as const,
       updatedAt: now,
-    });
-    return { projection: (await ctx.db.get(existing._id))!, created: false };
+    };
+    const changed = await patchIfChanged(ctx, existing, patch);
+    return { projection: changed ? { ...existing, ...patch } : existing, created: false };
   }
   const projectionId = await ctx.db.insert("externalProjections", {
     integrationId: integration._id,
@@ -3700,13 +3696,20 @@ async function ensureSourceRelations(
   // record of a page used to read the integration's whole class list instead.
   const byClass = classTargetsByPage.get(ctx) ?? new Map<string, Promise<Doc<"externalRecords">[]>>();
   classTargetsByPage.set(ctx, byClass);
-  let direct = byClass.get(providerClassId);
+  const targetKey = JSON.stringify([providerClassId, source.mappedAccountId]);
+  let direct = byClass.get(targetKey);
   if (!direct) {
-    direct = ctx.db
-      .query("externalRecords")
-      .withIndex("by_class_type", (q) => q.eq("providerClassId", providerClassId).eq("recordType", "class"))
-      .take(50);
-    byClass.set(providerClassId, direct);
+    direct = Promise.all(
+      [...new Set([undefined, source.mappedAccountId])].map((accountId) =>
+        ctx.db.query("externalRecords")
+          .withIndex("by_integration_class_type_account", (q) =>
+            q.eq("integrationId", integration._id).eq("providerClassId", providerClassId)
+              .eq("recordType", "class").eq("mappedAccountId", accountId))
+          .filter((q) => q.eq(q.field("schoolId"), integration.schoolId))
+          .first(),
+      ),
+    ).then((rows) => rows.filter((row) => row !== null).sort((a, b) => a._creationTime - b._creationTime));
+    byClass.set(targetKey, direct);
   }
   let target = (await direct).find(matches);
   if (!target) {
@@ -4062,17 +4065,14 @@ function recordKindPolicy(
   const capabilityKinds = capabilitySyncKinds(capability);
   const archived = new Map<string, Promise<boolean>>();
   const preferences = new Map<string, Promise<SyncPreferences>>();
+  let records: ReturnType<typeof createSchoolRecordListReader> | undefined;
   const classArchived = (accountId: Id<"accounts">, providerClassId: string | undefined) => {
     if (!providerClassId) return Promise.resolve(false);
     const key = `${accountId}|${providerClassId}`;
     let pending = archived.get(key);
     if (!pending) {
-      pending = ctx.db
-        .query("externalRecords")
-        .withIndex("by_account_kind_class", (q) =>
-          q.eq("mappedAccountId", accountId).eq("syncKind", "classes").eq("providerClassId", providerClassId),
-        )
-        .take(10)
+      pending = (records ??= createSchoolRecordListReader(ctx))
+        .then((read) => read(accountId, "classes", 10, providerClassId))
         .then((rows) => rows.some((row) =>
           row.integrationId === integrationId && !row.tombstone &&
           CLASS_IDENTITY_TYPES.has(row.recordType) && isArchived(row.normalized)));
@@ -4465,7 +4465,8 @@ export const commitNormalizedPage = mutation({
         .withIndex("by_integration_key", (q) =>
           q
             .eq("integrationId", integration._id)
-            .eq("providerRecordKey", input.providerRecordKey),
+            .eq("providerRecordKey", input.providerRecordKey)
+            .eq("sourceIdentityKey", undefined),
         )
         .collect()
         ).find(
@@ -5333,12 +5334,6 @@ async function removeUnseenSource(
   // A task past its keep date is no longer read or recorded as seen; the retention sweep removes it.
   if (isTaskRecordType(source.recordType) && (source.expiresAt ?? taskExpiresAt(source.normalized)) <= now)
     return false;
-  const seen = source.sourceIdentityKey !== undefined
-    ? await ctx.db.query("externalSyncSeenKeys").withIndex("by_run_identity", (q) =>
-        q.eq("syncRunId", syncRun._id).eq("sourceIdentityKey", source.sourceIdentityKey!)).first()
-    : await ctx.db.query("externalSyncSeenKeys").withIndex("by_run_provider", (q) =>
-        q.eq("syncRunId", syncRun._id).eq("providerRecordKey", source.providerRecordKey)).first();
-  if (seen) return false;
   // A pass reads the provider over time. A record another sync created or
   // saw after this pass began is present, even though this pass read its
   // page before it appeared; it is not removed.
@@ -5346,6 +5341,12 @@ async function removeUnseenSource(
       ((source.sourceState === "available" || source.sourceState === "changed") &&
         (source.sourceStateAt ?? 0) >= pass.startedAt))
     return false;
+  const seen = source.sourceIdentityKey !== undefined
+    ? await ctx.db.query("externalSyncSeenKeys").withIndex("by_run_identity", (q) =>
+        q.eq("syncRunId", syncRun._id).eq("sourceIdentityKey", source.sourceIdentityKey!)).first()
+    : await ctx.db.query("externalSyncSeenKeys").withIndex("by_run_provider", (q) =>
+        q.eq("syncRunId", syncRun._id).eq("providerRecordKey", source.providerRecordKey)).first();
+  if (seen) return false;
   await ctx.db.patch(source._id, {
     tombstone: true,
     tombstonedAt: now,
@@ -7224,16 +7225,16 @@ export const materializeClassWorkspaces = mutation({
       ];
       const related = (
         await Promise.all(
-          relatedTypes.map((recordType) =>
-            ctx.db
-              .query("externalRecords")
-              .withIndex("by_class_type", (q) =>
-                q
-                  .eq("providerClassId", source.providerClassId)
-                  .eq("recordType", recordType),
-              )
-              .take(500),
-          ),
+          relatedTypes.map(async (recordType) => {
+            const scopes = await Promise.all([undefined, actor.accountId].map((accountId) =>
+              ctx.db.query("externalRecords")
+                .withIndex("by_integration_class_type_account", (q) =>
+                  q.eq("integrationId", integration._id).eq("providerClassId", source.providerClassId)
+                    .eq("recordType", recordType).eq("mappedAccountId", accountId))
+                .take(500),
+            ));
+            return scopes.flat().sort((a, b) => a._creationTime - b._creationTime).slice(0, 500);
+          }),
         )
       )
         .flat()

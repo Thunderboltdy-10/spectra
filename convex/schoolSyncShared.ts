@@ -19,6 +19,7 @@ import {
 } from "../shared/school-sync";
 import type { vSchoolSyncKind, vSchoolSyncTrigger } from "./schoolSyncSchema";
 import { getActorForAccountId } from "./identityShared";
+import { createSchoolRecordListReader } from "./schoolRecordSummaries";
 
 type Ctx = QueryCtx | MutationCtx;
 export const LOGIN_SYNC_SETUP_VERSION = 3;
@@ -232,10 +233,10 @@ export async function selectedClasses(
     .withIndex("by_account_integration", (q) => q.eq("accountId", accountId).eq("integrationId", integrationId))
     .take(500);
   const selectedIds = [...new Set(selections.filter((row) => row.selected).map((row) => row.providerClassId))];
+  if (!selectedIds.length) return [];
+  const read = await createSchoolRecordListReader(ctx);
   return Promise.all(selectedIds.map(async (providerClassId) => {
-    const rows = await ctx.db.query("externalRecords")
-      .withIndex("by_account_kind_class", (q) => q.eq("mappedAccountId", accountId).eq("syncKind", "classes").eq("providerClassId", providerClassId))
-      .take(10);
+    const rows = await read(accountId, "classes", 10, providerClassId);
     const archived = rows.some((row) => row.integrationId === integrationId && !row.tombstone &&
       CLASS_IDENTITY_TYPES.has(row.recordType) && isArchived(row.normalized));
     return { providerClassId, archived };
@@ -281,18 +282,16 @@ export async function syncTargets(
     // One of the student's own classes (selected or not: an old class may be archived), and
     // only a bounded range of its tasks. Never the whole history.
     const { classId, from, to } = input.window;
-    const known = (await ctx.db.query("externalRecords")
-      .withIndex("by_account_kind_class", (q) => q.eq("mappedAccountId", accountId).eq("syncKind", "classes").eq("providerClassId", classId))
-      .take(10))
+    const read = await createSchoolRecordListReader(ctx);
+    const known = (await read(accountId, "classes", 10, classId))
       .some((row) => row.integrationId === integration._id && !row.tombstone && CLASS_IDENTITY_TYPES.has(row.recordType));
     if (!known || !preferences.admits("past_tasks", trigger, classId)) return empty;
     return { ...empty, classIds: [classId], window: { from, to: Math.min(to, from + OLD_TASK_RESTORE_MAX_RANGE_MS), limit: OLD_TASK_RESTORE_LIMIT } };
   }
   if (kind === "cas") {
     if (!preferences.admits("cas", trigger)) return empty;
-    const classRows = await ctx.db.query("externalRecords")
-      .withIndex("by_account_kind_class", (q) => q.eq("mappedAccountId", accountId).eq("syncKind", "classes"))
-      .take(500);
+    const read = await createSchoolRecordListReader(ctx);
+    const classRows = await read(accountId, "classes", 500);
     const yearGroups = new Set<string>();
     if (input.mapping?.providerYearGroupId) yearGroups.add(input.mapping.providerYearGroupId);
     for (const row of classRows) {
@@ -311,11 +310,10 @@ export async function syncTargets(
   if (kind !== "grades" && kind !== "dropbox_files") return { ...empty, classIds };
   const now = Date.now();
   const tasks: Array<{ classId: string; taskId: string; due: number }> = [];
+  const read = await createSchoolRecordListReader(ctx);
   for (const classId of classIds)
     for (const taskKind of ["current_tasks", "past_tasks"] as const) {
-      const rows = await ctx.db.query("externalRecords")
-        .withIndex("by_account_kind_class", (q) => q.eq("mappedAccountId", accountId).eq("syncKind", taskKind).eq("providerClassId", classId))
-        .take(MAX_TASK_TARGETS);
+      const rows = await read(accountId, taskKind, MAX_TASK_TARGETS, classId);
       for (const row of rows) {
         if (row.integrationId !== integration._id || row.tombstone) continue;
         const value = row.normalized && typeof row.normalized === "object" ? (row.normalized as Record<string, unknown>) : {};

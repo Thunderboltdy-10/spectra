@@ -429,6 +429,10 @@ export async function commitChangeGroup(
     summary,
     committedAt: now,
     versionId,
+    // Only AI run undo needs the extra copies after the version is durable.
+    ...(group.source === "human"
+      ? { baseSnapshot: undefined, finalSnapshot: undefined, snapshotsTrimmed: true }
+      : {}),
   });
   await ctx.db.patch(artifact._id, { currentVersionId: versionId });
   await confirmCanonicalPlacements(ctx, versionId);
@@ -518,6 +522,9 @@ export async function commitHumanCheckpoint(
         summary,
         committedAt: now,
         versionId,
+        baseSnapshot: undefined,
+        finalSnapshot: undefined,
+        snapshotsTrimmed: true,
       }),
     ),
   );

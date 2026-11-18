@@ -392,7 +392,7 @@ async function schoolRecordWithOwnText(ctx: QueryCtx, record: Doc<"externalRecor
 const schoolSource = defineSource({
   kind: "school",
   table: "externalRecords",
-  watch: ["sourceHash", "normalized", "tombstone", "sourceState", "audienceScope", "mappedAccountId", "providerClassId",
+  watch: ["sourceHash", "normalized", "audienceScope", "mappedAccountId", "providerClassId",
     "academicPeriodKey", "recordType", "schoolId"],
   indexable: schoolIndexable,
   updatedAt: (doc) => doc.sourceModifiedAt ?? doc.updatedAt,
@@ -474,10 +474,13 @@ function sourceTrigger<T extends TableNames>(source: SourceSpec<T>): TriggerSpec
     table: source.table,
     target(previous, next) {
       const doc = next ?? previous;
-      if (!doc || !changed(previous, next, source.watch)) return null;
+      if (!doc) return null;
       const wasIn = previous ? source.indexable(previous) : false;
       const isIn = next ? source.indexable(next) : false;
       if (!wasIn && !isIn) return null;
+      // Availability transitions matter, but re-stamping an available school
+      // record does not change the text or audience of its search chunks.
+      if (wasIn === isIn && !changed(previous, next, source.watch)) return null;
       // Leaving the index (deleted, removed, tombstoned) is purged at once; reads already exclude it.
       return { kind: source.kind, itemId: String(doc._id), schoolId: source.schoolId(doc), immediate: wasIn && !isIn };
     },

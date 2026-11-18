@@ -10,7 +10,6 @@ import { z } from "zod";
 import {
   activeReplicaWriteTarget,
   chooseReplicaContinuity,
-  latestActiveWriteForReplica,
 } from "./bridgeIdentity";
 import { evaluateAccessForActor } from "./authorityShared";
 import { assertPayloadWriteAllowed, computeEffectivePolicy } from "./syncPolicy";
@@ -841,12 +840,34 @@ const discoveredResourceSchema = z.object({
   nativeFormat: z.string().regex(/^[a-z0-9][a-z0-9._-]{0,31}$/),
 });
 
+async function activeWriteForReplica(ctx: MutationCtx, replica: Doc<"workReplicas">) {
+  const rows = await Promise.all((["pending", "claimed"] as const).map((state) =>
+    ctx.db.query("bridgeWriteRequests")
+      .withIndex("by_replica_state", (q) => q.eq("replicaId", replica._id).eq("state", state))
+      .filter((q) => q.eq(q.field("workId"), replica.workId))
+      .order("desc")
+      .first(),
+  ));
+  return rows.filter((row) => row !== null)
+    .sort((a, b) => b.createdAt - a.createdAt || b._creationTime - a._creationTime)[0];
+}
+
+function resourceDiscoveryLookups(ctx: MutationCtx, actor: BridgeActor, mount: Doc<"bridgeMounts">) {
+  let policy: ReturnType<typeof computeEffectivePolicy> | undefined;
+  let twins: ReturnType<typeof twinMounts> | undefined;
+  return {
+    mountPolicy: () => policy ??= computeEffectivePolicy(ctx, actor.accountId, { mount: String(mount._id) }),
+    twins: () => twins ??= twinMounts(ctx, actor.accountId, mount),
+  };
+}
+
 async function discoverResourceForMount(
   ctx: MutationCtx,
   device: Doc<"bridgeDevices">,
   actor: BridgeActor,
   mount: Doc<"bridgeMounts"> & { rootOrgNodeId: Id<"orgNodes"> },
   input: z.infer<typeof discoveredResourceSchema>,
+  lookups = resourceDiscoveryLookups(ctx, actor, mount),
   depth = 0,
 ): Promise<
   | { skipped: true; reason: string; workId?: undefined; replicaId?: undefined; revision?: undefined; payloadHash?: undefined; needsPayload?: undefined }
@@ -874,8 +895,7 @@ async function discoverResourceForMount(
       }
       return { skipped: true as const, reason: "office-lock" as const };
     }
-    const [mountPolicy, byResource, byPath] = await Promise.all([
-      computeEffectivePolicy(ctx, actor.accountId, { account: String(actor.accountId), mount: String(mount._id) }),
+    const [byResource, byPath] = await Promise.all([
       ctx.db.query("workReplicas").withIndex("by_device_resource", (q) => q.eq("deviceId", device._id).eq("localResourceId", input.localResourceId)).take(20),
       ctx.db.query("workReplicas").withIndex("by_device_mount_path", (q) => q.eq("deviceId", device._id).eq("mountId", mount._id).eq("relativePath", input.relativePath)).take(20),
     ]);
@@ -903,13 +923,7 @@ async function discoverResourceForMount(
         item: String(existingReplica.workId),
       });
       const existingCloud = scored.find(({ candidate }) => candidate._id === existingReplica._id)?.cloud;
-      const activeWrite = latestActiveWriteForReplica(
-        await ctx.db.query("bridgeWriteRequests")
-          .withIndex("by_work_created", (q) => q.eq("workId", existingReplica.workId))
-          .order("desc")
-          .take(50),
-        existingReplica._id,
-      );
+      const activeWrite = await activeWriteForReplica(ctx, existingReplica);
       const nativePayloadAllowed = policy.cloudContent === "full";
       // One file on this computer is one work, however it first came in. When a
       // folder takes over a file chosen alone or a smaller folder, the work comes
@@ -1062,7 +1076,7 @@ async function discoverResourceForMount(
     // The same file already in Spectra from this folder on another computer:
     // this computer's copy joins that work, then is handled like any copy.
     if (!depth) {
-      for (const twin of await twinMounts(ctx, actor.accountId, mount)) {
+      for (const twin of await lookups.twins()) {
         const twinReplica = (await ctx.db.query("workReplicas")
           .withIndex("by_device_mount_path", (q) => q.eq("deviceId", twin.deviceId).eq("mountId", twin._id).eq("relativePath", input.relativePath))
           .take(5))[0];
@@ -1086,12 +1100,13 @@ async function discoverResourceForMount(
           lastVerifiedAt: now,
           updatedAt: now,
         });
-        return discoverResourceForMount(ctx, device, actor, mount, input, depth + 1);
+        return discoverResourceForMount(ctx, device, actor, mount, input, lookups, depth + 1);
       }
     }
     let discoveryRequest = await ctx.db.query("syncDiscoveryRequests")
       .withIndex("by_device_resource", (q) => q.eq("deviceId", device._id).eq("localResourceId", input.localResourceId))
       .unique();
+    const mountPolicy = await lookups.mountPolicy();
     if (mountPolicy.source.kind !== "default") {
       if (!policyIncludesPath(mountPolicy, input.relativePath)) return { skipped: true as const, reason: "filtered" as const };
       if (mountPolicy.discovery === "explicit") return { skipped: true as const, reason: "explicit-only" as const };
@@ -1101,6 +1116,10 @@ async function discoverResourceForMount(
         if (discoveryRequest?.state !== "approved") {
           const now = Date.now();
           if (discoveryRequest) {
+            if (discoveryRequest.state === "pending" && discoveryRequest.mountId === mount._id &&
+                discoveryRequest.relativePath === input.relativePath && discoveryRequest.size === input.size &&
+                discoveryRequest.contentHash === input.contentHash && discoveryRequest.nativeFormat === input.nativeFormat)
+              return { skipped: true as const, reason: "approval-required" as const };
             await ctx.db.patch(discoveryRequest._id, {
               mountId: mount._id,
               relativePath: input.relativePath,
@@ -1169,6 +1188,7 @@ export const discoverResourcesPage = mutation({
       throw new Error("MOUNT_NOT_ACTIVE");
     if (!args.resources.length || args.resources.length > 100)
       throw new Error("DISCOVERY_PAGE_SIZE_INVALID");
+    const lookups = resourceDiscoveryLookups(ctx, actor, mount);
     const registrations = [];
     for (const rawResource of args.resources) {
       const parsed = discoveredResourceSchema.safeParse(rawResource);
@@ -1188,6 +1208,7 @@ export const discoverResourcesPage = mutation({
         actor,
         mount as Doc<"bridgeMounts"> & { rootOrgNodeId: Id<"orgNodes"> },
         parsed.data,
+        lookups,
       ));
     }
     return { registrations };
@@ -1519,13 +1540,7 @@ export const commitPayloadUpload = mutation({
       // The upload verified newer local bytes only. The cloud payload remains
       // retained at the common base, so it is behind rather than current.
       await ctx.db.patch(cloud._id, { state: "behind", updatedAt: now });
-      const activeWrite = latestActiveWriteForReplica(
-        await ctx.db.query("bridgeWriteRequests")
-          .withIndex("by_work_created", (q) => q.eq("workId", replica.workId))
-          .order("desc")
-          .take(50),
-        replica._id,
-      );
+      const activeWrite = await activeWriteForReplica(ctx, replica);
       if (
         activeWrite &&
         input.hash !== activeWrite.baseRevision &&

@@ -171,7 +171,7 @@ export async function upsertSourceCalendarItem(
       q.eq("ownerAccountId", input.ownerAccountId).eq("sourceKey", sourceKey),
     )
     .unique();
-  const existingById = input.existingItemId
+  const existingById = !existingByKey && input.existingItemId
     ? await ctx.db.get(input.existingItemId)
     : null;
   const existing =

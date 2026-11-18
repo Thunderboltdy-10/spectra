@@ -14,6 +14,7 @@ import { createManagebacQueryVisibilityReader, createManagebacVisibilityReader }
 import { ensurePlannerProjection, purgeSyncKindPage, submissionFiles } from "./managebac";
 import { deleteStorageIfNoOtherBinding, storageHasOtherBinding } from "./durableStorageBindings";
 import { vSchoolSyncKind, vSchoolSyncMode } from "./schoolSyncSchema";
+import { createSchoolRecordListReader } from "./schoolRecordSummaries";
 import {
   CLASS_IDENTITY_TYPES,
   isArchived,
@@ -118,11 +119,12 @@ async function ownRecord(ctx: Ctx, actor: Actor, recordId: Id<"externalRecords">
   return (await reader.canReadRecord(record)) ? { integration, record, reader } : null;
 }
 
-async function classTitles(ctx: Ctx, actor: Actor, integrationId: Id<"schoolIntegrations">) {
-  const rows = await ctx.db
-    .query("externalRecords")
-    .withIndex("by_account_kind_class", (q) => q.eq("mappedAccountId", actor.accountId).eq("syncKind", "classes"))
-    .take(LIST_LIMIT);
+type SchoolRecordListReader = Awaited<ReturnType<typeof createSchoolRecordListReader>>;
+type SchoolListRecord = Awaited<ReturnType<SchoolRecordListReader>>[number];
+
+async function classTitles(ctx: Ctx, actor: Actor, integrationId: Id<"schoolIntegrations">, reader?: SchoolRecordListReader) {
+  const read = reader ?? await createSchoolRecordListReader(ctx);
+  const rows = await read(actor.accountId, "classes", LIST_LIMIT);
   const titles = new Map<string, string>();
   for (const row of rows)
     if (row.integrationId === integrationId && row.providerClassId && CLASS_IDENTITY_TYPES.has(row.recordType) && !row.tombstone) {
@@ -133,7 +135,7 @@ async function classTitles(ctx: Ctx, actor: Actor, integrationId: Id<"schoolInte
   return titles;
 }
 
-function taskSummary(record: Doc<"externalRecords">, classTitle?: string) {
+function taskSummary(record: Pick<SchoolListRecord, "_id" | "providerClassId" | "academicPeriodKey" | "normalized" | "syncKind" | "sourceState" | "provenanceUrl">, classTitle?: string) {
   const value = fields(record.normalized);
   return {
     recordId: record._id,
@@ -466,17 +468,22 @@ export const classes = query({
     const actor = await requireStudent(ctx);
     const integration = await managebacFor(ctx, actor);
     if (!integration) return { classes: [] };
-    const reader = createManagebacQueryVisibilityReader(ctx, actor);
+    const read = await createSchoolRecordListReader(ctx);
     const [rows, selections, prefs] = await Promise.all([
-      readableOfKind(ctx, actor, integration._id, "classes", reader.canReadRecord),
+      read(actor.accountId, "classes", LIST_LIMIT),
       ctx.db.query("managebacClassSelections")
         .withIndex("by_account_integration", (q) => q.eq("accountId", actor.accountId).eq("integrationId", integration._id))
         .take(LIST_LIMIT),
       loadSyncPreferences(ctx, actor.accountId, integration._id),
     ]);
-    const byClass = new Map<string, Doc<"externalRecords">>();
-    for (const row of rows)
-      if (row.providerClassId && CLASS_IDENTITY_TYPES.has(row.recordType)) {
+    const reader = createManagebacQueryVisibilityReader(ctx, actor);
+    const candidates = rows.filter((row) =>
+      row.integrationId === integration._id && row.schoolId === actor.schoolId &&
+      !row.tombstone && row.providerClassId && CLASS_IDENTITY_TYPES.has(row.recordType));
+    const readable = await Promise.all(candidates.map(reader.canReadRecord));
+    const byClass = new Map<string, SchoolListRecord>();
+    for (const [index, row] of candidates.entries())
+      if (readable[index] && row.providerClassId) {
         const current = byClass.get(row.providerClassId);
         // A class row names it better than a membership row.
         if (!current || (current.recordType !== "class" && row.recordType === "class")) byClass.set(row.providerClassId, row);
@@ -515,12 +522,16 @@ export const tasks = query({
     const integration = await managebacFor(ctx, actor);
     if (!integration) return { tasks: [] };
     const reader = createManagebacQueryVisibilityReader(ctx, actor);
+    const read = await createSchoolRecordListReader(ctx);
     const kinds: SchoolSyncKind[] = args.view === "current" ? ["current_tasks"] : args.view === "past" ? ["past_tasks"] : ["current_tasks", "past_tasks"];
-    const [titles, ...lists] = await Promise.all([
-      classTitles(ctx, actor, integration._id),
-      ...kinds.map((kind) => readableOfKind(ctx, actor, integration._id, kind, reader.canReadRecord, args.providerClassId)),
-    ]);
-    const rows = lists.flat().map((row) => taskSummary(row, row.providerClassId ? titles.get(row.providerClassId) : undefined));
+    const lists = await Promise.all(kinds.map((kind) => read(actor.accountId, kind, LIST_LIMIT, args.providerClassId)));
+    const candidates = lists.flat().filter((row) =>
+      row.integrationId === integration._id && row.schoolId === actor.schoolId && !row.tombstone);
+    const readable = await Promise.all(candidates.map(reader.canReadRecord));
+    const visible = candidates.filter((_, index) => readable[index]);
+    const titles = visible.some((row) => row.providerClassId)
+      ? await classTitles(ctx, actor, integration._id, read) : new Map<string, string>();
+    const rows = visible.map((row) => taskSummary(row, row.providerClassId ? titles.get(row.providerClassId) : undefined));
     // Current work soonest first; the archive newest first.
     rows.sort((a, b) => a.past !== b.past ? (a.past ? 1 : -1)
       : a.past ? (b.dueAt ?? 0) - (a.dueAt ?? 0) : (a.dueAt ?? Infinity) - (b.dueAt ?? Infinity));

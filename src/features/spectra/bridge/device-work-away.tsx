@@ -25,13 +25,18 @@ export function useDeviceWorkAwayNote(artifact: Placed | undefined) {
   return away === "checking" ? null : away;
 }
 
-export function DeviceWorkAway({ title, reason }: { title: string; reason: string | "checking" }) {
+export function DeviceWorkAway({ title, reason, noBackup }: { title: string; reason: string | "checking"; noBackup?: boolean }) {
   if (reason === "checking")
     return <div className="flex h-full min-h-[240px] items-center justify-center text-[var(--text-tertiary)]">Opening {title}…</div>;
   return (
     <div className="flex h-full min-h-[240px] flex-col items-center justify-center gap-3 px-6 text-center">
       <p className="text-[length:var(--text-title)] font-medium text-[var(--text-primary)]">{title} is on your computer</p>
       <p className="max-w-[44ch] text-[var(--text-secondary)]">{reason}</p>
+      {noBackup ? (
+        <p className="max-w-[44ch] text-caption text-[var(--text-tertiary)]">
+          There&apos;s no backup of it to edit here yet. Backups are made while it&apos;s on that computer, unless you chose to keep everything only there.
+        </p>
+      ) : null}
       <Link
         href="/devices"
         className="rounded-control border border-[var(--border-default)] px-3 py-1.5 font-medium text-[var(--text-primary)] hover:bg-[var(--bg-secondary)]"

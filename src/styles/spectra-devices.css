@@ -858,6 +858,24 @@
   color: var(--text-secondary);
 }
 
+.device-folder-twin-action {
+  font: inherit;
+  font-weight: 600;
+  color: var(--folder-ink, var(--text-primary));
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  border-radius: 4px;
+}
+
+.device-folder-twin-action:disabled {
+  opacity: 0.6;
+}
+
+.device-folder-twin-action:focus-visible {
+  outline: 2px solid var(--focus-ring, currentColor);
+  outline-offset: 2px;
+}
+
 /* What a folder still has to move: one lane each way, an arrow in a small
    chip saying which way, the count in words. Stuck files read in warning. */
 .device-folder-lanes {

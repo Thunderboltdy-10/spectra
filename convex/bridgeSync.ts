@@ -5,7 +5,7 @@ import { internalMutation, mutation } from "./orgNodeMutation";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { getActorForAccountId, getAuthenticatedActor } from "./identityShared";
-import { createFolderNode, placeSourceNode, purgeNode, purgeSourceNodes, trashNode, findPrimaryNode, moveNode, renameNode, restoreTrashedNode, ensureGeneralNode, artifactSummaryFor, ARTIFACT_SUMMARY_READ_MODEL_VERSION } from "./orgTreeShared";
+import { createFolderNode, placeSourceNode, purgeNode, purgeSourceNodes, trashNode, findNodesForSource, findPrimaryNode, moveNode, renameNode, restoreTrashedNode, ensureGeneralNode, artifactSummaryFor, ARTIFACT_SUMMARY_READ_MODEL_VERSION } from "./orgTreeShared";
 import { z } from "zod";
 import {
   activeReplicaWriteTarget,
@@ -195,23 +195,166 @@ async function ensureFolderPath(ctx: Parameters<typeof createFolderNode>[0], acc
  * folder at the same place on two computers is one folder: its files are one
  * set of works with a copy on each computer, never brought in twice.
  */
-async function twinMounts(ctx: QueryCtx | MutationCtx, accountId: Id<"accounts">, mount: { deviceId: Id<"bridgeDevices">; rootKey?: string; selectedFile?: string; _id?: Id<"bridgeMounts"> }) {
+async function twinMounts(ctx: QueryCtx | MutationCtx, accountId: Id<"accounts">, mount: { deviceId: Id<"bridgeDevices">; rootKey?: string; selectedFile?: string; _id?: Id<"bridgeMounts">; linkedToMountId?: Id<"bridgeMounts"> }) {
+  const twins: Doc<"bridgeMounts">[] = [];
+  // Folders linked by hand: the same folder at a different path on each computer.
+  const linked = [
+    ...(mount.linkedToMountId ? [await ctx.db.get(mount.linkedToMountId)] : []),
+    ...(mount._id ? await ctx.db.query("bridgeMounts").withIndex("by_linked_to", (q) => q.eq("linkedToMountId", mount._id)).take(10) : []),
+  ];
+  for (const twin of linked)
+    if (twin && twin._id !== mount._id && twin.deviceId !== mount.deviceId && twin.state !== "revoked" && twin.selectedFile === mount.selectedFile && twin.accountId === accountId)
+      twins.push(twin);
   const rootKey = mount.rootKey;
-  if (!rootKey) return [];
+  if (!rootKey) return twins;
   const devices = await ctx.db.query("bridgeDevices")
     .withIndex("by_account_state", (q) => q.eq("accountId", accountId).eq("state", "active"))
     .take(20);
-  const twins: Doc<"bridgeMounts">[] = [];
   for (const other of devices) {
     if (other._id === mount.deviceId) continue;
     const twin = await ctx.db.query("bridgeMounts")
       .withIndex("by_device_root_key", (q) => q.eq("deviceId", other._id).eq("rootKey", rootKey))
       .unique();
-    if (twin && twin._id !== mount._id && twin.state !== "revoked" && twin.selectedFile === mount.selectedFile && twin.accountId === accountId)
+    if (twin && twin._id !== mount._id && twin.state !== "revoked" && twin.selectedFile === mount.selectedFile && twin.accountId === accountId && !twins.some((known) => known._id === twin._id))
       twins.push(twin);
   }
   return twins;
 }
+
+/** Another live folder keeps this Library folder too (the same OneDrive folder on another computer). */
+async function rootSharedWithOtherMount(ctx: QueryCtx | MutationCtx, mount: Doc<"bridgeMounts">) {
+  if (!mount.rootOrgNodeId) return false;
+  return (await twinMounts(ctx, mount.accountId, mount)).some((twin) => twin.rootOrgNodeId === mount.rootOrgNodeId);
+}
+
+/**
+ * Link a folder on this computer to the same folder synced from another
+ * computer, when the two paths differ so Spectra couldn't tell on its own
+ * (OneDrive under a different user folder, say). Files brought in from both
+ * become one work each, with a copy on each computer; the duplicates go to
+ * the Trash, where they can still be restored.
+ */
+export const linkSameFolder = mutation({
+  args: { mountId: v.id("bridgeMounts"), twinMountId: v.id("bridgeMounts") },
+  handler: async (ctx, args) => {
+    const actor = await getAuthenticatedActor(ctx);
+    if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
+    const [mount, twin] = await Promise.all([ctx.db.get(args.mountId), ctx.db.get(args.twinMountId)]);
+    if (!mount || !twin || mount.accountId !== actor.accountId || twin.accountId !== actor.accountId) throw new Error("MOUNT_NOT_FOUND");
+    if (mount.deviceId === twin.deviceId || mount.state === "revoked" || twin.state === "revoked") throw new Error("MOUNT_LINK_INVALID");
+    if (mount.selectedFile !== twin.selectedFile || twin.linkedToMountId === mount._id) throw new Error("MOUNT_LINK_INVALID");
+    await ctx.db.patch(mount._id, { linkedToMountId: twin._id, updatedAt: Date.now() });
+    await ctx.scheduler.runAfter(0, internal.bridgeSync.mergeLinkedFolder, { mountId: mount._id });
+    return null;
+  },
+});
+
+/** Stop treating the two folders as one. What was merged stays merged. */
+export const unlinkSameFolder = mutation({
+  args: { mountId: v.id("bridgeMounts") },
+  handler: async (ctx, args) => {
+    const actor = await getAuthenticatedActor(ctx);
+    if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
+    const mount = await ctx.db.get(args.mountId);
+    if (!mount || mount.accountId !== actor.accountId) throw new Error("MOUNT_NOT_FOUND");
+    if (mount.linkedToMountId) await ctx.db.patch(mount._id, { linkedToMountId: undefined, updatedAt: Date.now() });
+    for (const other of await ctx.db.query("bridgeMounts").withIndex("by_linked_to", (q) => q.eq("linkedToMountId", mount._id)).take(10))
+      if (other.accountId === actor.accountId) await ctx.db.patch(other._id, { linkedToMountId: undefined, updatedAt: Date.now() });
+    return null;
+  },
+});
+
+const MERGE_PAGE = 100;
+
+/**
+ * Merge a linked folder into its twin, a page at a time. First each copy whose
+ * file the twin already brought in joins the twin's work (the duplicate work
+ * goes to the Trash); then whatever is left in this folder's Library folder
+ * moves to the same place under the twin's, and the emptied folder goes.
+ */
+export const mergeLinkedFolder = internalMutation({
+  args: { mountId: v.id("bridgeMounts"), cursor: v.optional(v.string()), phase: v.optional(v.literal("tree")) },
+  handler: async (ctx, args) => {
+    const mount = await ctx.db.get(args.mountId);
+    const twin = mount?.linkedToMountId ? await ctx.db.get(mount.linkedToMountId) : null;
+    if (!mount || !twin || twin.state === "revoked" || mount.state === "revoked") return null;
+    const actor = await getActorForAccountId(ctx, mount.accountId);
+    if (!actor) return null;
+    if (args.phase !== "tree") {
+      const page = await ctx.db.query("workReplicas")
+        .withIndex("by_mount", (q) => q.eq("mountId", mount._id))
+        .paginate({ cursor: args.cursor ?? null, numItems: MERGE_PAGE });
+      const now = Date.now();
+      for (const replica of page.page) {
+        if (replica.kind !== "local" || !replica.relativePath || replica.deviceId !== mount.deviceId) continue;
+        const relativePath = replica.relativePath;
+        const twinReplica = (await ctx.db.query("workReplicas")
+          .withIndex("by_device_mount_path", (q) => q.eq("deviceId", twin.deviceId).eq("mountId", twin._id).eq("relativePath", relativePath))
+          .take(5)).find((row) => row.kind === "local");
+        if (!twinReplica || twinReplica.workId === replica.workId) continue;
+        const work = await ctx.db.get(twinReplica.workId);
+        if (!work || work.status === "deleted" || work.ownerAccountId !== mount.accountId) continue;
+        const duplicate = replica.workId;
+        await ctx.db.patch(replica._id, {
+          workId: twinReplica.workId,
+          revision: twinReplica.revision,
+          baseRevision: twinReplica.baseRevision,
+          contentHash: twinReplica.contentHash,
+          payloadRef: twinReplica.payloadRef,
+          updatedAt: now,
+        });
+        const left = await ctx.db.query("workReplicas").withIndex("by_work", (q) => q.eq("workId", duplicate)).first();
+        if (!left)
+          for (const node of await findNodesForSource(ctx, "work", String(duplicate)))
+            if (node.accountId === mount.accountId && node.deletedAt === undefined) await trashNode(ctx, node);
+      }
+      await ctx.scheduler.runAfter(0, internal.bridgeSync.mergeLinkedFolder, page.isDone
+        ? { mountId: mount._id, phase: "tree" as const }
+        : { mountId: mount._id, cursor: page.continueCursor });
+      return null;
+    }
+    const oldRootId = mount.rootOrgNodeId;
+    const twinRootId = twin.rootOrgNodeId;
+    if (!twinRootId || mount.selectedFile) return null;
+    if (!oldRootId || oldRootId === twinRootId) {
+      if (!oldRootId) await ctx.db.patch(mount._id, { rootOrgNodeId: twinRootId, updatedAt: Date.now() });
+      return null;
+    }
+    // Walk this folder's Library tree for anything still in it.
+    const found: Array<{ node: Doc<"orgNodes">; path: string[] }> = [];
+    const queue: Array<{ id: Id<"orgNodes">; path: string[] }> = [{ id: oldRootId, path: [] }];
+    let visited = 0;
+    while (queue.length && found.length < MERGE_PAGE && visited < 300) {
+      const { id, path } = queue.shift()!;
+      visited++;
+      const children = await ctx.db.query("orgNodes")
+        .withIndex("by_account_parent_order", (q) => q.eq("accountId", mount.accountId).eq("parentId", id))
+        .take(200);
+      for (const child of children) {
+        if (child.deletedAt !== undefined) continue;
+        if (child.kind === "folder") queue.push({ id: child._id, path: [...path, child.name] });
+        else if (found.length < MERGE_PAGE) found.push({ node: child, path });
+      }
+    }
+    for (const { node, path } of found) {
+      const base = await mountPathBase(ctx, mount.accountId, twinRootId, path);
+      const parent = await ensureFolderPath(ctx, mount.accountId, actor.schoolId, base, path);
+      if (node.parentId !== parent) await moveNode(ctx, node, { parentId: parent });
+    }
+    if (found.length) {
+      await ctx.scheduler.runAfter(0, internal.bridgeSync.mergeLinkedFolder, { mountId: mount._id, phase: "tree" as const });
+      return null;
+    }
+    await ctx.db.patch(mount._id, { rootOrgNodeId: twinRootId, updatedAt: Date.now() });
+    const oldRoot = await ctx.db.get(oldRootId);
+    const stillUsed = await ctx.db.query("bridgeMounts")
+      .withIndex("by_account_state", (q) => q.eq("accountId", mount.accountId))
+      .filter((q) => q.and(q.eq(q.field("rootOrgNodeId"), oldRootId), q.neq(q.field("state"), "revoked")))
+      .first();
+    if (oldRoot && oldRoot.deletedAt === undefined && !stillUsed) await trashNode(ctx, oldRoot);
+    return null;
+  },
+});
 
 async function mountRootFor(
   ctx: MutationCtx,
@@ -2095,7 +2238,8 @@ export const detachGrant = mutation({
     if (mount) {
       const now = Date.now();
       const rootNode = mount.rootOrgNodeId ? await ctx.db.get(mount.rootOrgNodeId) : null;
-      if (!mount.selectedFile && rootNode && rootNode.accountId === actor.accountId && rootNode.deletedAt === undefined) {
+      // A Library folder another computer still syncs (the same OneDrive folder) stays.
+      if (!mount.selectedFile && rootNode && rootNode.accountId === actor.accountId && rootNode.deletedAt === undefined && !(await rootSharedWithOtherMount(ctx, mount))) {
         await trashNode(ctx, rootNode);
       }
       const [replicas, pending, claimed] = await Promise.all([
@@ -2403,5 +2547,80 @@ export const reportChanges = mutation({
     }
     await ctx.db.patch(device._id, { lastSeenAt: Date.now() });
     return { results };
+  },
+});
+
+/** Spectra types that travel as a .spectra-pkg file (src/features/spectra/lenses/spectra-package.ts). */
+const PACKAGE_TYPES = new Set(["flashcard_deck", "quiz", "planner_task", "agent", "whiteboard", "presentation"]);
+
+/** Bridge 0.1.2 makes the folders a new file goes into; older ones need them there already. */
+function bridgeMakesFolders(version: string | undefined) {
+  const [major = 0, minor = 0, patch = 0] = (version ?? "").split(/[.+-]/).map((part) => Number.parseInt(part, 10) || 0);
+  return major > 0 || minor > 1 || (minor === 1 && patch >= 2);
+}
+
+/**
+ * Works made in Spectra since new files started syncing both ways, placed in
+ * a folder this computer syncs, that have no file on it yet. The browser on
+ * this computer asks for each to be written there. Native Spectra documents
+ * have no file form yet, so only Office-linked works and Spectra package
+ * types qualify.
+ */
+export const waitingForDisk = query({
+  args: { deviceId: v.id("bridgeDevices") },
+  handler: async (ctx, args) => {
+    const actor = await getAuthenticatedActor(ctx).catch(() => null);
+    if (!actor) return [];
+    const device = await ctx.db.get(args.deviceId);
+    if (!device || device.accountId !== actor.accountId || device.state !== "active") return [];
+    const accountPolicy = await ctx.db.query("syncPolicies")
+      .withIndex("by_account_scope", (q) => q.eq("accountId", actor.accountId).eq("scopeKind", "account").eq("scopeId", String(actor.accountId)))
+      .unique();
+    if (!accountPolicy || accountPolicy.discovery !== "auto" || accountPolicy.structure !== "mirror-both") return [];
+    const mounts = (await ctx.db.query("bridgeMounts").withIndex("by_device_state", (q) => q.eq("deviceId", device._id).eq("state", "active")).take(50))
+      .filter((mount) => !mount.selectedFile && mount.rootOrgNodeId);
+    if (!mounts.length) return [];
+    const byRoot = new Map(mounts.map((mount) => [String(mount.rootOrgNodeId), mount]));
+    const since = accountPolicy.updatedAt;
+    const recent = await ctx.db.query("spectraArtifactSummaries")
+      .withIndex("by_account_created", (q) => q.eq("ownerAccountId", actor.accountId).gt("createdAt", since))
+      .order("desc")
+      .take(40);
+    const makesFolders = bridgeMakesFolders(device.appVersion);
+    const waiting: Array<{ artifactId: Id<"spectraArtifacts">; mountId: Id<"bridgeMounts">; folderPath: string[]; updatedAt: number }> = [];
+    for (const summary of recent) {
+      if (waiting.length >= 10) break;
+      if (summary.status !== "active" && summary.status !== "draft") continue;
+      const projection = (summary.projection ?? {}) as { nativeFormat?: string; storageHome?: string; resourceClass?: string };
+      if (projection.storageHome === "device" || projection.resourceClass === "resource") continue;
+      if (!PACKAGE_TYPES.has(summary.blueprintKey) && !isOfficeFormat(projection.nativeFormat ?? "")) continue;
+      const locals = await ctx.db.query("workReplicas").withIndex("by_work_kind", (q) => q.eq("workId", summary.artifactId).eq("kind", "local")).take(20);
+      if (locals.some((replica) => replica.deviceId === device._id)) continue;
+      const node = await findPrimaryNode(ctx, actor.accountId, "work", String(summary.artifactId));
+      if (!node || node.deletedAt !== undefined) continue;
+      // Up through its folders to the Library folder of a synced folder.
+      const folderPath: string[] = [];
+      let parentId = node.parentId;
+      let mount: Doc<"bridgeMounts"> | undefined;
+      for (let depth = 0; parentId && depth < 12; depth++) {
+        mount = byRoot.get(String(parentId));
+        if (mount) break;
+        const parent: Doc<"orgNodes"> | null = await ctx.db.get(parentId);
+        if (!parent || parent.kind !== "folder" || parent.deletedAt !== undefined) break;
+        folderPath.unshift(parent.name);
+        parentId = parent.parentId;
+      }
+      if (!mount || mount.createdAt > (summary.createdAt ?? 0)) continue;
+      if (folderPath.length && !makesFolders) {
+        // An older Bridge writes only into a folder already on the disk.
+        const prefix = `${folderPath.join("/")}/`;
+        const present = await ctx.db.query("workReplicas")
+          .withIndex("by_device_mount_path", (q) => q.eq("deviceId", device._id).eq("mountId", mount!._id).gte("relativePath", prefix).lt("relativePath", `${prefix}\uffff`))
+          .first();
+        if (!present) continue;
+      }
+      waiting.push({ artifactId: summary.artifactId, mountId: mount._id, folderPath, updatedAt: summary.updatedAt });
+    }
+    return waiting;
   },
 });

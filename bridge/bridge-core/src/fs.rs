@@ -524,6 +524,9 @@ impl<P: Platform> SafeWriter<P> {
             return Err(FsError::FileLocked);
         }
         let parent = target.parent().ok_or(FsError::GrantEscape)?;
+        // A new file Spectra places in a folder made in Spectra: the folder
+        // comes to the disk with it. The path already resolved inside the grant.
+        fs::create_dir_all(parent)?;
         let temp = parent.join(format!(".spectra-{}.tmp", op.op_id));
         let result = (|| -> Result<String, FsError> {
             self.platform.before_write(&target)?;

@@ -30,15 +30,32 @@ const BACKUPS_KEPT = 7;
 const HAND_OVER_MS = 30 * 24 * 60 * 60_000;
 const DELETE_PAGE = 100;
 
-async function ownedWorks(ctx: QueryCtx, accountId: Id<"accounts">, perKind: number) {
-  const pages = await Promise.all([...DEVICE_WORK_TYPES].map((blueprintKey) =>
-    ctx.db
-      .query("spectraArtifacts")
-      .withIndex("by_account_blueprint", (q) =>
-        q.eq("ownerAccountId", accountId).eq("blueprintKey", blueprintKey as BlueprintKey))
-      .order("desc")
-      .take(perKind)));
-  return pages.flat();
+type SummaryPlacement = {
+  storageHome?: "device";
+  storageStoreId?: string;
+  nativeFormat?: string;
+  resourceClass?: string;
+};
+
+/**
+ * Where this account's works live, read from their compact summaries rather
+ * than the works themselves: Devices asks this on every change, and a work's
+ * full row carries its whole content.
+ */
+async function ownedPlacements(ctx: QueryCtx, accountId: Id<"accounts">, perKind: number) {
+  const pages = await Promise.all(
+    [...DEVICE_WORK_TYPES].flatMap((blueprintKey) =>
+      (["active", "draft", "archived"] as const).map((status) =>
+        ctx.db
+          .query("spectraArtifactSummaries")
+          .withIndex("by_account_blueprint_status_updated", (q) =>
+            q.eq("ownerAccountId", accountId).eq("blueprintKey", blueprintKey).eq("status", status))
+          .order("desc")
+          .take(perKind),
+      ),
+    ),
+  );
+  return pages.flat().map((row) => (row.projection ?? {}) as SummaryPlacement);
 }
 
 /**
@@ -124,12 +141,12 @@ export const counts = query({
   args: { storeId: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const actor = await requireSpectraActor(ctx);
-    const rows = await ownedWorks(ctx, actor._id, 150);
+    const rows = await ownedPlacements(ctx, actor._id, 150);
     let here = 0;
     let elsewhere = 0;
     let cloud = 0;
     for (const row of rows) {
-      if (row.status === "deleted" || row.resourceClass === "resource") continue;
+      if (row.resourceClass === "resource") continue;
       if (row.storageHome !== "device") {
         // An Office file stays with its source for now, so it isn't "still to move".
         if (!row.nativeFormat) cloud += 1;
@@ -236,6 +253,42 @@ export const handOverBackups = query({
   },
 });
 
+/**
+ * A work kept on a computer that isn't here: the backups that hold it, so this
+ * browser can open and edit that copy. The newest full backup of its computer
+ * and every later one, then what was handed over to that computer since,
+ * oldest first. Edits made here go back to the computer as a hand-over.
+ */
+export const awayCopy = query({
+  args: { artifactId: v.id("spectraArtifacts") },
+  handler: async (ctx, args) => {
+    const { actor, artifact } = await requireArtifactCapability(ctx, args.artifactId, "modify");
+    if (artifact.storageHome !== "device" || !artifact.storageStoreId || artifact.ownerAccountId !== actor.accountId) return null;
+    const storeId = artifact.storageStoreId;
+    const since = artifact.storageMovedAt ?? 0;
+    const recent = await ctx.db
+      .query("deviceBackups")
+      .withIndex("by_account_store", (q) => q.eq("accountId", actor.accountId).eq("storeId", storeId).gte("createdAt", since))
+      .order("desc")
+      .take(BACKUPS_KEPT * 2);
+    const lastFull = recent.findIndex((row) => row.full);
+    const chain = (lastFull < 0 ? recent : recent.slice(0, lastFull + 1)).reverse();
+    const handOvers = (await handOversFor(ctx, actor.accountId, storeId))
+      .filter((row) => row.createdAt >= since && (!row.storeId.startsWith("web:") || row.storeId.endsWith(`:${args.artifactId}`)))
+      .reverse();
+    const rows = [...chain, ...handOvers];
+    if (!rows.length) return null;
+    const newest = chain[chain.length - 1];
+    return {
+      storeId,
+      epoch: artifact.storageEpoch ?? 0,
+      computerName: chain.find((row) => row.computerName)?.computerName ?? null,
+      at: newest?.createdAt ?? null,
+      backups: await Promise.all(rows.map(async (row) => ({ id: String(row._id), url: await ctx.storage.getUrl(row.storageId) }))),
+    };
+  },
+});
+
 /** The name and summary follow the work, so lists stay right without opening it. */
 export const touch = mutation({
   args: {
@@ -325,6 +378,7 @@ export const movedToDevice = mutation({
       storageStoreId: args.storeId,
       storageSeeded: true,
       storageEpoch: (artifact.storageEpoch ?? 0) + 1,
+      storageMovedAt: Date.now(),
       liveStateVectorHash: undefined,
       content: defaultArtifactContent(blueprintKey),
       schemaVersion: defaultArtifactSchemaVersion(blueprintKey),
@@ -355,6 +409,7 @@ export const movedToCloud = mutation({
       storageStoreId: undefined,
       storageSeeded: undefined,
       storageEpoch: (artifact.storageEpoch ?? 0) + 1,
+      storageMovedAt: undefined,
       liveStateVectorHash: undefined,
       title: args.title,
       ...(args.summary !== undefined ? { summary: args.summary } : {}),
@@ -417,6 +472,14 @@ export const pruneBackups = internalMutation({
       .withIndex("by_account_store", (q) => q.eq("accountId", args.accountId).eq("storeId", storeId))
       .order("desc")
       .take(BACKUPS_KEPT * 6);
+    // A browser's edits to one work, each holding all of them: the newest two are plenty.
+    if (storeId.startsWith("web:")) {
+      for (const row of rows.slice(2)) {
+        await ctx.storage.delete(row.storageId as Id<"_storage">);
+        await ctx.db.delete(row._id);
+      }
+      return;
+    }
     const lastFull = rows.findIndex((row) => row.full);
     if (lastFull < 0) return;
     const keep = Math.max(BACKUPS_KEPT, lastFull + 1);
@@ -442,7 +505,8 @@ export const backupsToRestore = query({
       .take(BACKUPS_KEPT * 8);
     const chains = new Map<string, typeof rows>();
     for (const row of rows) {
-      if (row.storeId === args.storeId) continue;
+      // Edits a browser made to a work while its computer was away go only to that computer.
+      if (row.storeId === args.storeId || row.storeId.startsWith("web:")) continue;
       const chain = chains.get(row.storeId) ?? [];
       // A chain ends at its newest full backup.
       if (chain.some((earlier) => earlier.full)) continue;

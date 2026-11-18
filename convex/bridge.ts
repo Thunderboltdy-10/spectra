@@ -425,7 +425,12 @@ async function trashDeviceFiles(ctx: MutationCtx, accountId: Id<"accounts">, dev
               .map((other) => ctx.db.query("bridgeMounts").withIndex("by_device_root_key", (q) => q.eq("deviceId", other._id).eq("rootKey", mount.rootKey)).unique()),
           )).some((twin) => twin && twin.state !== "revoked" && twin.rootOrgNodeId === rootOrgNodeId)
         : false;
-      if (shared) continue;
+      // Or the same folder linked by hand from another computer.
+      const linked = [
+        ...(mount.linkedToMountId ? [await ctx.db.get(mount.linkedToMountId)] : []),
+        ...(await ctx.db.query("bridgeMounts").withIndex("by_linked_to", (q) => q.eq("linkedToMountId", mount._id)).take(10)),
+      ].some((twin) => twin && twin.deviceId !== deviceId && twin.state !== "revoked" && twin.rootOrgNodeId === rootOrgNodeId);
+      if (shared || linked) continue;
       const root = await ctx.db.get(rootOrgNodeId);
       if (root && root.accountId === accountId) await trashNode(ctx, root);
       continue;

@@ -23,6 +23,8 @@ const materializeSchema = z.object({
   mountId: z.string().optional(),
   deviceId: z.string().optional(),
   fileName: z.string().trim().min(1).max(180).optional(),
+  /** Folders under the synced folder, as they stand in the Library. */
+  folderPath: z.array(z.string().trim().min(1).max(180)).max(12).optional(),
 });
 
 const mediaTypes: Record<string, string> = {
@@ -130,7 +132,8 @@ export async function POST(request: Request) {
     const requested = input.fileName
       ? safeBaseName(input.fileName.replace(/\.[^.]+$/, ""))
       : safeBaseName(artifact!.title.replace(/\.[^.]+$/, ""));
-    const relativePath = `${requested}.${extension}`;
+    const folders = (input.folderPath ?? []).map(safeBaseName).filter((name) => name !== "." && name !== "..");
+    const relativePath = [...folders, `${requested}.${extension}`].join("/");
     const result = await convexMutation<
       { workId: Id<"spectraArtifacts">; mountId: Id<"bridgeMounts">; relativePath: string; payloadRef: string; contentHash: string; nativeFormat: string; fidelityMap: unknown },
       { state: "pending" | "existing"; replicaId: string; requestId: string | null }

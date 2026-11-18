@@ -2117,6 +2117,8 @@ export default defineSchema({
     storageSeeded: v.optional(v.boolean()),
     /** Counts moves between a computer and the cloud: each move starts a fresh live history. */
     storageEpoch: v.optional(v.number()),
+    /** When it last moved onto a computer: backups from before hold an earlier history. */
+    storageMovedAt: v.optional(v.number()),
     // Set by a rename until the live document says something else.
     renamedFromTitle: v.optional(v.string()),
     /** An official course syllabus (shared/syllabus). Read-only; refreshed when the bundle changes. */
@@ -2434,13 +2436,18 @@ export default defineSchema({
     lastScanAt: v.optional(v.number()),
     lastScanId: v.optional(v.string()),
     doubleSyncRisk: v.boolean(),
+    // Set by hand: this folder is the same one as that mount on another
+    // computer (OneDrive or the like at a different path there), so their
+    // files are one set of works with a copy on each computer.
+    linkedToMountId: v.optional(v.id("bridgeMounts")),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
     .index("by_account_state", ["accountId", "state"])
     .index("by_device_state", ["deviceId", "state"])
     .index("by_device_root_key", ["deviceId", "rootKey"])
-    .index("by_device_grant", ["deviceId", "grantId"]),
+    .index("by_device_grant", ["deviceId", "grantId"])
+    .index("by_linked_to", ["linkedToMountId"]),
 
   syncPolicies: defineTable({
     accountId: v.id("accounts"),

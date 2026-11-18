@@ -2,11 +2,13 @@
 
 import {
   useCallback,
+  useContext,
   useEffect,
   useRef,
   useState,
   useSyncExternalStore,
 } from "react";
+import { AwayCopyContext } from "./away-copy-transport";
 import type {
   ArtifactCollaborationTransport,
   CollaborationSyncSnapshot,
@@ -117,6 +119,9 @@ export function useArtifactCollaboration(
   const [initializationError, setInitializationError] = useState<string>();
   const recoveringRef = useRef(false);
   const recoveryAttemptRef = useRef(0);
+  // A work whose computer is away edits the copy from its backups instead of a room.
+  const awayScope = useContext(AwayCopyContext);
+  const away = awayScope && awayScope.artifactId === artifactId ? awayScope : null;
   useEffect(() => {
     if (!artifactId) {
       setTransport(null);
@@ -130,18 +135,21 @@ export function useArtifactCollaboration(
     const persistenceKey = artifactCollaborationPersistenceKey(
       artifactId,
       partitionKey,
-      persistenceNamespace,
+      // Kept apart from the room's cache, so the computer's own session never meets it.
+      away ? `away-${persistenceNamespace}` : persistenceNamespace,
       schemaVersion,
       storageEpoch,
     );
     // The same work closed a moment ago may still be draining: hand over to this session.
     draining.get(persistenceKey)?.();
-    const next = createArtifactCollaborationTransport(
-      artifactId,
-      partitionKey,
-      schemaVersion,
-      providerKind,
-    );
+    const next = away
+      ? away.create()
+      : createArtifactCollaborationTransport(
+          artifactId,
+          partitionKey,
+          schemaVersion,
+          providerKind,
+        );
     const persistence = new BoundedYjsLocalPersistence({
       key: persistenceKey,
       document: next.document,
@@ -193,6 +201,7 @@ export function useArtifactCollaboration(
     };
   }, [
     artifactId,
+    away,
     generation,
     partitionKey,
     persistenceNamespace,

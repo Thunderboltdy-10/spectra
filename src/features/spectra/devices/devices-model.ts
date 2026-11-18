@@ -41,6 +41,9 @@ export type CloudDevice = {
 };
 
 export type CloudMount = {
+  _id?: string;
+  rootKey?: string;
+  linkedToMountId?: string;
   selectedFile?: string;
   grantId: string;
   deviceId: string;
@@ -79,6 +82,13 @@ export type FolderView = {
   rootNodeId?: string;
   /** Another computer syncs a folder of the same name: likely one folder kept in step by OneDrive or the like. */
   alsoOn?: string;
+  /** That folder on the other computer, so the two can be linked as one. */
+  alsoOnMountId?: string;
+  /** Already one folder with the other computer's: found by its path, or linked by hand. */
+  sameAs?: { computer: string; byHand: boolean };
+  mountId?: string;
+  rootKey?: string;
+  linkedToMountId?: string;
 };
 
 export type DeviceView = {
@@ -167,9 +177,14 @@ export function liveFolder(mount: BridgeMount, allPaused: boolean): FolderView {
   }
 }
 
+function mountKeys(mount: CloudMount | undefined) {
+  return mount ? { mountId: mount._id, rootKey: mount.rootKey, linkedToMountId: mount.linkedToMountId } : {};
+}
+
 function remoteFolder(mount: CloudMount, actionable: boolean, offlineLabel: string): FolderView {
   const files = mount.fileCount > 0 ? `${mount.fileCount.toLocaleString()} file${mount.fileCount === 1 ? "" : "s"}` : undefined;
   return {
+    ...mountKeys(mount),
     id: mount.grantId,
     kind: mount.selectedFile ? "file" : "folder",
     name: mount.rootLabel,
@@ -195,10 +210,14 @@ function thisComputerView(local: LocalBridge, cloud: CloudDevice | undefined, mo
   const liveIds = new Set(liveMounts.map((mount) => mount.id));
   const allPaused = Boolean(live && status?.paused);
   const folders = [
-    ...liveMounts.map((mount) => ({
-      ...liveFolder(mount, allPaused),
-      rootNodeId: mount.selectionKind === "file" ? undefined : mounts.find((row) => row.grantId === mount.id)?.rootOrgNodeId,
-    })),
+    ...liveMounts.map((mount) => {
+      const row = mounts.find((candidate) => candidate.grantId === mount.id);
+      return {
+        ...liveFolder(mount, allPaused),
+        ...mountKeys(row),
+        rootNodeId: mount.selectionKind === "file" ? undefined : row?.rootOrgNodeId,
+      };
+    }),
     ...mounts.filter((mount) => !liveIds.has(mount.grantId)).map((mount) => remoteFolder(mount, false, "Not connected")),
   ];
   const problemFolder = folders.find((folder) => folder.tone === "attention" && !folder.paused);
@@ -314,12 +333,28 @@ export function devicesModel(input: {
  */
 function markTwins(devices: DeviceView[]) {
   const key = (folder: FolderView) => (folder.kind === "file" ? null : folder.name.trim().toLocaleLowerCase());
+  const linkedByHand = (a: FolderView, b: FolderView) =>
+    Boolean(a.mountId && b.mountId && (a.linkedToMountId === b.mountId || b.linkedToMountId === a.mountId));
   for (const device of devices) {
     for (const folder of device.folders) {
+      if (folder.kind === "file") continue;
+      const others = devices.filter((other) => other !== device);
+      const same = others
+        .flatMap((other) => other.folders.map((theirs) => ({ other, theirs })))
+        .find(({ theirs }) => linkedByHand(folder, theirs) || Boolean(folder.rootKey && theirs.rootKey === folder.rootKey));
+      if (same) {
+        folder.sameAs = { computer: same.other.name, byHand: linkedByHand(folder, same.theirs) };
+        continue;
+      }
       const name = key(folder);
       if (!name) continue;
-      const twin = devices.find((other) => other !== device && other.folders.some((theirs) => key(theirs) === name));
-      if (twin) folder.alsoOn = twin.name;
+      for (const other of others) {
+        const theirs = other.folders.find((candidate) => key(candidate) === name);
+        if (!theirs) continue;
+        folder.alsoOn = other.name;
+        folder.alsoOnMountId = theirs.mountId;
+        break;
+      }
     }
   }
 }

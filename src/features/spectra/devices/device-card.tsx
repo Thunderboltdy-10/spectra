@@ -1,6 +1,8 @@
 "use client";
 
 import { Fragment, useRef, useState, type CSSProperties } from "react";
+import { useMutation } from "convex/react";
+import type { Id } from "../../../../convex/_generated/dataModel";
 import { Icon, type IconName } from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
@@ -277,11 +279,7 @@ function FolderTile({
           {folder.detail ? `, ${folder.detail}` : ""}
         </span>
       </span>
-      {folder.alsoOn ? (
-        <span className="device-folder-twin">
-          {folder.alsoOn} also syncs a folder called {folder.name}. If it&apos;s the same folder kept on both by OneDrive, Dropbox or iCloud, sync it from one computer only, or its files come into Spectra twice.
-        </span>
-      ) : null}
+      <FolderTwin folder={folder} />
       {progress ? (
         <span className="device-folder-sync">
           <span className="device-folder-progress" role="progressbar" aria-valuemin={0} aria-valuemax={progress.total} aria-valuenow={progress.synced} aria-label={`${progress.synced} of ${progress.total} files`}>
@@ -329,6 +327,64 @@ function FolderTile({
         </span>
       ) : null}
     </li>
+  );
+}
+
+/*
+ * The same folder on two computers (OneDrive, Dropbox or iCloud keep it on
+ * both). Found by its path, it is one folder already; at different paths, a
+ * shared name is the hint, and linking makes it one: duplicates brought in
+ * from both go to the Trash.
+ */
+function FolderTwin({ folder }: { folder: FolderView }) {
+  const link = useMutation(api.bridgeSync.linkSameFolder);
+  const unlink = useMutation(api.bridgeSync.unlinkSameFolder);
+  const [working, setWorking] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const run = async (action: () => Promise<unknown>) => {
+    setWorking(true);
+    setFailed(false);
+    try {
+      await action();
+    } catch {
+      setFailed(true);
+    } finally {
+      setWorking(false);
+    }
+  };
+  if (folder.sameAs)
+    return (
+      <span className="device-folder-twin">
+        The same folder as on {folder.sameAs.computer}, so its files come into Spectra once.
+        {folder.sameAs.byHand && folder.mountId ? (
+          <>
+            {" "}
+            <button type="button" className="device-folder-twin-action" disabled={working} onClick={() => void run(() => unlink({ mountId: folder.mountId as Id<"bridgeMounts"> }))}>
+              Unlink
+            </button>
+          </>
+        ) : null}
+      </span>
+    );
+  if (!folder.alsoOn) return null;
+  return (
+    <span className="device-folder-twin">
+      {folder.alsoOn} also syncs a folder called {folder.name}. If it&apos;s the same folder kept on both by OneDrive, Dropbox or iCloud, link them so its files come into Spectra once.
+      {folder.mountId && folder.alsoOnMountId ? (
+        <>
+          {" "}
+          <button
+            type="button"
+            className="device-folder-twin-action"
+            disabled={working}
+            onClick={() => void run(() => link({ mountId: folder.mountId as Id<"bridgeMounts">, twinMountId: folder.alsoOnMountId as Id<"bridgeMounts"> }))}
+          >
+            {working ? "Linking…" : `Same folder as on ${folder.alsoOn}`}
+          </button>
+        </>
+      ) : null}
+      {failed ? <span className="block text-[var(--text-danger,var(--text-secondary))]">Couldn&apos;t link the folders. Try again.</span> : null}
+    </span>
   );
 }
 

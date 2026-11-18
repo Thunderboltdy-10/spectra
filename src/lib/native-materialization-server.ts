@@ -9,7 +9,11 @@ import type { EffectiveSyncPolicy } from "../../shared/sync-policy";
 
 /** Native bytes still advance in Spectra when desktop writeback is disabled. */
 export async function writableNativeReplica<T extends { kind: string; state: string; mountId?: Id<"bridgeMounts"> }>(workId: Id<"spectraArtifacts">, replicas: readonly T[]) {
-  const local = replicas.find(replica => replica.kind === "local" && replica.state !== "unavailable");
+  // The newest present copy: with one folder synced on two computers, an older
+  // copy may not have caught up yet.
+  const local = replicas
+    .filter(replica => replica.kind === "local" && replica.state !== "unavailable")
+    .sort((left, right) => ((right as { updatedAt?: number }).updatedAt ?? 0) - ((left as { updatedAt?: number }).updatedAt ?? 0))[0];
   if (!local) return undefined;
   const policy = await convexQuery<{ itemId: Id<"spectraArtifacts">; mountId?: Id<"bridgeMounts"> }, EffectiveSyncPolicy>(
     "syncPolicy:effective", { itemId: workId, ...(local.mountId ? { mountId: local.mountId } : {}) });

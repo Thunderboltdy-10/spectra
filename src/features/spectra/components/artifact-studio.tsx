@@ -22,6 +22,7 @@ import { useQuery } from "@/features/spectra/data/use-kept-query";
 import { useCalmQuery } from "../data/use-calm-query";
 import { toast } from "@/components/ui/toast";
 import { DeviceWorkAway, useDeviceWorkAway } from "../bridge/device-work-away";
+import { AwayCopyBanner, AwayCopyProvider, useAwayCopy } from "../bridge/away-copy";
 import { useMutation } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import { useAuthedArgs } from "../data/use-authed-args";
@@ -2069,6 +2070,8 @@ export function ArtifactStudio({
   executeApplicationCommand?: ApplicationCommandDispatcher;
 }) {
   const deviceWorkAway = useDeviceWorkAway(artifact);
+  // Its computer away, the copy in its backups opens here instead.
+  const awayCopy = useAwayCopy(artifact, deviceWorkAway);
   const router = useRouter();
   const width = panelWidth ?? 720;
   // The same subscription the editor holds; Convex shares it. It says when this work went to Trash elsewhere.
@@ -2235,10 +2238,16 @@ export function ArtifactStudio({
           )}
         </div>
       </div>
-    ) : deviceWorkAway ? (
-      <DeviceWorkAway title={artifact.title} reason={deviceWorkAway} />
+    ) : deviceWorkAway && awayCopy.state !== "ready" ? (
+      <DeviceWorkAway
+        title={artifact.title}
+        reason={awayCopy.state === "loading" ? "checking" : deviceWorkAway}
+        noBackup={awayCopy.state === "none"}
+      />
     ) : (
+      <AwayCopyProvider copy={awayCopy}>
       <div className="flex h-full min-h-0 flex-col bg-transparent">
+        {awayCopy.state === "ready" ? <AwayCopyBanner copy={awayCopy} /> : null}
         {replicaTruth?.trashedNodeId ? (
           <TrashedWorkNotice artifactId={artifact._id} trashedNodeId={replicaTruth.trashedNodeId} />
         ) : null}
@@ -2248,7 +2257,7 @@ export function ArtifactStudio({
           // first keystroke, restoring the server snapshot and making every
           // artifact editor appear non-interactive. Remote revisions are
           // reconciled by ArtifactStudioEditor's snapshot effects.
-          key={`${artifact._id}:editor:${artifact.storageHome ?? "cloud"}:${artifact.storageEpoch ?? 0}`}
+          key={`${artifact._id}:editor:${artifact.storageHome ?? "cloud"}:${artifact.storageEpoch ?? 0}${awayCopy.state === "ready" ? ":away" : ""}`}
           mode={mode}
           artifact={artifact}
           artifacts={artifacts}
@@ -2272,6 +2281,7 @@ export function ArtifactStudio({
           executeApplicationCommand={executeApplicationCommand}
         />
       </div>
+      </AwayCopyProvider>
     );
 
   const contextualBody = contextRegistration ? (
@@ -5394,9 +5404,12 @@ function ArtifactStudioEditor({
   const [statusActionBusy, setStatusActionBusy] = useState(false);
   const putBackFile = useMutation(api.bridgeSync.putBackFile);
   const [statusCompareOpen, setStatusCompareOpen] = useState(false);
-  const statusLocalReplica = replicaTruth?.replicas.find(
-    (replica) => replica.kind === "local",
-  );
+  // This computer's copy names the folder; another computer's copy of the
+  // same synced folder (OneDrive) comes second.
+  const statusLocalReplica =
+    replicaTruth?.replicas.find(
+      (replica) => replica.kind === "local" && replica.deviceId === bridge.status?.deviceId,
+    ) ?? replicaTruth?.replicas.find((replica) => replica.kind === "local");
   const statusFolderLabel = statusLocalReplica?.mountId
     ? activeBridgeMounts?.find(
         (mount) => mount._id === statusLocalReplica.mountId,
@@ -5423,6 +5436,9 @@ function ArtifactStudioEditor({
             retryAt: replica.retryAt,
             errorCode: replica.errorCode,
             relativePath: replica.relativePath,
+            ...(replica.kind === "local" && bridge.status?.deviceId
+              ? { here: replica.deviceId === bridge.status.deviceId }
+              : {}),
           })) ?? [],
         folderLabel: statusFolderLabel,
         officeApplication: nativeOfficeDocument

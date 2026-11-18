@@ -44,6 +44,8 @@ export type ArtifactStatusReplica = {
   retryAt?: number;
   errorCode?: string;
   relativePath?: string;
+  /** A local copy on the computer this page runs on. Unknown counts as not. */
+  here?: boolean;
 };
 
 export type ArtifactStatusInput = {
@@ -187,7 +189,11 @@ export function artifactStatusOf(input: ArtifactStatusInput): ArtifactStatus {
   const state = stateOf(input);
   const can = input.can ?? {};
   const app = input.officeApplication ?? "Office";
-  const local = input.replicas.find((replica) => replica.kind === "local" && replica.state !== "unavailable");
+  // The copy on this computer first: with the same folder synced on two
+  // computers (OneDrive), the other one's copy may be older or elsewhere.
+  const present = input.replicas.filter((replica) => replica.kind === "local" && replica.state !== "unavailable");
+  const local = present.find((replica) => replica.here) ?? present[0];
+  const onThisComputer = Boolean(local?.here) || !present.some((replica) => replica.here !== undefined);
   const fileName = fileNameOf(local?.relativePath);
   const trail = folderTrailOf(input.folderLabel, local?.relativePath);
   const verified = input.replicas
@@ -195,7 +201,8 @@ export function artifactStatusOf(input: ArtifactStatusInput): ArtifactStatus {
     .filter((value): value is number => typeof value === "number");
   const savedAt = verified.length ? Math.max(...verified) : input.savedAt;
   const ago = savedAt === undefined ? undefined : savedAgo(savedAt, input.now);
-  const where = local ? (trail ? `on this computer in ${trail}` : "on this computer") : undefined;
+  const computer = onThisComputer ? "this computer" : "your other computer";
+  const where = local ? (trail ? `on ${computer} in ${trail}` : `on ${computer}`) : undefined;
 
   const sentence = (() => {
     if (state === "saved") {
@@ -204,7 +211,7 @@ export function artifactStatusOf(input: ArtifactStatusInput): ArtifactStatus {
     }
     if (state === "syncing") {
       return fileName
-        ? `Bringing ${fileName} ${where ?? "on this computer"} up to date.`
+        ? `Bringing ${fileName} ${where ?? `on ${computer}`} up to date.`
         : "Bringing the desktop copy up to date.";
     }
     if (state === "waitingOffice") {
@@ -223,7 +230,10 @@ export function artifactStatusOf(input: ArtifactStatusInput): ArtifactStatus {
   const facts: ArtifactStatus["facts"] = [];
   if (ago) facts.push({ label: "Last saved", value: ago });
   if (fileName) facts.push({ label: "Desktop file", value: fileName });
-  if (where) facts.push({ label: "Where", value: trail ? `This computer · ${trail}` : "This computer" });
+  if (where) {
+    const place = onThisComputer ? "This computer" : "Your other computer";
+    facts.push({ label: "Where", value: trail ? `${place} · ${trail}` : place });
+  }
   if (state === "waitingOffice") facts.push({ label: "In use", value: `Open in ${app} on this computer` });
 
   const actions: ArtifactStatusAction[] = [];

@@ -4258,7 +4258,7 @@ dependencies = [
 
 [[package]]
 name = "spectra-bridge"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4281,7 +4281,7 @@ dependencies = [
 
 [[package]]
 name = "spectra-bridge-core"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "async-trait",

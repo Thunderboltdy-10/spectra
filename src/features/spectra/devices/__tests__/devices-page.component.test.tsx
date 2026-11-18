@@ -44,6 +44,7 @@ vi.mock("../../../../../convex/_generated/api", () => {
   return {
     api: {
       bridge: { syncBacklog: ref("bridge:syncBacklog"), syncedNodes: ref("bridge:syncedNodes"), overview: ref("bridge:overview"), requestPairing: ref("bridge:requestPairing"), revokeDevice: ref("bridge:revokeDevice") },
+      bridgeSync: { linkSameFolder: ref("bridgeSync:linkSameFolder"), unlinkSameFolder: ref("bridgeSync:unlinkSameFolder") },
       catalogGraph: { identity: ref("catalogGraph:identity") },
       identity: { session: ref("identity:session") },
       syncPolicy: { effective: ref("syncPolicy:effective"), overrideAccount: ref("syncPolicy:overrideAccount") },

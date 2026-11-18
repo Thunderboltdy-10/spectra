@@ -18,6 +18,7 @@ import { useSpectraPreferences } from "../settings/preference-store";
 import { useSetupDue } from "../onboarding/setup-state";
 import { useTourStore } from "../onboarding/tour-store";
 import { useBridgeHealth } from "./use-bridge";
+import { NewWorksToDisk } from "./new-works-to-disk";
 import {
   BRIDGE_DISCOVERY_STORAGE_KEY,
   BRIDGE_SESSION_STORAGE_KEY,
@@ -266,7 +267,13 @@ export function BridgeConnection() {
     });
   }, [inSetup, joined, pathname, router, workSettings]);
   const undecided = joined && hydrated && !preferences.ai.runtimeChosen && preferences.ai.runtime === "spectra";
-  return undecided ? <OwnAgentByDefault onFound={(runtime) => update("ai", { runtime })} /> : null;
+  const deviceId = joined && isAuthenticated ? status?.deviceId : undefined;
+  return (
+    <>
+      {undecided ? <OwnAgentByDefault onFound={(runtime) => update("ai", { runtime })} /> : null}
+      {deviceId ? <NewWorksToDisk deviceId={deviceId} /> : null}
+    </>
+  );
 }
 
 /** Someone with their own subscription starts on it, until they choose otherwise. */

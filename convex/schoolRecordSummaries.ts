@@ -5,13 +5,14 @@ import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { internalMutation } from "./functions";
 import type { SchoolSyncKind } from "../shared/school-sync";
 
-const MIGRATION_KEY = "school-record-summaries";
+// v2 leaves removed records out: every list skips them, and they piled up as tasks expired.
+const MIGRATION_KEY = "school-record-summaries-v2";
 const CLASS_FIELDS = ["title", "name", "subject", "yearGroupId", "archived"];
 const TASK_FIELDS = ["title", "name", "className", "dueAt", "deadlineAt", "due_at", "due_date",
   "status", "taskType", "type", "term", "termName"];
 
 function project(row: Doc<"externalRecords"> | null) {
-  if (!row?.mappedAccountId || (row.syncKind !== "classes" &&
+  if (!row?.mappedAccountId || row.tombstone || (row.syncKind !== "classes" &&
     row.syncKind !== "current_tasks" && row.syncKind !== "past_tasks")) return null;
   const fields = row.syncKind === "classes" ? CLASS_FIELDS : TASK_FIELDS;
   const normalized: Record<string, Value> = {};
@@ -45,10 +46,12 @@ export async function syncSchoolRecordSummary(
   recordId: Id<"externalRecords">,
   before: Doc<"externalRecords"> | null,
   after: Doc<"externalRecords"> | null,
+  /** The backfill compares with what's stored, not with an earlier version of the record. */
+  force = false,
 ) {
   const previous = project(before);
   const next = project(after);
-  if (JSON.stringify(convexToJson(previous)) === JSON.stringify(convexToJson(next))) return;
+  if (!force && JSON.stringify(convexToJson(previous)) === JSON.stringify(convexToJson(next))) return;
   const existing = await ctx.db.query("schoolRecordSummaries")
     .withIndex("by_record", (q) => q.eq("recordId", recordId)).unique();
   if (next) {
@@ -95,7 +98,7 @@ export const continueBackfill = internalMutation({
       numItems: 100,
       maximumBytesRead: 2_000_000,
     });
-    for (const record of page.page) await syncSchoolRecordSummary(ctx, record._id, null, record);
+    for (const record of page.page) await syncSchoolRecordSummary(ctx, record._id, null, record, true);
     const now = Date.now();
     const fields = {
       cursor: page.isDone ? undefined : page.continueCursor,

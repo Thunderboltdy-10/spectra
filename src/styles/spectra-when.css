@@ -216,6 +216,8 @@
   margin-top: 16px;
 }
 .calendar-composer-hours {
+  /* Two times side by side need the whole row, or "11:00 AM" is cut off. */
+  grid-column: 1 / -1;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;

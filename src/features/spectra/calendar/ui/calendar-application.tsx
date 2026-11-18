@@ -49,7 +49,7 @@ import { isAdoptable, isPeekable, schoolRecordOf, useTaskPeek } from "./use-task
 import { useOpenSchoolTask } from "../../school/open-school-task";
 import { formatTime, isDeadline, isReschedulable, layerFor } from "../domain/item-format";
 import { CalendarItemCard, type OpenedCalendarItem } from "./calendar-item-card";
-import { CalendarComposer, type ComposerPlace } from "./calendar-composer";
+import { CalendarComposer, type CalendarDraft, type ComposerPlace } from "./calendar-composer";
 import { firstTipMoment } from "../../onboarding/first-tips";
 
 const HOUR = 60 * 60_000;
@@ -491,6 +491,17 @@ export function CalendarApplication({ startAt, focusAt, still = false }: { start
   const taskPeek = useTaskPeek();
   const [composerOpen, setComposerOpen] = useState(false);
   const [composerAt, setComposerAt] = useState<ComposerPlace | null>(null);
+  const [composerDraft, setComposerDraft] = useState<CalendarDraft | null>(null);
+  // What's being added stands in the week, in place, until it's added or let go.
+  const draftPreview: GesturePreview | null =
+    composerOpen && composerDraft && !composerDraft.allDay
+      ? {
+          title: composerDraft.title.trim() || (composerDraft.kind === "personal_event" ? "New event" : "New task"),
+          startAt: composerDraft.startAt,
+          endAt: composerDraft.endAt ?? composerDraft.startAt,
+          layer: composerDraft.kind === "personal_event" ? "personal" : "tasks",
+        }
+      : null;
   const [visibleLayers, setVisibleLayers] = useState<Set<CalendarLayerKey>>(
     () => new Set(CALENDAR_LAYERS.map((layer) => layer.key)),
   );
@@ -1398,7 +1409,7 @@ export function CalendarApplication({ startAt, focusAt, still = false }: { start
                   timezone={timezone}
                   timedItems={timedItems}
                   dayItems={dayItems}
-                  gesturePreview={gesturePreview}
+                  gesturePreview={gesturePreview ?? draftPreview}
                   pendingItemIds={pendingItemIds}
                   resizeGesture={Boolean(resizeGesture)}
                   onPreview={previewDrop}
@@ -1456,6 +1467,7 @@ export function CalendarApplication({ startAt, focusAt, still = false }: { start
         <CalendarComposer
           open={composerOpen}
           at={composerAt}
+          onDraft={setComposerDraft}
           onClose={() => setComposerOpen(false)}
           onCreate={async (draft) => {
             await calendarPost({ action: "createPersonalItem", ...draft, timezone });
@@ -1806,7 +1818,8 @@ function PreviewBlock({
 }) {
   const layer = CALENDAR_LAYERS.find((candidate) => candidate.key === preview.layer)!;
   const top = (minutesOnDay(preview.startAt, timezone) / 60) * HOUR_PX;
-  const height = Math.max(24, ((preview.endAt - preview.startAt) / HOUR) * HOUR_PX);
+  // A deadline has no length: tall enough for its time and title.
+  const height = Math.max(preview.endAt > preview.startAt ? 24 : 44, ((preview.endAt - preview.startAt) / HOUR) * HOUR_PX);
   return (
     <div
       className="pointer-events-none absolute inset-x-1 z-chrome overflow-hidden rounded-lg border-2 border-dashed px-2 py-1.5 text-left shadow-lg"
@@ -1819,7 +1832,9 @@ function PreviewBlock({
       }}
     >
       <span className="block text-micro font-bold">
-        {formatTime(preview.startAt, timezone)} – {formatTime(preview.endAt, timezone)}
+        {preview.endAt > preview.startAt
+          ? `${formatTime(preview.startAt, timezone)} – ${formatTime(preview.endAt, timezone)}`
+          : `Due ${formatTime(preview.startAt, timezone)}`}
       </span>
       <span className="mt-0.5 block truncate text-micro font-semibold text-[var(--text-primary)]">
         {preview.title}

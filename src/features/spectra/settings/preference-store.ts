@@ -1,6 +1,7 @@
 "use client";
 
 import { setDocumentDark } from "@/lib/document-theme";
+import { setTimeOfDayFormat } from "@/components/ui/when";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConvex, useConvexAuth } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
@@ -123,6 +124,7 @@ function applyDocumentPreferences(preferences: SpectraPreferences) {
   const theme = preferences.appearance.theme;
   if (theme !== "system") setDocumentDark(theme === "dark");
   root.dataset.spectraDensity = preferences.appearance.density;
+  setTimeOfDayFormat(preferences.general.timeFormat);
   root.dataset.spectraContrast =
     preferences.appearance.contrast === "high" ||
     preferences.accessibility.highContrast

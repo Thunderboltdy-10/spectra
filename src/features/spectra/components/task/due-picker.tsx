@@ -114,8 +114,8 @@ export function DuePicker({
           }}
         >
           <DayField label="Day" value={date} onChange={setDate} />
-          {spanning ? <TimeField label="From" placeholder="Start" value={from} onChange={setFrom} opensAt="16:00" /> : null}
-          <TimeField label={spanning ? "To" : "Time"} placeholder={spanning ? "End" : "Any time"} value={time} onChange={setTime} opensAt="17:00" />
+          {spanning ? <TimeField label="From" placeholder="Start" value={from} onChange={setFrom} /> : null}
+          <TimeField label={spanning ? "To" : "Time"} placeholder={spanning ? "End" : "Any time"} value={time} onChange={setTime} />
           <button type="submit" className="due-picker-set" disabled={!date}>
             Set
           </button>

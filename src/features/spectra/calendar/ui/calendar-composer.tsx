@@ -60,10 +60,13 @@ export function CalendarComposer({
   at,
   onClose,
   onCreate,
+  onDraft,
 }: {
   open: boolean;
   at?: ComposerPlace | null;
   onClose: () => void;
+  /** What it would add as it's being written, so the calendar can show it in place; null when closed. */
+  onDraft?: (draft: CalendarDraft | null) => void;
   /** Writes it; a rejection is shown here and the composer stays open. */
   onCreate: (draft: CalendarDraft) => Promise<void>;
 }) {
@@ -106,8 +109,7 @@ export function CalendarComposer({
     setEnd(laterBy(next, length));
   };
 
-  const submit = () => {
-    const draft: CalendarDraft = event
+  const draftOf = (): CalendarDraft => event
       ? {
           kind: "personal_event",
           title,
@@ -117,6 +119,15 @@ export function CalendarComposer({
       : when === "due"
         ? { kind: "task", title, startAt: localInstant(day, dueAt), endAt: localInstant(day, dueAt) }
         : { kind: "task", title, startAt: localInstant(day, "23:59"), allDay: true };
+
+  const draftKey = open ? JSON.stringify(draftOf()) : "";
+  useEffect(() => {
+    onDraft?.(draftKey ? (JSON.parse(draftKey) as CalendarDraft) : null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the draft, by its value.
+  }, [draftKey]);
+
+  const submit = () => {
+    const draft = draftOf();
     setBusy(true);
     // Dots gather at the press; what was added grows out of them where it lands.
     const creation = beginCreation({ into: "item" });
@@ -175,7 +186,7 @@ export function CalendarComposer({
                 <TimeField label="Ends" value={end} onChange={(next) => next && setEnd(next)} from={start} />
               </div>
             ) : when === "due" ? (
-              <TimeField label="Due time" value={dueAt} onChange={(next) => next && setDueAt(next)} opensAt="17:00" />
+              <TimeField label="Due time" value={dueAt} onChange={(next) => next && setDueAt(next)} />
             ) : null}
           </div>
           <p className="calendar-composer-hint">

@@ -59,10 +59,28 @@ export function parseTimeOfDay(text: string): string | null {
   return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
 }
 
-/** "HH:MM" the way this device writes a time (14:30, or 2:30 PM). */
+export type TimeOfDayFormat = "locale" | "12_hour" | "24_hour";
+
+let clock: TimeOfDayFormat = "locale";
+const clockFormats = new Map<TimeOfDayFormat, Intl.DateTimeFormat>();
+
+/** The clock times are written in, from Settings: this device's own, or 12 or 24 hours. */
+export function setTimeOfDayFormat(format: TimeOfDayFormat) {
+  clock = format;
+}
+
+/** "HH:MM" the way this person writes a time (14:30, or 2:30 PM). */
 export function formatTimeOfDay(time: string) {
   const [hour, minute] = time.split(":").map(Number);
-  return new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit", timeZone: "UTC" }).format(
-    new Date(Date.UTC(2024, 0, 1, hour, minute)),
-  );
+  let format = clockFormats.get(clock);
+  if (!format) {
+    format = new Intl.DateTimeFormat(undefined, {
+      hour: clock === "24_hour" ? "2-digit" : "numeric",
+      minute: "2-digit",
+      timeZone: "UTC",
+      ...(clock === "12_hour" ? { hour12: true } : clock === "24_hour" ? { hourCycle: "h23" as const } : {}),
+    });
+    clockFormats.set(clock, format);
+  }
+  return format.format(new Date(Date.UTC(2024, 0, 1, hour, minute)));
 }

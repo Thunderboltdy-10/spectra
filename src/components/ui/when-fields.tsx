@@ -9,8 +9,8 @@ import { addDays, formatTimeOfDay, monthWeeks, parseTimeOfDay, sameMonth, todayK
 /*
  * Choosing a day and a time of day, the same way everywhere a student sets
  * when something happens. A day is picked on a month laid out in weeks; a time
- * is typed the way people say it ("9", "930", "9.30pm") or picked from the
- * quarter hours, which open at the one chosen. Both read and write plain
+ * is typed the way people say it ("9", "930", "9.30pm") or picked from a
+ * list every five minutes, which opens at the one chosen or else at now. Both read and write plain
  * "YYYY-MM-DD" and "HH:MM" strings, so the zone they mean stays the caller's.
  */
 
@@ -157,8 +157,7 @@ export function TimeField({
   label,
   placeholder = "Add a time",
   from,
-  opensAt = "08:00",
-  stepMinutes = 15,
+  stepMinutes = 5,
   className,
 }: {
   value: string;
@@ -168,8 +167,6 @@ export function TimeField({
   placeholder?: string;
   /** A start this time ends after: the list starts there and says how long each would be. */
   from?: string;
-  /** Where the list opens when no time is chosen yet. */
-  opensAt?: string;
   /** The interval offered in the list; typing still accepts any exact time. */
   stepMinutes?: 5 | 15;
   className?: string;
@@ -179,6 +176,7 @@ export function TimeField({
   const [active, setActive] = useState<string | null>(null);
   const input = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLUListElement>(null);
+  const [scroller, setScroller] = useState<HTMLDivElement | null>(null);
   const listId = useId();
   const slots = useMemo(() => {
     const times = Array.from({ length: 1440 / stepMinutes }, (_, index) => {
@@ -206,12 +204,17 @@ export function TimeField({
   }, [value]);
 
   useEffect(() => {
-    if (!open) return;
-    const target = active ?? (value ? near(value) : from ? slots[0] : opensAt);
-    list.current?.querySelector<HTMLElement>(`[data-time="${target}"]`)?.scrollIntoView({ block: active ? "nearest" : "start" });
+    if (!open || !scroller) return;
+    const now = new Date();
+    const target = active ?? near(value || (from ? slots[0]! : `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`));
+    const slot = list.current?.querySelector<HTMLElement>(`[data-time="${target}"]`);
+    if (!slot) return;
+    if (active) slot.scrollIntoView({ block: "nearest" });
+    // The chosen time (or now) in the middle, with what's either side of it in view.
+    else scroller.scrollTop = slot.offsetTop - (scroller.clientHeight - slot.offsetHeight) / 2;
     // Only where the list stands when it opens or the active slot moves.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, active]);
+  }, [open, active, scroller]);
 
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
@@ -264,6 +267,7 @@ export function TimeField({
         </span>
       </PopoverAnchor>
       <PopoverContent
+        ref={setScroller}
         align="start"
         className="when-times"
         onOpenAutoFocus={(event) => event.preventDefault()}

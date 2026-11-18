@@ -247,10 +247,17 @@ const START_PAGE_OPTIONS = [
   { value: "calendar", label: "Calendar" },
 ];
 
+const CLOCK_OPTIONS = [
+  { value: "locale", label: "As this device writes it" },
+  { value: "12_hour", label: "12 hours (2:30 PM)" },
+  { value: "24_hour", label: "24 hours (14:30)" },
+];
+
 function StartSettings({ p, update }: SectionProps<"general">) {
   return (
     <SettingGroup title="Opening Spectra" description="Where Spectra opens when you arrive at Home.">
       <SelectRow label="Start page" description="Links to a thread or a piece of work still open where they point." value={p.startPage === "chat" ? "workspace" : p.startPage} options={START_PAGE_OPTIONS} onChange={(startPage) => update({ startPage: startPage as typeof p.startPage })} />
+      <SelectRow label="Clock" description="How times are written when you pick one." value={p.timeFormat} options={CLOCK_OPTIONS} onChange={(timeFormat) => update({ timeFormat: timeFormat as typeof p.timeFormat })} />
     </SettingGroup>
   );
 }

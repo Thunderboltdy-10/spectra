@@ -185,6 +185,7 @@ import {
   materializeJsonImages,
 } from "../organization/library-import";
 import { requestSpectra } from "../data/request";
+import { cleanOfficeHtml } from "../rich-content/clipboard";
 import { documentReferenceIds } from "./document-reference-ids";
 import { entryOf, withStacked } from "../editor/reference-stack";
 
@@ -680,6 +681,53 @@ function withEditorFormatting(
  * among them — render the one real document view rather than a lookalike.
  * It takes its content as a prop and owns no data acquisition.
  */
+/** A DOM range over document positions, or null when the view cannot map them. */
+function documentDomRange(editor: Editor, { from, to }: { from: number; to: number }) {
+  try {
+    const start = editor.view.domAtPos(from);
+    const end = editor.view.domAtPos(to);
+    const range = document.createRange();
+    range.setStart(start.node, start.offset);
+    range.setEnd(end.node, end.offset);
+    return range;
+  } catch {
+    return null;
+  }
+}
+
+/** Scrolls a match to the middle of the page without moving focus. */
+function revealDocumentRange(editor: Editor, match: { from: number; to: number }) {
+  let top: number;
+  try {
+    top = editor.view.coordsAtPos(match.from).top;
+  } catch {
+    return;
+  }
+  // The nearest scrolling ancestor of the page, moved so the match sits in its middle.
+  let scroller: HTMLElement | null = editor.view.dom.parentElement;
+  while (scroller && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) scroller = scroller.parentElement;
+  const frame = scroller ?? document.scrollingElement;
+  if (!frame) return;
+  const box = scroller ? scroller.getBoundingClientRect() : { top: 0, height: window.innerHeight };
+  frame.scrollTop += top - (box.top + box.height / 2);
+}
+
+/** Paints find matches with the CSS highlight registry; returns the cleanup. */
+function paintFindMatches(ranges: readonly (Range | null)[], current: number) {
+  const registry = (globalThis.CSS as { highlights?: Map<string, unknown> } | undefined)?.highlights;
+  const HighlightType = (globalThis as { Highlight?: new (...ranges: Range[]) => unknown }).Highlight;
+  if (!registry || !HighlightType) return undefined;
+  const all = ranges.filter((range): range is Range => range !== null);
+  registry.set("spectra-find", new HighlightType(...all));
+  const active = ranges[current];
+  if (active) registry.set("spectra-find-current", new HighlightType(active));
+  else registry.delete("spectra-find-current");
+  return () => {
+    registry.delete("spectra-find");
+    registry.delete("spectra-find-current");
+  };
+}
+
 export function DocumentStudio({
   artifactId,
   title,
@@ -1138,6 +1186,8 @@ export function DocumentStudio({
       editable: !readOnly,
       immediatelyRender: false,
       editorProps: {
+        // Word's lists and markup made plain HTML, so a paste from Word keeps its shape.
+        transformPastedHTML: cleanOfficeHtml,
         attributes: {
           "data-work-id": artifactId,
           class:
@@ -1865,7 +1915,15 @@ export function DocumentStudio({
       (findCursor + direction + findMatches.length) % findMatches.length;
     const match = findMatches[next]!;
     setFindCursor(next);
-    editor.chain().focus().setTextSelection(match).scrollIntoView().run();
+    // Focus stays in the find field, so Enter keeps stepping instead of typing over the match.
+    editor.chain().setTextSelection(match).run();
+    revealDocumentRange(editor, match);
+  }
+
+  /** Closes the find bar and hands the caret back to the page at the current match. */
+  function closeFind() {
+    setFindOpen(false);
+    if (editor && !editor.isDestroyed && findMatches.length) editor.commands.focus();
   }
 
   /**
@@ -3412,6 +3470,28 @@ export function DocumentStudio({
     if (!editor || editor.isDestroyed) return;
     editor.view.dom.setAttribute("spellcheck", spellcheckOn ? "true" : "false");
   }, [editor, spellcheckOn]);
+  const findKey = findMatches.map((match) => `${match.from}:${match.to}`).join(",");
+  const findDoc = editor?.state.doc;
+  useEffect(() => {
+    // Every match is painted, the current one stronger, without touching the document.
+    if (!editor || editor.isDestroyed || !findKey) return;
+    const ranges = findMatches.map((match) => documentDomRange(editor, match));
+    const painted = paintFindMatches(ranges, findCursor);
+    return painted;
+    // findMatches is rebuilt each render; findKey and the doc stand for it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editor, findKey, findDoc, findCursor]);
+  const findQueryKey = findOpen ? `${findDraft.trim()}|${JSON.stringify(findOptions)}` : "";
+  useEffect(() => {
+    // While typing, the page shows the first match after the caret.
+    if (!editor || editor.isDestroyed || !findQueryKey || !findMatches.length) return;
+    const caret = editor.state.selection.from;
+    const index = Math.max(0, findMatches.findIndex((match) => match.from >= caret));
+    setFindCursor(index);
+    revealDocumentRange(editor, findMatches[index]!);
+    // Only a new query or option moves the view; edits to the page do not.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editor, findQueryKey]);
 
   return (
     <div
@@ -3570,7 +3650,7 @@ export function DocumentStudio({
                   setFindCursor(0);
                 }}
                 onKeyDown={(event) => {
-                  if (event.key === "Escape") setFindOpen(false);
+                  if (event.key === "Escape") closeFind();
                   if (event.key === "Enter")
                     selectFindMatch(event.shiftKey ? -1 : 1);
                 }}
@@ -3659,7 +3739,7 @@ export function DocumentStudio({
             <button
               type="button"
               aria-label="Close find and replace"
-              onClick={() => setFindOpen(false)}
+              onClick={closeFind}
             >
               <X className="h-4 w-4" />
             </button>

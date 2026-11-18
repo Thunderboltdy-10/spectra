@@ -54,14 +54,15 @@
 
 /* The tab and the card's one menu share a row; the menu sits astride the
    face's top edge, part of the border rather than of the work. */
+/* The tab, and its menu just to its right, on the card's top edge. */
 .work-embed-top {
   position: relative;
   z-index: 1;
   display: flex;
   min-width: 0;
   align-items: flex-end;
-  justify-content: space-between;
-  gap: 12px;
+  justify-content: flex-start;
+  gap: 2px;
 }
 
 .work-embed-tab {
@@ -134,7 +135,8 @@ button.work-embed-title:hover {
 }
 
 .work-embed-more {
-  margin: 0 14px -14px 0;
+  flex: none;
+  align-self: center;
   opacity: 0.6;
   transition: opacity var(--motion-fast) var(--ease-standard);
 }
@@ -153,11 +155,13 @@ button.work-embed-title:hover {
 
 .work-embed-more :is(.work-embed-more-trigger, .work-embed-done) {
   border-radius: 999px;
-  background: var(--card-paper);
-  box-shadow:
-    0 0 0 1px var(--card-border),
-    0 2px 6px -3px rgb(52 40 28 / 0.25);
+  background: transparent;
   color: var(--text-secondary);
+}
+
+.work-embed-more .work-embed-done {
+  background: var(--card-paper);
+  box-shadow: 0 0 0 1px var(--card-border);
 }
 
 .work-embed-more .work-embed-more-trigger:hover,

@@ -2178,6 +2178,7 @@ export function ConversationSurface({
     <div className="spectra-conversation relative flex h-full min-h-0 flex-col bg-[var(--bg-primary)]">
       <div
         ref={scrollRef}
+        data-scroll-memory="off"
         onScroll={(event) => {
           const element = event.currentTarget;
           setFollowing(

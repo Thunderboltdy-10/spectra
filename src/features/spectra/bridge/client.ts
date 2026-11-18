@@ -54,6 +54,16 @@ const mountSchema = z
 export type BridgeMount = z.infer<typeof mountSchema>;
 const officeFileSchema = z.object({ folder: z.string(), name: z.string() }).passthrough();
 export type BridgeOfficeFile = z.infer<typeof officeFileSchema>;
+const syncLogSchema = z
+  .object({
+    at: z.number(),
+    folder: z.string(),
+    kind: z.string(),
+    detail: z.string(),
+    repeats: z.number().optional().default(0),
+  })
+  .passthrough();
+export type BridgeSyncLogEntry = z.infer<typeof syncLogSchema>;
 const statusSchema = z
   .object({
     version: z.string(),
@@ -68,6 +78,10 @@ const statusSchema = z
     mounts: z.array(mountSchema).optional().default([]),
     /** Files Office holds open in a selected folder right now. */
     officeFiles: z.array(officeFileSchema).optional().default([]),
+    /** What syncing did lately on this computer, newest first (Bridge 0.1.3+). */
+    syncLog: z.array(syncLogSchema).optional().default([]),
+    /** What the last update attempt needs to say: it failed, or it is installing. */
+    updateNote: z.string().nullable().optional(),
   })
   .passthrough();
 export type BridgeStatus = z.infer<typeof statusSchema>;
@@ -675,9 +689,26 @@ export async function requestBridgeUpdate(): Promise<string> {
       );
     }
   } catch {
-    /* Old Bridges have no update route; the tray is the remaining door. */
+    /* Bridge 0.1.0 has no update route and no way to be told to update. */
   }
-  return "Look for Spectra Bridge near the clock and open it to install the update.";
+  return manualBridgeUpdateMessage(bridgePlatform());
+}
+
+/** How to update a Bridge that can't be updated from the page: install the new one over it. */
+export function manualBridgeUpdateMessage(platform: BridgePlatform) {
+  return platform === "macos"
+    ? "This Spectra Bridge is too old to update from here. Download the new one, open it and drag Spectra Bridge into Applications to replace this one, then open it. Your folders stay connected."
+    : "This Spectra Bridge is too old to update from here. Download the new one and run it: it installs over this one, and your folders stay connected.";
+}
+
+/** "0.1.0" is older than "0.1.2". Unknown versions are never called old. */
+export function bridgeVersionOlder(version: string | undefined, latest: string | null | undefined) {
+  const parts = (value: string) => value.split(/[.+-]/).slice(0, 3).map((part) => Number.parseInt(part, 10));
+  if (!version || !latest) return false;
+  const [a, b] = [parts(version), parts(latest)];
+  if ([...a, ...b].some((part) => !Number.isFinite(part))) return false;
+  for (let index = 0; index < 3; index += 1) if (a[index] !== b[index]) return a[index]! < b[index]!;
+  return false;
 }
 
 export async function offerPairing(input: {

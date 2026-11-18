@@ -53,6 +53,27 @@ pub struct LocalControlSnapshot {
     pub last_sync_at: Option<u64>,
     pub mounts: Vec<LocalMountStatus>,
     pub office_files: Vec<LocalOfficeFile>,
+    /// What syncing did lately, newest first.
+    #[serde(default)]
+    pub sync_log: Vec<SyncLogEntry>,
+    /// The last thing an update did, when it needs saying (it failed, it waits).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub update_note: Option<String>,
+}
+
+/// One line of the local sync log.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncLogEntry {
+    /// Unix milliseconds of the latest time this happened.
+    pub at: u64,
+    pub folder: String,
+    /// scan, toSpectra, fromSpectra, conflict or error.
+    pub kind: String,
+    pub detail: String,
+    /// How many more times the same line happened in a row.
+    #[serde(default)]
+    pub repeats: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -69,6 +90,10 @@ pub struct LocalBridgeStatus {
     pub last_sync_at: Option<u64>,
     pub mounts: Vec<LocalMountStatus>,
     pub office_files: Vec<LocalOfficeFile>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sync_log: Vec<SyncLogEntry>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub update_note: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -30,7 +30,7 @@ import {
   type CalendarLayerKey,
   type CalendarOverview,
 } from "../domain/model";
-import { fetchCalendarOverview, mergeCalendarPages, type CalendarContinuation } from "../data/overview-client";
+import { fetchCalendarOverview, fetchCalendarWeek, mergeCalendarPages, type CalendarContinuation } from "../data/overview-client";
 import { exportCalendarFile, importCalendarFile } from "./calendar-transfer";
 import {
   addLocalDays,
@@ -367,6 +367,54 @@ function keepCalendar(overview: CalendarOverview) {
   }
 }
 
+/* Moving old timetables onto the calendar is checked once a day per browser,
+   not on every visit: it's a write, and it almost never finds anything. */
+const MIGRATION_CHECKED = "spectra:calendar-migration-checked:v1";
+const MIGRATION_CHECK_EVERY = 24 * 60 * 60_000;
+
+function migrationCheckDue() {
+  try {
+    return Date.now() - Number(window.localStorage.getItem(MIGRATION_CHECKED) ?? 0) > MIGRATION_CHECK_EVERY;
+  } catch {
+    return true;
+  }
+}
+
+function noteMigrationChecked() {
+  try {
+    window.localStorage.setItem(MIGRATION_CHECKED, String(Date.now()));
+  } catch {
+    // Storage blocked: it's checked again next visit.
+  }
+}
+
+/** The lists that don't depend on the days shown. */
+const WEEK_STREAMS = ["visible"] as const;
+const BACKLOG_STREAMS = ["unscheduled", "planner", "partial", "migration"] as const;
+type CalendarBacklog = Pick<CalendarOverview, "unscheduledTasks" | "partialTimeItems" | "migration"> & {
+  /** Items with no date, shown whichever days are in view. */
+  undated: CalendarItem[];
+};
+
+function isUndated(item: CalendarItem) {
+  return item.startAt === undefined && !item.id.startsWith("pending:");
+}
+
+function backlogOf(overview: CalendarOverview): CalendarBacklog {
+  return {
+    unscheduledTasks: overview.unscheduledTasks,
+    partialTimeItems: overview.partialTimeItems,
+    migration: overview.migration,
+    undated: overview.items.filter(isUndated),
+  };
+}
+
+function withBacklog(overview: CalendarOverview, backlog: CalendarBacklog | null | undefined): CalendarOverview {
+  if (!backlog) return overview;
+  const { undated, ...lists } = backlog;
+  return { ...overview, ...lists, items: [...overview.items.filter((item) => !isUndated(item)), ...undated] };
+}
+
 function isDayItem(item: CalendarItem) {
   return Boolean(
     item.startAt !== undefined &&
@@ -537,15 +585,17 @@ export function CalendarApplication({ startAt, focusAt, still = false }: { start
     [days],
   );
 
+  const backlogRef = useRef<CalendarBacklog | null>(null);
   const applyOverview = useCallback(
-    (incoming: CalendarOverview, mode: "replace" | "merge", appendPage = false) => {
+    (week: CalendarOverview, mode: "replace" | "merge", appendPage = false) => {
       setOverview((current) => {
+        // A week read carries only the week; the range-free lists stay as last read.
+        const incoming = withBacklog(
+          week,
+          current ? backlogOf(current) : backlogRef.current,
+        );
         if (!current || mode === "replace") return incoming;
-        if (appendPage) {
-          const merged = mergeCalendarPages(current, incoming);
-          merged.migration.complete = (merged.migration.pageComplete ?? false) && incoming.migration.complete;
-          return merged;
-        }
+        if (appendPage) return { ...mergeCalendarPages(current, { ...incoming, unscheduledTasks: [], partialTimeItems: [] }), unscheduledTasks: incoming.unscheduledTasks, partialTimeItems: incoming.partialTimeItems, migration: incoming.migration };
         // A fresh full-range read replaces removed rows; extensions and later pages still merge.
         if (incoming.range.from <= visibleRange.from && incoming.range.to >= visibleRange.to) {
           return { ...incoming, items: mergeById(current.items.filter((item) => item.id.startsWith("pending:")), incoming.items) };
@@ -579,10 +629,15 @@ export function CalendarApplication({ startAt, focusAt, still = false }: { start
       const request = new AbortController();
       overviewRequestRef.current = request;
       if (!nextPage) setContinuation(null);
+      // Reading the days shown (not scrolling to new ones) also rereads the
+      // range-free lists, since whatever changed the week may have moved them.
+      if (!nextPage && (from === undefined || (from === visibleRange.from && to === visibleRange.to))) void loadBacklogRef.current();
       if (showRefresh) setRefreshing(true);
       setError("");
       try {
-        const result = await fetchCalendarOverview(requestFrom, requestTo, { signal: request.signal, continuation: nextPage });
+        const result = nextPage
+          ? await fetchCalendarOverview(requestFrom, requestTo, { signal: request.signal, continuation: nextPage, streams: WEEK_STREAMS })
+          : await fetchCalendarWeek(requestFrom, requestTo, { signal: request.signal });
         if (request.signal.aborted || overviewRequestRef.current !== request) return;
         applyOverview(result.overview, mode, Boolean(nextPage));
         setContinuation(result.continuation);
@@ -605,6 +660,48 @@ export function CalendarApplication({ startAt, focusAt, still = false }: { start
   );
   loadRef.current = load;
 
+  // Unscheduled tasks, plans and undated school items, read beside the week
+  // (never before it) and again only when something changed, not per week.
+  const backlogRequestRef = useRef<AbortController | null>(null);
+  const loadBacklog = useCallback(async () => {
+    backlogRequestRef.current?.abort();
+    const request = new AbortController();
+    backlogRequestRef.current = request;
+    try {
+      const now = Date.now();
+      const undatedRead = fetchCalendarWeek(now - 1, now, { signal: request.signal, phases: ["unscheduled"] });
+      let result = await fetchCalendarOverview(now - 1, now, { signal: request.signal, streams: BACKLOG_STREAMS, maxPages: 16 });
+      let lists: Omit<CalendarBacklog, "undated"> = result.overview;
+      // A very long list keeps loading quietly; each page is bounded.
+      for (let round = 0; result.continuation && round < 4; round++) {
+        result = await fetchCalendarOverview(result.continuation.from, result.continuation.to, {
+          signal: request.signal,
+          continuation: result.continuation,
+          maxPages: 16,
+        });
+        const merged = mergeCalendarPages({ ...result.overview, ...lists, items: [] }, result.overview);
+        lists = merged;
+      }
+      const undated = (await undatedRead).overview.items.filter(isUndated);
+      if (request.signal.aborted) return;
+      const backlog: CalendarBacklog = {
+        unscheduledTasks: lists.unscheduledTasks,
+        partialTimeItems: lists.partialTimeItems,
+        migration: lists.migration,
+        undated,
+      };
+      backlogRef.current = backlog;
+      setOverview((current) => (current ? withBacklog(current, backlog) : current));
+    } catch {
+      // The week still shows; these lists keep their last answer.
+    } finally {
+      if (backlogRequestRef.current === request) backlogRequestRef.current = null;
+    }
+  }, []);
+  const loadBacklogRef = useRef(loadBacklog);
+  loadBacklogRef.current = loadBacklog;
+  useEffect(() => () => backlogRequestRef.current?.abort(), []);
+
   useEffect(() => () => overviewRequestRef.current?.abort(), []);
 
   // The last calendar read on this device shows at once while a fresh one loads.
@@ -623,12 +720,14 @@ export function CalendarApplication({ startAt, focusAt, still = false }: { start
     // beside it, once, and reloads only if it moved something.
     let cancelled = false;
     void loadRef.current("replace");
-    void calendarPost({ action: "ensureMigration" })
-      .then((result) => {
-        const moved = (result as { data?: { migratedEvents?: number } } | null)?.data?.migratedEvents ?? 0;
-        if (!cancelled && moved > 0) void loadRef.current("merge");
-      })
-      .catch(() => undefined);
+    if (migrationCheckDue())
+      void calendarPost({ action: "ensureMigration" })
+        .then((result) => {
+          noteMigrationChecked();
+          const moved = (result as { data?: { migratedEvents?: number } } | null)?.data?.migratedEvents ?? 0;
+          if (!cancelled && moved > 0) void loadRef.current("merge");
+        })
+        .catch(() => undefined);
     return () => {
       cancelled = true;
     };
@@ -1339,7 +1438,7 @@ export function CalendarApplication({ startAt, focusAt, still = false }: { start
           ) : null}
         </div>
 
-        <section className="relative min-h-0 min-w-0 flex-1">
+        <section className="relative min-h-0 min-w-0 flex-1" data-scroll-memory="off">
           {layersOpen ? (
             <aside
               className="absolute right-4 top-1 z-dropdown w-[240px] rounded-card border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-2 shadow-[var(--shadow-lg)] sm:right-6 lg:right-8"

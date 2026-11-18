@@ -673,10 +673,10 @@ export function useSpectraRun({
         event.type === "approval_accepted" ||
         event.type === "approval_rejected" ||
         event.type === "choice_selected" ||
-        event.type === "interrupted" ||
-        event.type === "final"
+        event.type === "interrupted"
       )
         void onDataChanged?.();
+      // "final" reads the saved answer below, before the streamed one goes.
       // Durable history can replay an older attempt's terminal event
       // while a retry is already active. Its card keeps the history;
       // only the live request path raises a toast for a current failure.
@@ -704,9 +704,15 @@ export function useSpectraRun({
           current?.runId === tab.runId ? null : current,
         );
       if (event.type === "final") {
-        setLiveExchange((current) =>
-          current?.runId === tab.runId ? null : current,
-        );
+        // The streamed answer stays until the saved one has been read, so it
+        // never blinks out between the two.
+        void Promise.resolve(onDataChanged?.())
+          .catch(() => undefined)
+          .finally(() =>
+            setLiveExchange((current) =>
+              current?.runId === tab.runId ? null : current,
+            ),
+          );
         void onFinal?.({
           runId: tab.runId,
           summary: event.summary,
@@ -767,8 +773,11 @@ export function useSpectraRun({
             threadId: observedThreadId,
             artifactId: observedThreadId ? undefined : artifactId,
             workspaceId: observedThreadId || artifactId ? undefined : workspaceId,
-            surface:
-              surface === "artifacts"
+            // A conversation's runs are its own wherever they were started:
+            // a run sent from the Library and opened as a page keeps streaming.
+            surface: observedThreadId
+              ? undefined
+              : surface === "artifacts"
                 ? "artifact"
                 : (surface as "chat" | "workspace" | "artifact"),
           });

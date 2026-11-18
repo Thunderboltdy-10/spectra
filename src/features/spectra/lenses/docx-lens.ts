@@ -2685,6 +2685,18 @@ export function applyParagraphFormat(
       shading.setAttributeNs(WML_NAMESPACE, "fill", safeHexColor(format.shading));
     }
   }
+  if (format.pageBreakBefore !== undefined && format.pageBreakBefore !== null) {
+    if (format.pageBreakBefore) orderedChild(properties, "pageBreakBefore", PPR_ORDER);
+    else dropChild(properties, "pageBreakBefore");
+  }
+  // An empty paragraph holding a page break is how the editor's page break reaches Word.
+  if (format.pageBreak === true && !holdsPageBreak(paragraph)) {
+    const run = new XmlElement("r", "w");
+    const pageBreak = new XmlElement("br", "w");
+    pageBreak.setAttribute("w:type", "page");
+    run.appendChild(pageBreak);
+    paragraph.element.appendChild(run);
+  }
   if (!properties.elements().length) paragraph.element.removeChild(properties);
   document._markMainDirty();
 }

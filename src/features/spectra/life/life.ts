@@ -217,6 +217,42 @@ class Life {
     this.post({ type: "place", id: formed.id, dx, dy, clip });
   }
 
+  private pinned = new Map<number, { element: Element; left: number; top: number; until: number }>();
+  private pinFrame = 0;
+
+  /**
+   * The canvas is fixed to the screen, so a figure drawn over an element (a hand-over, an
+   * arrival) stays put when the page scrolls under it. Pinned, it moves with the element every
+   * frame until it has gone, the element leaves the page, or `maxMs` passes.
+   */
+  pin(formed: Formed, element: Element, maxMs = 6000): Formed {
+    if (!this.on || typeof window === "undefined") return formed;
+    const r = element.getBoundingClientRect();
+    this.pinned.set(formed.id, { element, left: r.left, top: r.top, until: performance.now() + maxMs });
+    void formed.gone.then(() => this.pinned.delete(formed.id));
+    if (!this.pinFrame) this.pinFrame = requestAnimationFrame(this.followPins);
+    return formed;
+  }
+
+  private followPins = () => {
+    this.pinFrame = 0;
+    const now = performance.now();
+    for (const [id, pin] of this.pinned) {
+      if (!pin.element.isConnected || now > pin.until || !this.on) {
+        this.pinned.delete(id);
+        continue;
+      }
+      const r = pin.element.getBoundingClientRect();
+      const dx = r.left - pin.left;
+      const dy = r.top - pin.top;
+      if (!dx && !dy) continue;
+      pin.left = r.left;
+      pin.top = r.top;
+      this.post({ type: "place", id, dx, dy, clip: null });
+    }
+    if (this.pinned.size) this.pinFrame = requestAnimationFrame(this.followPins);
+  };
+
   /** Something goes away: its lines part into dots that sink into the field. */
   unform(what: Figure | Formed, { from }: { from?: Point } = {}): Promise<void> {
     const id = this.nextId++;

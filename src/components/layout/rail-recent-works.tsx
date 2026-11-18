@@ -11,6 +11,7 @@ import { presentWork, workTypeMeta, type PresentedWorkType } from "@/features/sp
 import { formatRelativeTime } from "@/features/spectra/components/spectra-view-model";
 import { spectraBus } from "@/features/spectra/events";
 import { editedWorks, subscribeEditedWorks } from "@/features/spectra/today/recent-edits";
+import { matchesAllWords, mergeMeaningMatches, semanticTargetId, useMeaningHits } from "@/features/spectra/semantic/meaning-matches";
 
 /*
  * The works touched last, above the threads. This is read once and again when
@@ -108,12 +109,20 @@ export function RailRecentWorks() {
     };
   }, [convex, isAuthenticated, wanted]);
 
+  const meaning = useMeaningHits(isAuthenticated ? wanted : "", ["artifact"]);
   const matches = useMemo(() => {
     if (!wanted) return null;
-    const recent = (works ?? []).filter((work) => work.title.toLowerCase().includes(wanted));
+    const recent = (works ?? []).filter((work) => matchesAllWords(work.title, wanted));
     const seen = new Set(recent.map((work) => work.workId));
-    return [...recent, ...(found ?? []).filter((work) => !seen.has(work.workId))].slice(0, FOUND);
-  }, [found, wanted, works]);
+    return mergeMeaningMatches({
+      literal: [...recent, ...(found ?? []).filter((work) => !seen.has(work.workId))],
+      hits: meaning.hits,
+      known: works ?? [],
+      idOf: (work) => work.workId,
+      extra: (hit) => ({ workId: semanticTargetId(hit), title: hit.title, typeKey: hit.subtype ?? null, activityAt: hit.updatedAt ?? 0 }),
+      limit: FOUND,
+    });
+  }, [found, meaning.hits, wanted, works]);
 
   const closeSearch = () => {
     setSearching(false);
@@ -158,15 +167,15 @@ export function RailRecentWorks() {
             onBlur={() => {
               if (!term.trim()) setSearching(false);
             }}
-            placeholder="Find artifact by name"
-            aria-label="Find artifact by name"
+            placeholder="Find an artifact"
+            aria-label="Find an artifact"
             className="h-8 w-full rounded-control border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-2.5 text-caption text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-strong)]"
           />
         </div>
       ) : null}
       {matches && !matches.length ? (
         <p className="px-2.5 py-1 text-caption leading-5 text-[var(--text-tertiary)]">
-          {wanted.length >= 2 && found === null ? "Looking…" : "Nothing by that name."}
+          {wanted.length >= 2 && (found === null || meaning.loading) ? "Looking…" : "Nothing matches that."}
         </p>
       ) : works === null ? (
         <ul aria-hidden className="space-y-px">

@@ -9,6 +9,7 @@ import { workTypeMeta, type PresentedWorkType } from "../../artifacts/presentati
 import { useAuthedArgs } from "../../data/use-authed-args";
 import { spectraBus } from "../../events";
 import { useTreeQuickView, useTreeSearch, type TreeNode } from "../../organization/tree-client";
+import { mergeMeaningMatches, semanticTargetId, useMeaningHits } from "../../semantic/meaning-matches";
 
 /*
  * The work a task is for (EDITORS.md, "Planner task"): the essay it is about,
@@ -100,7 +101,30 @@ function WorkPicker({ exclude, onPick, onClose }: { exclude: Set<string>; onPick
   const box = useRef<HTMLDivElement>(null);
   const search = useTreeSearch(term, ["work"]);
   const recent = useTreeQuickView(search.active ? null : "recent", ["work"]);
-  const nodes = (search.active ? search.results : recent.nodes).filter((node) => node.sourceId && !exclude.has(node.sourceId)).slice(0, 8);
+  const meaning = useMeaningHits(term, ["artifact"]);
+  const nodes = (
+    search.active
+      ? mergeMeaningMatches<TreeNode>({
+          literal: search.results,
+          hits: meaning.hits,
+          idOf: (node) => node.sourceId,
+          extra: (hit) => ({
+            nodeId: `meaning:${semanticTargetId(hit)}`,
+            parentId: null,
+            kind: "work",
+            name: hit.title,
+            sourceId: semanticTargetId(hit),
+            orderKey: "",
+            pinned: false,
+            isContainer: false,
+            createdAt: hit.updatedAt ?? 0,
+            updatedAt: hit.updatedAt ?? 0,
+            activityAt: hit.updatedAt ?? 0,
+            typeKey: hit.subtype,
+          }),
+        })
+      : recent.nodes
+  ).filter((node) => node.sourceId && !exclude.has(node.sourceId)).slice(0, 8);
 
   useEffect(() => {
     const away = (event: PointerEvent) => {
@@ -115,7 +139,7 @@ function WorkPicker({ exclude, onPick, onClose }: { exclude: Set<string>; onPick
       <input
         autoFocus
         className="sheet-input w-full"
-        placeholder="Find an artifact by name"
+        placeholder="Find an artifact"
         aria-label="Find an artifact to link"
         value={term}
         onChange={(event) => setTerm(event.target.value)}
@@ -124,7 +148,7 @@ function WorkPicker({ exclude, onPick, onClose }: { exclude: Set<string>; onPick
           if (event.key === "Enter" && nodes[0]?.sourceId) onPick(nodes[0].sourceId);
         }}
       />
-      <p className="task-picker-note">{search.active ? (nodes.length ? "Found" : "Nothing by that name") : "Recent"}</p>
+      <p className="task-picker-note">{search.active ? (nodes.length ? "Found" : meaning.loading ? "Searching" : "Nothing matches that") : "Recent"}</p>
       <ul>
         {nodes.map((node) => {
           const type = typeOf(node.typeKey);

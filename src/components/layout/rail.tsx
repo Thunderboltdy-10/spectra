@@ -63,7 +63,10 @@ function RailResizeHandle() {
   const [width, setWidth] = useState(RAIL_DEFAULT);
   useLayoutEffect(() => {
     const saved = Number(window.localStorage.getItem(WIDTH_KEY));
-    if (saved >= RAIL_MIN && saved <= RAIL_MAX) setWidth(saved);
+    if (!(saved >= RAIL_MIN && saved <= RAIL_MAX)) return;
+    setWidth(saved);
+    // The width the person chose comes back with the page, not only once they drag again.
+    setRailWidth(saved);
   }, []);
   const commit = (next: number | null) => {
     const value = next === null ? RAIL_DEFAULT : Math.round(Math.min(RAIL_MAX, Math.max(RAIL_MIN, next)));

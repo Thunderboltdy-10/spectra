@@ -45,6 +45,7 @@ import { useSpectraPreferences } from "../settings/preference-store";
 import { applyRuntimeChoice } from "../settings/ui/runtime-settings";
 import { bridgeUnavailableReason, useBridgeAvailability } from "../bridge/availability";
 import { DEVICES_HREF } from "../bridge/client";
+import { pastedFiles } from "../rich-content/clipboard";
 import { installProvider, setupActionFor, startProviderSetup } from "../ai/provider-setup";
 
 /*
@@ -274,10 +275,12 @@ export const IslandComposer = forwardRef<
   };
 
   const onPaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
-    // Pasted files attach; pasted text, however long, stays text.
-    if (event.clipboardData.files.length) {
+    // Pasted files attach; pasted text, however long, stays text. Word and
+    // other Office apps add a picture of what was copied: the text wins.
+    const files = pastedFiles(event.clipboardData);
+    if (files.length) {
       event.preventDefault();
-      void addFiles(event.clipboardData.files);
+      void addFiles(files);
     }
   };
 

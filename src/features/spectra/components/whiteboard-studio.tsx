@@ -133,6 +133,7 @@ import {
   downloadDocumentBlob,
 } from "./artifact-studio-file-utils";
 import { readConvexError } from "../../../../shared/convex-error.mjs";
+import { pastedFiles } from "../rich-content/clipboard";
 
 type Tool = "select" | "hand" | "connector" | WhiteboardNodeType;
 type Drag = {
@@ -2504,7 +2505,8 @@ export function WhiteboardStudio({
       return;
     if (action === "paste") {
       if (readOnly) return;
-      const image = Array.from(event.clipboardData.files).find((file) =>
+      // A paste from Word carries a picture of its text too: the text wins.
+      const image = pastedFiles(event.clipboardData).find((file) =>
         file.type.startsWith("image/"),
       );
       if (image) {

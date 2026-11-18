@@ -791,7 +791,10 @@ function runFormatFromMarks(marks) {
     "darkGreen", "darkMagenta", "darkRed", "darkYellow", "darkGray", "lightGray",
     "black", "white", "none",
   ]);
+  const code = list.some((mark) => mark?.type === "code");
   const format = {
+    // Inline code reaches Word as a monospace face on a light ground.
+    ...(code ? { fontFamily: "Consolas", shading: "F2F2F2" } : {}),
     ...(list.some((mark) => mark?.type === "bold") ? { bold: true } : {}),
     ...(list.some((mark) => mark?.type === "italic") ? { italic: true } : {}),
     ...(list.some((mark) => mark?.type === "underline") ? { underline: true } : {}),
@@ -885,37 +888,60 @@ export function documentRichInlineFromJson(node) {
   return output;
 }
 
+/**
+ * The table as a regular grid: a merged cell sits at its top-left slot and the slots it covers
+ * are empty. Word gets every cell's content even where it cannot take the merge.
+ */
+function tableGrid(node) {
+  const rows = (node.content ?? []).filter((row) => row?.type === "tableRow");
+  const grid = rows.map(() => []);
+  rows.forEach((row, rowIndex) => {
+    let column = 0;
+    for (const cell of row.content ?? []) {
+      while (grid[rowIndex][column] !== undefined) column += 1;
+      const colspan = Math.max(1, Math.min(63, Math.round(Number(cell?.attrs?.colspan) || 1)));
+      const rowspan = Math.max(1, Math.min(rows.length - rowIndex, Math.round(Number(cell?.attrs?.rowspan) || 1)));
+      for (let r = rowIndex; r < rowIndex + rowspan; r += 1)
+        for (let c = column; c < column + colspan; c += 1)
+          grid[r][c] = r === rowIndex && c === column ? cell : null;
+      column += colspan;
+    }
+  });
+  const columns = Math.max(0, ...grid.map((row) => row.length));
+  return grid.map((row) => Array.from({ length: columns }, (_, index) => row[index] ?? null));
+}
+
 function tableRows(node) {
-  return (node.content ?? []).map((row) =>
-    (row.content ?? []).map((cell) => documentNodeText(cell).trim()),
-  );
+  return tableGrid(node).map((row) => row.map((cell) => (cell ? documentNodeText(cell).trim() : "")));
 }
 
 function tableRichRows(node) {
-  return (node.content ?? []).map((row) =>
-    (row.content ?? []).map((cell) => documentRichInlineFromJson(cell)),
-  );
+  return tableGrid(node).map((row) => row.map((cell) => (cell ? documentRichInlineFromJson(cell) : [])));
 }
 
 /** Column widths the writer dragged, in editor pixels; unset columns are null. */
 function tableColumnWidths(node) {
-  const widths = (node.content?.[0]?.content ?? []).map((cell) => {
-    const width = Number(Array.isArray(cell?.attrs?.colwidth) ? cell.attrs.colwidth[0] : NaN);
-    return Number.isFinite(width) && width > 0 ? Math.round(width) : null;
+  // A merged cell's `colwidth` holds one width per column it spans.
+  const widths = (node.content?.[0]?.content ?? []).flatMap((cell) => {
+    const span = Math.max(1, Math.round(Number(cell?.attrs?.colspan) || 1));
+    const given = Array.isArray(cell?.attrs?.colwidth) ? cell.attrs.colwidth : [];
+    return Array.from({ length: span }, (_, index) => {
+      const width = Number(given[index]);
+      return Number.isFinite(width) && width > 0 ? Math.round(width) : null;
+    });
   });
   return widths.some((width) => width !== null) ? { columnWidths: widths } : {};
 }
 
+/**
+ * Only a table Word cannot be given as a grid at all. Merged cells and header cells outside the
+ * first row are written as a plain grid (their content kept), so they no longer stop a sync.
+ */
 function unsupportedTableStructure(node) {
   const containsTable = (child) => child?.type === "table" || (child?.content ?? []).some(containsTable);
   const rows = node.content ?? [];
-  const columns = rows[0]?.content?.length ?? 0;
-  const headerRow = rows[0]?.content?.every((cell) => cell.type === "tableHeader") ?? false;
-  return rows.some((row, index) => row.type !== "tableRow" || row.content?.length !== columns ||
-    row.content.some((cell) =>
-      cell.type !== (index === 0 && headerRow ? "tableHeader" : "tableCell") ||
-      (cell.attrs?.colspan ?? 1) !== 1 || (cell.attrs?.rowspan ?? 1) !== 1 ||
-      (cell.content ?? []).some(containsTable)));
+  return !rows.length || rows.some((row) => row?.type !== "tableRow" || !row.content?.length ||
+    row.content.some((cell) => (cell.content ?? []).some(containsTable)));
 }
 
 export function documentBlocksFromJson(json) {
@@ -953,6 +979,32 @@ export function documentBlocksFromJson(json) {
       };
     }
 
+    // Blocks Word holds as paragraph properties: a divider is a bottom border, a page break an
+    // empty paragraph holding one.
+    if (node?.type === "horizontalRule" || node?.type === "pageBreak")
+      return {
+        id,
+        type: "paragraph",
+        text: "",
+        attrs: {
+          paragraphFormat: paragraphFormatFromAttrs(node.type === "pageBreak" ? { pageBreak: true } : { frameBorder: "bottom" }),
+        },
+      };
+    if (node?.type === "taskList") {
+      // A ballot box per item keeps the checklist's state readable in Word.
+      const items = [];
+      const visit = (list, depth) => {
+        for (const item of list?.content ?? []) {
+          for (const child of item?.content ?? []) {
+            if (child?.type === "taskList") visit(child, depth + 1);
+            else if (child?.type === "paragraph")
+              items.push(`${"  ".repeat(depth)}${item.attrs?.checked === true ? "☒" : "☐"} ${documentNodeText(child).trim()}`);
+          }
+        }
+      };
+      visit(node, 0);
+      return { id, type: "paragraph", text: items.join("\n") };
+    }
     const inlineContent = documentRichInlineFromJson(node);
     const hasRichContent = richInlineHasSemantics(inlineContent);
     const text = (
@@ -1255,11 +1307,39 @@ export function documentContentToProseMirrorJson(contentValue) {
       }),
     };
   }
+  const source = blocks.length ? blocks : [{ id: "intro", type: "paragraph", text: "" }];
   return {
     type: "doc",
-    content: (blocks.length
-      ? blocks
-      : [{ id: "intro", type: "paragraph", text: "" }]
-    ).map((block, index) => blockToJson(block, index, content.nativeBinding)),
+    content: numberWordLists(
+      source,
+      source.map((block, index) => blockToJson(block, index, content.nativeBinding)),
+    ),
   };
+}
+
+const WORD_LIST_TYPES = { lowerLetter: "a", upperLetter: "A", lowerRoman: "i", upperRoman: "I" };
+
+/**
+ * Each Word list paragraph is its own block, so it opens as a one-item list. A numbered one
+ * must still read 1, 2, 3 (or a, b, c), counting on from the items before it in the same Word
+ * list the way Word counts: per list and level, a shallower item restarting the deeper levels.
+ */
+export function numberWordLists(blocks, nodes) {
+  const counters = new Map();
+  return nodes.map((node, index) => {
+    const list = record(record(blocks[index]?.attrs).list);
+    if (node?.type !== "bulletList" || list.isBullet !== false || typeof list.numId !== "string") return node;
+    const level = Math.max(0, Math.min(8, Number(list.level) || 0));
+    const levels = counters.get(list.numId) ?? [];
+    const start = Number.isFinite(Number(list.start)) ? Number(list.start) : 1;
+    levels[level] = levels[level] === undefined ? start : levels[level] + 1;
+    levels.length = level + 1;
+    counters.set(list.numId, levels);
+    const type = WORD_LIST_TYPES[list.format];
+    return {
+      ...node,
+      type: "orderedList",
+      attrs: { ...(node.attrs ?? {}), start: levels[level], ...(type ? { type } : {}) },
+    };
+  });
 }

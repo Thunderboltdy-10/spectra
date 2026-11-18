@@ -182,6 +182,7 @@ async function readVisibleCalendarItems(
   limit: number,
   cursor: CalendarCursor | undefined,
   metrics: CalendarReadMetrics,
+  phaseOnly = false,
 ) {
   const phase = cursor?.kind === "visible" ? (cursor.phase ?? "range") : "range";
   const rows: ReadModelRow[] = [];
@@ -227,7 +228,8 @@ async function readVisibleCalendarItems(
       continue;
     rows.push(item);
   }
-  const nextPhase = phase === "range" ? "wide" : phase === "wide" ? "unscheduled" : null;
+  // A client reading the phases side by side asks each to stop at its own end.
+  const nextPhase = phaseOnly ? null : phase === "range" ? "wide" : phase === "wide" ? "unscheduled" : null;
   return {
     rows,
     nextCursor: bucketPage.isDone
@@ -557,6 +559,37 @@ async function readPartialTimeItems(
 }
 
 
+/**
+ * What a class's planner works are: when each is due, whether it was made for
+ * a school (ManageBac) task, and whether it's done. A class shelf sorts and
+ * files them by this; one indexed row per work, at most 100 works.
+ */
+export const plannerFacts = query({
+  args: { artifactIds: v.array(v.string()) },
+  handler: async (ctx, args) => {
+    const actor = await actorOrThrow(ctx);
+    const facts: Array<{ artifactId: string; dueAt: number | null; fromSchool: boolean; done: boolean }> = [];
+    for (const raw of args.artifactIds.slice(0, 100)) {
+      const artifactId = ctx.db.normalizeId("spectraArtifacts", raw);
+      if (!artifactId) continue;
+      const rows = await ctx.db
+        .query("calendarPlanTaskReadModels")
+        .withIndex("by_plan", (q) => q.eq("planArtifactId", artifactId))
+        .take(20);
+      const own = rows.filter((row) => row.ownerAccountId === actor.accountId);
+      if (!own.length) continue;
+      const dues = own.flatMap((row) => (row.dueAt === undefined ? [] : [row.dueAt]));
+      facts.push({
+        artifactId: raw,
+        dueAt: dues.length ? Math.min(...dues) : null,
+        fromSchool: own.some((row) => row.sourceRecordId !== undefined),
+        done: own.every((row) => row.taskStatus === "completed"),
+      });
+    }
+    return facts;
+  },
+});
+
 export const overview = query({
   args: {
     from: v.number(),
@@ -571,6 +604,7 @@ export const overview = query({
     targetCursor: v.optional(v.string()),
     limit: v.optional(v.number()),
     debug: v.optional(v.boolean()),
+    phaseOnly: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const actor = await actorOrThrow(ctx);
@@ -590,6 +624,7 @@ export const overview = query({
       limit,
       decodeCursor(args.cursor),
       metrics,
+      args.phaseOnly === true,
     );
     const unscheduledPage = args.unscheduledCursor === CALENDAR_DONE_CURSOR ? { rows: [], nextCursor: null } : await readUnscheduledTasks(
       ctx,

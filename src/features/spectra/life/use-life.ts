@@ -454,7 +454,7 @@ export function useLifeArrival(ref: RefObject<HTMLElement | null>, key: string |
     if (!seed) return markArrival(element);
     // The skeleton that held its place becomes it.
     const show = veil(element);
-    void life.morph(seed, figureOf(element, { bars: "h2, h3, h4, [data-card-title], p", maxBars: 6, ...figure })).formed.then(show);
+    void life.pin(life.morph(seed, figureOf(element, { bars: "h2, h3, h4, [data-card-title], p", maxBars: 6, ...figure })), element).formed.then(show);
     const fallback = window.setTimeout(show, 800);
     return () => {
       window.clearTimeout(fallback);
@@ -638,7 +638,7 @@ function useDeparture(
           // Whatever arrives there may be forming itself (hidden until it has): then it brings its own light.
           if (content && !isVeiled(content)) {
             // The content is already there: the lines set off toward it and give way, never standing over its text.
-            const morph = life.morph(shape, figureOf(content, { bars: TAKEOVER_BARS, maxBars: 12, frame: hasVisibleFrame(content) }));
+            const morph = life.pin(life.morph(shape, figureOf(content, { bars: TAKEOVER_BARS, maxBars: 12, frame: hasVisibleFrame(content) })), content);
             window.setTimeout(() => morph.release(), VEIL_MAX_MS);
           } else {
             void life.unform(shape);

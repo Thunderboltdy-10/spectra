@@ -10,7 +10,7 @@ import type { HarnessMessage } from "../ai/harness/types";
  * Home and the tests agree on them.
  */
 
-export const BRIEF_LIMITS = { items: 14, title: 140, note: 280, suggestions: 5 } as const;
+export const BRIEF_LIMITS = { items: 14, title: 140, note: 280, suggestions: 5, memory: 4_000 } as const;
 
 /** Kinds of work the brief may propose Spectra makes. */
 export const BRIEF_WORK_TYPES = ["document", "flashcard_deck", "quiz", "presentation"] as const;
@@ -41,6 +41,11 @@ export type BriefContext = {
   late: BriefContextItem[];
   /** Tasks with no date. */
   open: BriefContextItem[];
+  /**
+   * What Spectra remembers about the student (their memory), so the brief
+   * never pushes a task they said is done, wrong or not theirs.
+   */
+  memory?: string;
 };
 
 /** A task the brief proposes to add, every detail filled in. */
@@ -172,12 +177,14 @@ export function briefMessages(context: BriefContext): HarnessMessage[] {
         "Every suggestion also has title (under eight words, starting with a verb) and why (one short sentence naming the reason: a date, a class, what is left).",
         'A suggestion may also have "steps": two to four short, concrete instructions for doing it today, in order, each naming exactly what to do and for how long (such as "Answer questions 1 to 5 without notes, 20 minutes"). Give steps whenever the title alone would leave the student unsure how to start; leave them out of "add", whose task has its own.',
         "Use only ids from the lists. Never invent classes, dates or artifacts. Plain words, no emoji, no markdown.",
+        "What Spectra remembers about the student comes first when given and wins over the lists: never suggest, mention or count a task or deadline the student said is done, handed in, cancelled, wrong or not theirs, and follow what they said they prefer.",
       ].join("\n"),
     },
     {
       role: "user",
       content: [
         `Today is ${context.day}.`,
+        context.memory?.trim() ? `What Spectra remembers about the student:\n${clip(context.memory.trim(), BRIEF_LIMITS.memory)}` : "",
         section("Threads yesterday", context.yesterdayThreads, context.timeZone),
         section("Artifacts changed yesterday", context.yesterdayWorks, context.timeZone),
         section("Recent artifacts", context.recentWorks, context.timeZone),

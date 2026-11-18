@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type HTMLAttributes, type Ref } from "react";
+import { cleanOfficeHtml } from "../rich-content/clipboard";
 import { createPortal } from "react-dom";
 import type { JSONContent } from "@tiptap/core";
 import { EditorContent, useEditor, type Editor } from "@tiptap/react";
@@ -153,6 +154,7 @@ export function SlideTextField({
     editable,
     immediatelyRender: false,
     editorProps: {
+      transformPastedHTML: cleanOfficeHtml,
       attributes: {
         role: "textbox",
         "aria-multiline": "true",

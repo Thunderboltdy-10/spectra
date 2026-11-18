@@ -588,6 +588,8 @@ const PARAGRAPH_FORMAT_FIELDS = [
   "firstLineIndentPoints",
   "border",
   "shading",
+  "pageBreak",
+  "pageBreakBefore",
 ] as const;
 
 /**

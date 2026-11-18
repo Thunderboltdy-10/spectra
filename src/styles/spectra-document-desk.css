@@ -859,3 +859,12 @@
     animation: none;
   }
 }
+
+/* Find matches, painted through the CSS highlight registry (document-studio). */
+::highlight(spectra-find) {
+  background-color: color-mix(in oklab, var(--brand-primary) 20%, transparent);
+}
+::highlight(spectra-find-current) {
+  background-color: color-mix(in oklab, var(--brand-primary) 45%, transparent);
+  color: var(--text-primary);
+}

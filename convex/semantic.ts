@@ -13,7 +13,9 @@ import type { Doc, Id } from "./_generated/dataModel";
 import type { ActionCtx, QueryCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { action, internalMutation, internalQuery } from "./functions";
-import { embedQuery, embeddingInputFits, embeddingVersion, type QueryEmbeddingResult } from "./embeddingProvider";
+import {
+  EMBEDDING_BATCH_SIZE, QueryVectorCache, embedQuery, embeddingInputFits, embeddingVersion, requestEmbeddings, type QueryEmbeddingResult,
+} from "./embeddingProvider";
 import { getAuthenticatedActor } from "./identityShared";
 import { itemKeyOf, vectorFilterGroups, vSemanticKind, type VectorTerm } from "./semanticKeys";
 import { kindOfId, readableItems, sourceFor, viewerPartitions, workspaceReadable, type ReadableItem } from "./semanticSources";
@@ -351,6 +353,47 @@ export const search = action({
 export const searchThreads = action({
   args: { query: v.string(), workspaceId: v.optional(v.string()), limit: v.optional(v.number()), hints: v.optional(vHints) },
   handler: (ctx, args): Promise<SemanticSearchResponse> => runSearch(ctx, { ...args, kinds: ["thread"] }),
+});
+
+// ---------------------------------------------------------------------------------------------
+// Ranking short texts (settings and other fixed lists)
+
+const RANK_TEXTS_MAX = 240;
+const RANK_TEXT_CHARS = 400;
+/** Vectors for fixed UI texts (setting labels), per isolate: they rarely change. */
+const textVectors = new QueryVectorCache(512, 6 * 60 * 60_000);
+
+/**
+ * Scores fixed texts (for example every setting's label and description) against a query by
+ * meaning. Reads no tables: the texts come from the caller, and their vectors stay cached in the
+ * isolate, so a repeated search only embeds the query. Empty when embeddings are unavailable.
+ */
+export const rankTexts = action({
+  args: { query: v.string(), texts: v.array(v.string()) },
+  handler: async (ctx, args): Promise<{ scores: number[]; degraded: boolean }> => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("AUTH_NO_SCHOOL: An active school membership is required.");
+    const query = args.query.trim().slice(0, MAX_QUERY_CHARS);
+    const texts = args.texts.slice(0, RANK_TEXTS_MAX).map((text) => text.trim().slice(0, RANK_TEXT_CHARS));
+    if (!query || !texts.length) return { scores: texts.map(() => 0), degraded: false };
+    const version = embeddingVersion();
+    const asked = await embedQuery("rank-texts", query);
+    if (!version || !asked.ok) return { scores: texts.map(() => 0), degraded: true };
+    const missing = [...new Set(texts.filter((text) => text && !textVectors.get("settings", text, version)))];
+    for (let start = 0; start < missing.length; start += EMBEDDING_BATCH_SIZE) {
+      const batch = missing.slice(start, start + EMBEDDING_BATCH_SIZE);
+      const result = await requestEmbeddings(batch, { timeoutMs: 6_000, attempts: 2, backoffMs: 150 });
+      if (!result.ok) return { scores: texts.map(() => 0), degraded: true };
+      batch.forEach((text, index) => textVectors.put("settings", text, result.vectors[index], result.version));
+    }
+    return {
+      scores: texts.map((text) => {
+        const vector = text ? textVectors.get("settings", text, version) : undefined;
+        return vector ? Math.round(cosine(asked.vector, vector) * 1000) / 1000 : 0;
+      }),
+      degraded: false,
+    };
+  },
 });
 
 // ---------------------------------------------------------------------------------------------

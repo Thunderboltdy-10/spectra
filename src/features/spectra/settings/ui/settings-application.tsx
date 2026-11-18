@@ -25,6 +25,7 @@ import type { PreferenceSection, SpectraPreferences } from "../schema";
 import { clearSpectraMemory, exportSpectraMemory } from "../../data/api";
 import { MemoryFilesSettings } from "./memory-files-settings";
 import { RuntimeSettings } from "./runtime-settings";
+import { settingText, useSettingsMeaning } from "./settings-meaning";
 import { WorkHomeChoice } from "../../devices/work-home-choice";
 import { downloadDocumentBlob } from "../../components/artifact-studio-file-utils";
 import { COMMAND_TABS } from "../../commands";
@@ -80,9 +81,11 @@ function SettingGroup({ title, description, children }: { title: string; descrip
   );
 }
 
-function SettingRow({ label, description, control }: { label: string; description?: string; control: ReactNode }) {
+function SettingRow({ label, description, choices, control }: { label: string; description?: string; choices?: readonly string[]; control: ReactNode }) {
+  // What meaning search reads: the words a person sees, with the choices a select hides.
+  const meaning = [label, description, choices?.length ? `Choices: ${choices.join(", ")}` : null].filter(Boolean).join(". ");
   return (
-    <div data-setting-row className="group flex min-h-[68px] items-center gap-4 rounded-card px-3.5 py-3 transition-colors hover:bg-[var(--bg-secondary)] sm:px-4">
+    <div data-setting-row data-setting-meaning={meaning} className="group flex min-h-[68px] items-center gap-4 rounded-card px-3.5 py-3 transition-colors hover:bg-[var(--bg-secondary)] sm:px-4">
       <div className="min-w-0 flex-1">
         <div className="text-ui font-medium text-[var(--text-primary)]">{label}</div>
         {description ? <div className="mt-0.5 max-w-2xl text-micro leading-[18px] text-[var(--text-secondary)]">{description}</div> : null}
@@ -98,7 +101,7 @@ function ToggleRow({ label, description, checked, onCheckedChange }: { label: st
 
 function SelectRow({ label, description, value, options, onChange }: { label: string; description?: string; value: string; options: ReadonlyArray<{ value: string; label: string }>; onChange: (value: string) => void }) {
   return (
-    <SettingRow label={label} description={description} control={
+    <SettingRow label={label} description={description} choices={options.map((option) => option.label)} control={
       <SelectField ariaLabel={label} value={value} onChange={onChange} options={options} />
     } />
   );
@@ -228,7 +231,6 @@ function AppearanceSettings({ p, update }: SectionProps<"appearance">) {
       <ToggleRow label="Reduced motion" description="Removes decorative transitions while preserving state changes." checked={p.reducedMotion} onCheckedChange={(reducedMotion) => update({ reducedMotion, motionLevel: reducedMotion ? "reduced" : "full" })} />
       <ToggleRow label="Reveal answers as they're written" description="When off, each part of an answer appears whole." checked={p.streamingReveal} onCheckedChange={(streamingReveal) => update({ streamingReveal })} />
       <ToggleRow label="Shimmer on the line being written" checked={p.activeTailShimmer} onCheckedChange={(activeTailShimmer) => update({ activeTailShimmer })} />
-      <SelectRow label="Folders in the Library" description="Show what's inside lets a folder's first artifacts peek out and lists its contents when you rest the pointer on it. Each folder can switch on its own too." value={p.folderLook} options={[{ value: "peek", label: "Show what's inside" }, { value: "plain", label: "Plain folders" }]} onChange={(folderLook) => update({ folderLook: folderLook as typeof p.folderLook, folderLookFlipped: [] })} />
     </SettingGroup>
   );
 }
@@ -418,6 +420,7 @@ export function SettingsApplication({ initialSection = "ai" }: { initialSection?
   const searching = query.trim().length > 0;
   const results = useRef<HTMLDivElement>(null);
   const [matches, setMatches] = useState(0);
+  const meant = useSettingsMeaning(query, results);
   useEffect(() => { if (isSection(initialSection)) setActive(initialSection); }, [initialSection]);
   // Searching shows every section at once and hides what doesn't match: a
   // row by its own words, a group by its title (then all its rows show), a
@@ -428,7 +431,7 @@ export function SettingsApplication({ initialSection = "ai" }: { initialSection?
     const words = query.trim().toLowerCase().split(/\s+/);
     const has = (element: Element) => {
       const text = (element.textContent ?? "").toLowerCase();
-      return words.every((word) => text.includes(word));
+      return words.every((word) => text.includes(word)) || meant.has(settingText(element));
     };
     let shown = 0;
     for (const section of root.querySelectorAll<HTMLElement>("[data-settings-section]")) {
@@ -459,7 +462,7 @@ export function SettingsApplication({ initialSection = "ai" }: { initialSection?
       if (!section.hidden) shown += 1;
     }
     setMatches(shown);
-  }, [query, searching, preferences, hydrated]);
+  }, [query, searching, preferences, hydrated, meant]);
   const updateSection = <K extends PreferenceSection>(section: K) => (patch: Partial<SpectraPreferences[K]>) => update(section, patch);
   const body: Record<SectionId, ReactNode> = {
     ai: (

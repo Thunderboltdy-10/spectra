@@ -390,6 +390,26 @@
     margin: 0;
   }
 
+  /* A table in a message or a preview (not a document, whose columns the
+     writer sizes): each column as wide as its words need, between a short
+     word and a comfortable line, so a long column never squeezes the others
+     into towers. A wide table scrolls sideways inside its own frame. */
+  .spectra-prose:not(.ProseMirror) :where(.tableWrapper) {
+    max-width: 100%;
+    overscroll-behavior-x: contain;
+  }
+
+  .spectra-prose:not(.ProseMirror) :where(table) {
+    width: max-content;
+    min-width: 100%;
+  }
+
+  .spectra-prose:not(.ProseMirror) :where(th, td) {
+    min-width: 5.5rem;
+    max-width: 22rem;
+    overflow-wrap: break-word;
+  }
+
   .spectra-prose :where(hr) {
     margin: 1.5em 0;
     border: 0;

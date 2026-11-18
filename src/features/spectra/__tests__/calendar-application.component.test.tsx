@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { calendarPhaseCursor } from "../../../../shared/calendar-pagination";
 import {
   cleanup,
   act,
@@ -151,7 +152,11 @@ describe("Calendar application", () => {
     render(<CalendarApplication />);
     await screen.findByTitle(blockTitled("Essay draft"));
     let page = 0;
-    vi.mocked(fetch).mockImplementation(async () => {
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      // The range-free lists load apart from the week and aren't paged here.
+      if (/[?&]cursor=__calendar_done__/.test(String(input))) return overview([]);
+      // Long and undated items are read beside the range, each phase on its own.
+      if (["wide", "unscheduled"].some((phase) => String(input).includes(`cursor=${calendarPhaseCursor(phase as "wide")}&`))) return overview([]);
       page += 1;
       const payload = await overview([{ ...workBlock(), id: `fresh-${page}`, title: `Fresh ${page}` }]).json();
       payload.data.pagination = { visible: page < 9 ? `page-${page + 1}` : null };

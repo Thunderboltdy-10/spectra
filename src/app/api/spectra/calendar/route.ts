@@ -36,6 +36,7 @@ export async function GET(request: NextRequest) {
     if (targetItemId?.trim()) args.targetItemId = targetItemId.trim();
     if (targetTitle?.trim()) args.targetTitle = targetTitle.trim();
     if (limit !== undefined) args.limit = limit;
+    if (request.nextUrl.searchParams.get("phaseOnly") === "1") args.phaseOnly = true;
     for (const key of [...Object.values(CALENDAR_CURSOR_ARGS), "targetCursor"]) {
       const cursor = request.nextUrl.searchParams.get(key);
       if (cursor) args[key] = cursor;

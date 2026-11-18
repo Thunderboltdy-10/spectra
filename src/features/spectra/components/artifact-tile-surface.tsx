@@ -30,6 +30,7 @@ import {
   type WorkbenchNode,
 } from "../workbench";
 import { WorkbenchSplitTree } from "./workbench-split-tree";
+import { matchesAllWords, mergeMeaningMatches, useMeaningHits } from "../semantic/meaning-matches";
 
 type ArtifactTileSurfaceProps = {
   artifacts: SpectraArtifact[];
@@ -383,8 +384,15 @@ function AddWorkPicker({
     document.addEventListener("pointerdown", away);
     return () => document.removeEventListener("pointerdown", away);
   }, [onClose]);
-  const term = query.trim().toLowerCase();
-  const found = term ? artifacts.filter((artifact) => artifact.title.toLowerCase().includes(term)) : artifacts;
+  const meaning = useMeaningHits(query, ["artifact"]);
+  const found = query.trim()
+    ? mergeMeaningMatches({
+        literal: artifacts.filter((artifact) => matchesAllWords(`${artifact.title} ${artifact.summary ?? ""}`, query)),
+        hits: meaning.hits,
+        known: artifacts,
+        idOf: (artifact) => artifact._id,
+      })
+    : artifacts;
   return (
     <div
       ref={rootRef}

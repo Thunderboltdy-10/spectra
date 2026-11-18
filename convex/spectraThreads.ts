@@ -1354,7 +1354,13 @@ export const liveName = query({
 export const getActiveExecution = query({
   args: { threadId: v.id("spectraThreads") },
   handler: async (ctx, args) => {
-    const { actor, thread } = await requireOwnedThread(ctx, args.threadId);
+    // A live view of a thread that is gone or not theirs has nothing running;
+    // throwing here would take the whole page down while the thread's own
+    // read says "no longer available".
+    const actor = await requireActor(ctx);
+    const thread = await ctx.db.get(args.threadId);
+    if (!thread || thread.ownerAccountId !== actor._id || thread.schoolId !== actor.schoolId || thread.status === "deleted")
+      return null;
     return selectedActiveExecution(ctx, { actor, thread });
   },
 });

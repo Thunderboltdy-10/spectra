@@ -23,6 +23,7 @@ import {
 import { cn } from "@/lib/utils";
 import { formatBarClicks } from "../editor/format-menu";
 import type { GlyphIcon } from "@/components/icons/glyph-icons";
+import { cleanOfficeHtml } from "../rich-content/clipboard";
 
 export type StudioMenuItem = {
   key: string;
@@ -193,12 +194,34 @@ export function editorVerb(verb: "cut" | "copy"): boolean {
   }
 }
 
-/** Paste as text at the caret: through the editor when there is one, so its model stays in step. */
+type PasteView = { pasteText?: (text: string) => boolean; pasteHTML?: (html: string) => boolean };
+
+/** The clipboard's HTML, where the browser lets a page read it. */
+async function clipboardHtml() {
+  try {
+    for (const item of await navigator.clipboard.read()) {
+      if (item.types.includes("text/html")) return await (await item.getType("text/html")).text();
+    }
+  } catch {
+    // Reading anything but text is not allowed here: paste the text.
+  }
+  return "";
+}
+
+/**
+ * Paste at the caret: through the editor when there is one, so its model
+ * stays in step, with its formatting (a paste from Word keeps its lists);
+ * elsewhere as text.
+ */
 export async function pasteAtCaret(place?: Element | null): Promise<boolean> {
   try {
+    const view = (place as (Element & { editor?: { view?: PasteView } }) | null | undefined)?.editor?.view;
+    if (view?.pasteHTML) {
+      const html = await clipboardHtml();
+      if (html) return view.pasteHTML(cleanOfficeHtml(html));
+    }
     const text = await navigator.clipboard.readText();
     if (!text) return false;
-    const view = (place as (Element & { editor?: { view?: { pasteText?: (text: string) => boolean } } }) | null | undefined)?.editor?.view;
     if (view?.pasteText) return view.pasteText(text);
     return document.execCommand("insertText", false, text);
   } catch {

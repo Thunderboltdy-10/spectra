@@ -15,6 +15,7 @@ import { useLifeArrival, useLifeDeparture, useLifeJoin } from "../life/use-life"
 import type { LocalDeviceRequest } from "./actions";
 import { timeAgo, type DeviceTone, type DeviceView, type FolderView } from "./devices-model";
 import { EMPTY_BACKLOG, files as fileCount, type FolderBacklog, type SyncBacklog } from "./sync-backlog";
+import { bridgeVersionOlder, type BridgeSyncLogEntry } from "../bridge/client";
 
 export const TONE_GLYPH: Record<DeviceTone, IconName> = {
   ok: "done",
@@ -45,6 +46,8 @@ export function DeviceCard({
   onReconnect,
   downloadUrl,
   backlog,
+  latestVersion,
+  updateMessage,
 }: {
   device: DeviceView;
   now: number;
@@ -60,6 +63,10 @@ export function DeviceCard({
   downloadUrl?: string | null;
   /** What each folder still has to move, both ways. */
   backlog?: SyncBacklog;
+  /** The newest published Bridge, to say when this one is older. */
+  latestVersion?: string | null;
+  /** What pressing Check for update said, shown beside the button. */
+  updateMessage?: string;
 }) {
   const ref = useRef<HTMLElement>(null);
   const [browsing, setBrowsing] = useState<string | null>(null);
@@ -67,11 +74,14 @@ export function DeviceCard({
   useLifeJoin(ref, lifeKey);
   useLifeDeparture(ref, true, DEVICE_FIGURE, lifeKey);
   const local = device.isThisComputer && device.live;
+  const older = !device.updateRequired && bridgeVersionOlder(device.version, latestVersion);
   const facts = [
     device.platformLabel,
     device.version ? `Spectra Bridge ${device.version}` : null,
     device.lastSyncAt ? `synced ${timeAgo(device.lastSyncAt, now)}` : null,
   ].filter(Boolean);
+  const updateNote = updateMessage ?? device.updateNote;
+  const manualUpdate = /too old|could not be installed/i.test(updateNote ?? "");
 
   return (
     <article
@@ -168,8 +178,22 @@ export function DeviceCard({
         </section>
       ) : null}
 
+      {device.isThisComputer && device.syncLog.length ? <SyncActivity entries={device.syncLog} now={now} /> : null}
+
+      {older || updateNote ? (
+        <p className="device-card-update" role="status" data-problem={manualUpdate || undefined}>
+          <Icon name={manualUpdate ? "problem" : "info"} size={14} />
+          <span>
+            {updateNote ??
+              (device.isThisComputer
+                ? `Spectra Bridge ${latestVersion} is out. Press Check for update to install it.`
+                : `Spectra Bridge ${latestVersion} is out. On ${device.name}, choose Check for updates in the Spectra Bridge menu ${device.platformLabel.startsWith("Mac") ? "in the menu bar" : "near the clock"}.`)}
+          </span>
+        </p>
+      ) : null}
+
       <footer className="device-card-foot">
-        <span className="min-w-0 flex-1 truncate">
+        <span className="min-w-0 flex-[1_1_160px] truncate">
           {facts.join(", ")}
           {device.updateRequired ? ". This Bridge is out of date." : "."}
         </span>
@@ -188,7 +212,15 @@ export function DeviceCard({
             Try again
           </Button>
         ) : null}
-        {device.isThisComputer && !local && !device.updateRequired && downloadUrl ? (
+        {device.isThisComputer && (device.updateRequired || manualUpdate) && downloadUrl ? (
+          <Button asChild variant="ghost" size="sm">
+            <a href={downloadUrl} rel="noopener">
+              <Icon name="download" size={16} />
+              Download the new Bridge
+            </a>
+          </Button>
+        ) : null}
+        {device.isThisComputer && !local && !device.updateRequired && !manualUpdate && downloadUrl ? (
           <Button asChild variant="ghost" size="sm">
             <a href={downloadUrl} rel="noopener">
               <Icon name="download" size={16} />
@@ -396,32 +428,87 @@ function FolderTwin({ folder }: { folder: FolderView }) {
 function SyncLanes({ backlog, computer, single }: { backlog: FolderBacklog; computer: string; single: boolean }) {
   const down = backlog.toComputer.length;
   const up = backlog.toSpectra.length;
-  const stuck = backlog.conflict.length + backlog.problem.length;
+  const both = backlog.conflict.length;
+  const failed = backlog.problem.length;
   const names = (list: FolderBacklog[keyof FolderBacklog]) =>
     list.slice(0, 6).map((file) => file.path.split("/").pop() || file.path).join(", ") + (list.length > 6 ? ", and more" : "");
-  if (!down && !up && !stuck) return null;
+  if (!down && !up && !both && !failed) return null;
   return (
     <span className="device-folder-lanes" aria-label="Still to sync">
       {down ? (
-        <span className="device-folder-lane" data-way="down" title={names(backlog.toComputer)}>
+        <span className="device-folder-lane" data-way="down" title={`${names(backlog.toComputer)}. Saved here once ${computer} is on and the file isn't open in Office.`}>
           <Icon name="arrowDown" size={12} />
-          <span className="min-w-0 truncate">{single ? "Going" : fileCount(down)} to {computer}</span>
+          <span className="min-w-0 truncate">{single ? "Spectra's edits" : `Spectra's edits to ${fileCount(down)}`} on the way to {computer}</span>
         </span>
       ) : null}
       {up ? (
-        <span className="device-folder-lane" data-way="up" title={names(backlog.toSpectra)}>
+        <span className="device-folder-lane" data-way="up" title={`${names(backlog.toSpectra)}. Spectra takes in the saved file within a minute, or when it's next opened there.`}>
           <Icon name="arrowUp" size={12} />
-          <span className="min-w-0 truncate">{single ? "Going" : fileCount(up)} to Spectra</span>
+          <span className="min-w-0 truncate">{single ? "Edits made here" : `Edits to ${fileCount(up)}`} on the way to Spectra</span>
         </span>
       ) : null}
-      {stuck ? (
-        <span className="device-folder-lane" data-way="stuck" title={names([...backlog.conflict, ...backlog.problem])}>
-          <Icon name="problem" size={12} />
+      {both ? (
+        <span
+          className="device-folder-lane"
+          data-way="both"
+          title={`${names(backlog.conflict)}. Edited here and in Spectra since they last matched. Nothing is lost: open ${single ? "it" : "each"} in Spectra to keep both sets of changes.`}
+        >
+          <Icon name="info" size={12} />
           <span className="min-w-0 truncate">
-            {backlog.conflict.length ? `${single ? "Changed" : fileCount(backlog.conflict.length) + " changed"} on both sides` : `${single ? "Couldn't" : fileCount(backlog.problem.length) + " couldn't"} sync`}
+            {single ? "Edited in both places" : `${fileCount(both)} edited in both places`}, open in Spectra to combine
           </span>
         </span>
       ) : null}
+      {failed ? (
+        <span className="device-folder-lane" data-way="stuck" title={names(backlog.problem)}>
+          <Icon name="problem" size={12} />
+          <span className="min-w-0 truncate">{single ? "Couldn't sync" : `${fileCount(failed)} couldn't sync`}, retry the folder</span>
+        </span>
+      ) : null}
     </span>
+  );
+}
+
+const ACTIVITY_GLYPH: Record<string, IconName> = {
+  scan: "done",
+  toSpectra: "arrowUp",
+  fromSpectra: "arrowDown",
+  conflict: "info",
+  error: "problem",
+};
+const ACTIVITY_SHOWN = 6;
+
+/*
+ * What Bridge did lately on this computer, kept on the computer itself (the
+ * tray's Show sync log opens the same record as a file). A quiet folder's
+ * repeated checks are one line saying how often they happened.
+ */
+function SyncActivity({ entries, now }: { entries: BridgeSyncLogEntry[]; now: number }) {
+  const [all, setAll] = useState(false);
+  const shown = all ? entries : entries.slice(0, ACTIVITY_SHOWN);
+  return (
+    <section aria-label="Sync activity" className="device-activity">
+      <h4 className="device-card-subhead">Sync activity</h4>
+      <ol className="device-activity-list">
+        {shown.map((entry, index) => (
+          <li key={`${entry.at}:${index}`} className="device-activity-row" data-kind={entry.kind}>
+            <Icon name={ACTIVITY_GLYPH[entry.kind] ?? "syncing"} size={13} />
+            <span className="device-activity-folder">{entry.folder}</span>
+            <span className="device-activity-detail">
+              {entry.detail}
+              {entry.repeats ? <span className="device-activity-repeats"> ({entry.repeats + 1} times)</span> : null}
+            </span>
+            <time className="device-activity-when" dateTime={new Date(entry.at).toISOString()} title={new Date(entry.at).toLocaleString()}>
+              {timeAgo(entry.at, now)}
+            </time>
+          </li>
+        ))}
+      </ol>
+      {entries.length > ACTIVITY_SHOWN ? (
+        <button type="button" className="device-folder-browse" aria-expanded={all} onClick={() => setAll((value) => !value)}>
+          {all ? "Show less" : `Show all ${entries.length}`}
+        </button>
+      ) : null}
+    </section>
   );
 }

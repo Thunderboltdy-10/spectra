@@ -16,7 +16,7 @@ use spectra_bridge_core::identity::{AdoptionCandidate, adopt, local_resource_id}
 use spectra_bridge_core::journal::{Journal, NativeAckItem, OpState, ResourceRecord};
 use spectra_bridge_core::platform::{HostPlatform, OsFileIdentity, Platform};
 use spectra_bridge_core::protocol::{
-    LocalControlSnapshot, LocalMountStatus, LocalOfficeFile, PairingOffer,
+    LocalControlSnapshot, LocalMountStatus, LocalOfficeFile, PairingOffer, SyncLogEntry,
 };
 use spectra_bridge_core::retry::bridge_mount_repair_delay_ms;
 use spectra_bridge_core::server::{FilesSelected, LocalBridgeControl, ServerState, serve};
@@ -393,6 +393,14 @@ fn mount_synced_at_key(grant_id: &str) -> String {
     format!("mount_synced_at:{grant_id}")
 }
 
+/// How soon after a finished pass a reconnect may scan the same folder again.
+const RESTORE_RESCAN_MIN_MS: u64 = 5 * 60 * 1000;
+
+fn synced_within(journal: &Journal, grant_id: &str, window_ms: u64) -> bool {
+    read_ms(journal, &mount_synced_at_key(grant_id))
+        .is_some_and(|at| current_time_ms().saturating_sub(at) < window_ms)
+}
+
 fn set_flag(journal: &Journal, key: &str, on: bool) -> Result<(), String> {
     if on {
         journal.set_config(key, "true")
@@ -563,6 +571,8 @@ fn control_snapshot(grants: &GrantRegistry, journal: &Journal) -> LocalControlSn
         last_sync_at: read_ms(journal, LAST_SYNC_KEY),
         mounts: mount_views(grants, journal),
         office_files: office_files(grants, journal),
+        sync_log: read_sync_log(journal).into_iter().rev().take(100).collect(),
+        update_note: journal.config(UPDATE_NOTE_KEY).ok().flatten(),
     }
 }
 
@@ -1126,6 +1136,102 @@ fn bridge_log_directory() -> Option<std::path::PathBuf> {
     }
     #[allow(unreachable_code)]
     None
+}
+
+const SYNC_LOG_KEY: &str = "sync_log";
+const SYNC_LOG_LIMIT: usize = 300;
+
+fn read_sync_log(journal: &Journal) -> Vec<SyncLogEntry> {
+    journal
+        .config(SYNC_LOG_KEY)
+        .ok()
+        .flatten()
+        .and_then(|value| serde_json::from_str(&value).ok())
+        .unwrap_or_default()
+}
+
+/// The local record of what syncing did, newest last, for the Devices page
+/// and the tray's "Show sync log". The same line again in a row only moves
+/// its time, so an idle folder rescanned all day stays one line.
+fn log_sync(journal: &Journal, folder: &str, kind: &str, detail: &str) {
+    let mut entries = read_sync_log(journal);
+    let now = current_time_ms();
+    let detail = detail.chars().take(400).collect::<String>();
+    match entries.last_mut() {
+        Some(last) if last.folder == folder && last.kind == kind && last.detail == detail => {
+            last.at = now;
+            last.repeats = last.repeats.saturating_add(1);
+        }
+        _ => entries.push(SyncLogEntry {
+            at: now,
+            folder: folder.to_owned(),
+            kind: kind.to_owned(),
+            detail,
+            repeats: 0,
+        }),
+    }
+    if entries.len() > SYNC_LOG_LIMIT {
+        entries.drain(..entries.len() - SYNC_LOG_LIMIT);
+    }
+    if let Ok(value) = serde_json::to_string(&entries) {
+        let _ = journal.set_config(SYNC_LOG_KEY, &value);
+    }
+}
+
+fn grant_label(grants: &GrantRegistry, grant_id: &str) -> String {
+    grants
+        .device_grants()
+        .into_iter()
+        .find(|grant| grant.id == grant_id)
+        .map(|grant| grant.label)
+        .unwrap_or_else(|| "A folder".to_owned())
+}
+
+/// The sync log as a person reads it, written beside Bridge's logs and opened.
+fn open_sync_log(app: &tauri::AppHandle) -> Result<(), String> {
+    let runtime = app
+        .try_state::<BridgeRuntime>()
+        .ok_or_else(|| "Bridge is still starting".to_string())?;
+    let dir = app.path().app_log_dir().map_err(|error| error.to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+    let path = dir.join("Spectra Bridge sync log.txt");
+    let mut text = format!(
+        "Spectra Bridge {} sync log, newest first. Times are UTC.\n\n",
+        env!("CARGO_PKG_VERSION")
+    );
+    for entry in read_sync_log(&runtime.journal).iter().rev() {
+        let again = if entry.repeats > 0 {
+            format!(" (and {} more times since)", entry.repeats)
+        } else {
+            String::new()
+        };
+        text.push_str(&format!(
+            "{}  {}  {}{again}\n",
+            utc_minute(entry.at),
+            entry.folder,
+            entry.detail
+        ));
+    }
+    std::fs::write(&path, text).map_err(|error| error.to_string())?;
+    open_with_system(path.as_os_str()).map_err(|error| error.to_string())
+}
+
+/// "2026-11-18 16:35" from Unix milliseconds, without a date library.
+fn utc_minute(ms: u64) -> String {
+    let secs = ms / 1000;
+    let days = (secs / 86_400) as i64;
+    let (hour, minute) = ((secs % 86_400) / 3600, (secs % 3600) / 60);
+    // Civil date from days since 1970-01-01 (Howard Hinnant's algorithm).
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    format!("{year:04}-{month:02}-{day:02} {hour:02}:{minute:02}")
 }
 
 fn record_runtime_error(journal: &Journal, context: &str, error: &dyn std::fmt::Display) {
@@ -2032,6 +2138,9 @@ async fn finish_delivered_change(
     delivery: DeliveredChange,
 ) -> anyhow::Result<()> {
     let post_hash = delivery.envelope.change.hash.as_deref();
+    if let Some(path) = delivery.envelope.change.relative_path.as_deref() {
+        log_sync(journal, &grant_label(grants, &delivery.envelope.grant_id), "toSpectra", &format!("Sent the change to {path} to Spectra"));
+    }
     if !delivery.result.needs_payload {
         return journal.acknowledge_change(
             &delivery.item,
@@ -2765,7 +2874,9 @@ async fn run_sync(grant: &Grant, journal: &Journal) -> Result<(), String> {
             }
         }
     }
-    if pass.complete && !trust_reported {
+    // Every file this pass could read was sent, so the next pass can trust
+    // them. Files it couldn't read were never marked reported and still go.
+    if !trust_reported {
         let _ = journal.set_config(&verified_key, &current_time_ms().to_string());
     }
     let repair_delay_ms = if pass.needs_repair() {
@@ -2776,6 +2887,7 @@ async fn run_sync(grant: &Grant, journal: &Journal) -> Result<(), String> {
     };
     let (detail, synced, total) = mount_pass_status(&pass, repair_delay_ms);
     set_mount_status(journal, &grant.id, "active", &detail, synced, total)?;
+    log_sync(journal, &grant.label, "scan", &format!("Checked {total} {}. {detail}", file_word(total)));
     remember_waiting_files(
         journal,
         &grant.id,
@@ -2998,6 +3110,7 @@ async fn process_write_request(
     match result {
         Ok(write_result) => {
             record_write_progress(journal, "safe-writer-verified", Some(&request), None);
+            log_sync(journal, &grant_label(grants, &request.grant_id), "fromSpectra", &format!("Saved Spectra's changes to {}", request.relative_path));
             complete_claimed_write(
                 deployment,
                 credential,
@@ -3026,6 +3139,7 @@ async fn process_write_request(
         }
         Err(FsError::StaleRevision) => {
             record_write_progress(journal, "safe-writer-stale", Some(&request), None);
+            log_sync(journal, &grant_label(grants, &request.grant_id), "conflict", &format!("{} changed here and in Spectra at once; both versions are kept", request.relative_path));
             complete_claimed_write(
                 deployment,
                 credential,
@@ -3043,6 +3157,7 @@ async fn process_write_request(
         }
         Err(error) => {
             record_write_progress(journal, "safe-writer-failed", Some(&request), None);
+            log_sync(journal, &grant_label(grants, &request.grant_id), "error", &format!("Couldn't save {}: {error}", request.relative_path));
             complete_claimed_write(
                 deployment,
                 credential,
@@ -4006,6 +4121,7 @@ async fn sync_grant(
         Some(Ok(())) => Ok(MountSyncOutcome::Completed),
         Some(Err(error)) => {
             record_runtime_error(journal, "Mount repair scan failed", &error);
+            log_sync(journal, &grant.label, "error", &format!("Sync stopped: {error}"));
             match schedule_mount_repair_retry(journal, &grant.id, &error, 0, 0) {
                 Ok(_) => Ok(MountSyncOutcome::RetryScheduled),
                 Err(schedule_error) => {
@@ -4319,6 +4435,27 @@ fn bridge_activity(app: &tauri::AppHandle) -> BridgeActivity {
 
 static UPDATE_INSTALLING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+const UPDATE_NOTE_KEY: &str = "update_note";
+
+/// What the last update attempt needs to tell the person, shown on the Devices page.
+fn note_update(app: &tauri::AppHandle, note: Option<String>) {
+    let Some(runtime) = app.try_state::<BridgeRuntime>() else {
+        return;
+    };
+    let _ = match note {
+        Some(note) => runtime.journal.set_config(UPDATE_NOTE_KEY, &note),
+        None => runtime.journal.delete_config(UPDATE_NOTE_KEY),
+    };
+}
+
+fn manual_update_hint() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "Download the latest Spectra Bridge from the Devices page and drag it into Applications, replacing the old one."
+    } else {
+        "Download the latest Spectra Bridge from the Devices page and run the installer."
+    }
+}
+
 /// Installs `update` once nothing would be cut off by the restart.
 async fn install_when_idle(app: tauri::AppHandle, update: tauri_plugin_updater::Update) {
     use std::sync::atomic::Ordering;
@@ -4341,8 +4478,26 @@ async fn install_when_idle(app: tauri::AppHandle, update: tauri_plugin_updater::
                         continue;
                     }
                 }
-                if let Err(error) = update.download_and_install(|_, _| {}, || {}).await {
-                    eprintln!("[update] {error}");
+                let version = update.version.clone();
+                note_update(&app, Some(format!("Installing Spectra Bridge {version}…")));
+                match update.download_and_install(|_, _| {}, || {}).await {
+                    // Windows' installer restarts Bridge itself. Elsewhere the
+                    // new app is in place but this process is still the old
+                    // one: restart into it, or the update never takes effect.
+                    Ok(()) => {
+                        note_update(&app, None);
+                        app.restart();
+                    }
+                    Err(error) => {
+                        eprintln!("[update] {error}");
+                        note_update(
+                            &app,
+                            Some(format!(
+                                "Spectra Bridge {version} could not be installed: {error}. {}",
+                                manual_update_hint()
+                            )),
+                        );
+                    }
                 }
                 break;
             }
@@ -5269,6 +5424,14 @@ async fn run_sync_iteration(
         if restored_grants_reconciled.contains(&grant.id) || paused_grants.contains(&grant.id) {
             continue;
         }
+        // A folder that finished a pass moments ago is not rescanned just
+        // because the connection blinked; its watcher kept every change since.
+        if synced_within(journal, &grant.id, RESTORE_RESCAN_MIN_MS)
+            && !mount_repair_retry_due(journal, &grant.id)
+        {
+            restored_grants_reconciled.insert(grant.id);
+            continue;
+        }
         match sync_grant(&grant, journal, active_mount_syncs).await {
             Ok(MountSyncOutcome::Completed | MountSyncOutcome::RetryScheduled) => {
                 restored_grants_reconciled.insert(grant.id);
@@ -5799,10 +5962,22 @@ fn main() {
                 MenuItem::with_id(app, "open", "Open Devices in Spectra", true, None::<&str>)?;
             let account = MenuItem::with_id(app, "account", "Not connected to Spectra", false, None::<&str>)?;
             let pause = MenuItem::with_id(app, "pause", "Pause syncing", true, None::<&str>)?;
+            let log = MenuItem::with_id(app, "log", "Show sync log", true, None::<&str>)?;
+            let check = MenuItem::with_id(
+                app,
+                "update",
+                format!("Check for updates (version {})", env!("CARGO_PKG_VERSION")),
+                true,
+                None::<&str>,
+            )?;
             let disconnect = MenuItem::with_id(app, "disconnect", "Disconnect this computer", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit Bridge", true, None::<&str>)?;
             let separator = tauri::menu::PredefinedMenuItem::separator(app)?;
-            let menu = Menu::with_items(app, &[&account, &separator, &open, &pause, &disconnect, &quit])?;
+            let separator_end = tauri::menu::PredefinedMenuItem::separator(app)?;
+            let menu = Menu::with_items(
+                app,
+                &[&account, &separator, &open, &pause, &log, &check, &separator_end, &disconnect, &quit],
+            )?;
             let tray_journal = journal.clone();
             let tray_wake = sync_wake.clone();
             TrayIconBuilder::with_id(TRAY_ID)
@@ -5815,6 +5990,20 @@ fn main() {
                 ))?)
                 .on_menu_event(move |app, event| match event.id().as_ref() {
                     "open" => open_devices_page(app),
+                    "log" => {
+                        if let Err(error) = open_sync_log(app) {
+                            app.dialog().message(error).title("Could not show the sync log").show(|_| {});
+                        }
+                    }
+                    "update" => {
+                        let app = app.clone();
+                        tauri::async_runtime::spawn(async move {
+                            let message = request_bridge_update(&app)
+                                .await
+                                .unwrap_or_else(|error| error);
+                            app.dialog().message(message).title("Spectra Bridge updates").show(|_| {});
+                        });
+                    }
                     "pause" => {
                         let paused = !sync_paused(&tray_journal);
                         if let Err(error) = set_sync_paused(&tray_journal, paused) {
@@ -5859,13 +6048,17 @@ fn main() {
         })
         .build(tauri::generate_context!())
         .expect("Spectra Bridge shell failed")
-        .run(move |_app, event| {
-            if matches!(
-                event,
-                tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. }
-            ) {
+        .run(move |_app, event| match event {
+            // `code: None` means the last window closed. Bridge lives in the tray and its only
+            // windows are the pickers' one-pixel owners (`PickerOwner`), so closing one must not
+            // end the app. Quit (`app.exit(0)`) and the update restart carry a code.
+            tauri::RunEvent::ExitRequested {
+                code: None, api, ..
+            } => api.prevent_exit(),
+            tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. } => {
                 shutdown_wake.shutdown();
             }
+            _ => {}
         });
 }
 

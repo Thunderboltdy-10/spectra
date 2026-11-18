@@ -6,6 +6,9 @@ import {
 import {
   CALENDAR_CURSOR_ARGS,
   CALENDAR_DONE_CURSOR,
+  CALENDAR_VISIBLE_PHASES,
+  calendarPhaseCursor,
+  type CalendarVisiblePhase,
   type CalendarPagination,
   type CalendarStream,
 } from "../../../../../shared/calendar-pagination";
@@ -79,6 +82,12 @@ export async function fetchCalendarOverview(
     signal?: AbortSignal;
     continuation?: CalendarContinuation;
     maxPages?: number;
+    /** Only these streams are read; the others are sent as done. The week's
+     * own items and the range-free lists (unscheduled, planner, partial,
+     * migration) load apart, so a week never waits on every task. */
+    streams?: readonly CalendarStream[];
+    /** The continuation's visible phase stops at its own end. */
+    phaseOnly?: boolean;
   } = {},
 ) {
   if (
@@ -96,12 +105,17 @@ export async function fetchCalendarOverview(
   for (let page = 0; page < pageBudget; page++) {
     options.signal?.throwIfAborted();
     const params = new URLSearchParams({ from: String(from), to: String(to) });
+    if (options.phaseOnly) params.set("phaseOnly", "1");
     if (cursors)
       for (const stream of STREAMS)
         params.set(
           CALENDAR_CURSOR_ARGS[stream],
           cursors[stream] ?? CALENDAR_DONE_CURSOR,
         );
+    else if (options.streams)
+      for (const stream of STREAMS)
+        if (!options.streams.includes(stream))
+          params.set(CALENDAR_CURSOR_ARGS[stream], CALENDAR_DONE_CURSOR);
     const response = await requestSpectra(`/api/spectra/calendar?${params}`, {
       signal: options.signal,
     });
@@ -157,4 +171,44 @@ export async function fetchCalendarOverview(
       ? { from, to, cursors }
       : null;
   return { overview: overview!, continuation };
+}
+
+/**
+ * Calendar items by phase, read side by side rather than one after another:
+ * by default the days' own items (events starting in the range and long ones
+ * reaching into it); `["unscheduled"]` reads the undated items, which no
+ * range changes.
+ */
+export async function fetchCalendarWeek(
+  from: number,
+  to: number,
+  options: { signal?: AbortSignal; phases?: readonly CalendarVisiblePhase[] } = {},
+) {
+  const phases = options.phases ?? CALENDAR_VISIBLE_PHASES.filter((phase) => phase !== "unscheduled");
+  const results = await readPhases(from, to, phases, options.signal).catch((error: unknown) => {
+    if (options.signal?.aborted) throw error;
+    // A server from before phase reads: the ordinary visible stream, in turn.
+    return fetchCalendarOverview(from, to, { signal: options.signal, streams: ["visible"] }).then((result) => [result]);
+  });
+  let overview = results[0]!.overview;
+  for (const result of results.slice(1)) overview = mergeCalendarPages(overview, result.overview);
+  // A phase that ran past its page budget resumes as an ordinary continuation.
+  const continuation = results.find((result) => result.continuation)?.continuation ?? null;
+  return { overview, continuation };
+}
+
+function readPhases(from: number, to: number, phases: readonly CalendarVisiblePhase[], signal?: AbortSignal) {
+  return Promise.all(
+    phases.map((phase) =>
+      fetchCalendarOverview(from, to, {
+        signal,
+        phaseOnly: true,
+        continuation: {
+          from,
+          to,
+          cursors: { ...EMPTY_PAGINATION, visible: calendarPhaseCursor(phase) },
+        },
+      }),
+    ),
+  );
 }

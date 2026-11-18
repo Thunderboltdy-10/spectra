@@ -462,6 +462,8 @@ impl ServerState {
             last_sync_at: snapshot.last_sync_at,
             mounts: snapshot.mounts,
             office_files: snapshot.office_files,
+            sync_log: snapshot.sync_log,
+            update_note: snapshot.update_note,
         }
     }
     fn take_pairing_completion(&self, challenge: &str) -> Option<String> {
@@ -1212,6 +1214,8 @@ mod tests {
         }
         fn snapshot(&self) -> LocalControlSnapshot {
             LocalControlSnapshot {
+                sync_log: Vec::new(),
+                update_note: None,
                 device_name: "Studio PC".into(),
                 paused: true,
                 last_sync_at: Some(42),

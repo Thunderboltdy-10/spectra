@@ -108,7 +108,9 @@ export function DueTask({ task, now, open, place, picked }: { task: SchoolTask; 
     <TaskLink open={open} picked={picked} className="class-due-task" soon={days !== null && days >= 0 && days <= 1} late={days !== null && days < 0}>
       <span aria-hidden className="class-due-date">
         <span className="class-due-day">{at ? at.getDate() : "?"}</span>
-        <span className="class-due-month">{at ? at.toLocaleDateString(undefined, { month: "short" }) : ""}</span>
+        <span className="class-due-month">
+          {at ? at.toLocaleDateString(undefined, { month: "short", ...(at.getFullYear() === new Date(now).getFullYear() ? {} : { year: "2-digit" }) }) : ""}
+        </span>
       </span>
       <span className="min-w-0 flex-1">
         <span className="class-due-title">{task.title}</span>

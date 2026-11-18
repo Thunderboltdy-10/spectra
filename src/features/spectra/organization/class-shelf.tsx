@@ -33,14 +33,21 @@ const WORK_SHOWN = 4;
 const MONTHS_SHOWN = 2;
 const MONTH_TASKS_SHOWN = 4;
 
-type Month = { key: string; label: string; tasks: SchoolTask[] };
+/** A past task: from School, or the planner work left from an older school year's task. */
+type PastTask = Pick<SchoolTask, "title" | "dueAt"> & { recordId: string; planner?: TreeNode; school?: SchoolTask };
+type Month = { key: string; label: string; tasks: PastTask[] };
 
-function split(tasks: readonly SchoolTask[], now: number) {
+function split(tasks: readonly SchoolTask[]) {
   // A current task stays ahead even once its day has gone: it is late, not done.
   const ahead = tasks.filter((task) => !task.past);
   const behind = tasks.filter((task) => task.past);
   ahead.sort((a, b) => (a.dueAt ?? Infinity) - (b.dueAt ?? Infinity));
-  behind.sort((a, b) => (b.dueAt ?? 0) - (a.dueAt ?? 0));
+  return { ahead, behind };
+}
+
+/** Past tasks by month, newest first; a month from another year says its year. */
+function pastMonths(tasks: readonly PastTask[], now: number) {
+  const behind = [...tasks].sort((a, b) => (b.dueAt ?? 0) - (a.dueAt ?? 0));
   const months: Month[] = [];
   const thisYear = new Date(now).getFullYear();
   for (const task of behind) {
@@ -57,13 +64,13 @@ function split(tasks: readonly SchoolTask[], now: number) {
     }
     month.tasks.push(task);
   }
-  return { ahead, months };
+  return months;
 }
 
 /** A class's tasks from School, split into what is still to do and what is past by month. */
 export function useClassTasks(providerClassId: string | null, now: number) {
   const school = useQuery(api.school.tasks, useAuthedArgs(providerClassId ? { view: "all" as const, providerClassId } : "skip"));
-  const split_ = useMemo(() => split(school?.tasks ?? [], now), [school, now]);
+  const split_ = useMemo(() => split(school?.tasks ?? []), [school]);
   return { loading: Boolean(providerClassId) && school === undefined, ...split_ };
 }
 
@@ -103,7 +110,7 @@ export function ClassShelf({
   const [allAhead, setAllAhead] = useState(false);
   const [allWork, setAllWork] = useState(false);
   const [allMonths, setAllMonths] = useState(false);
-  const { loading, ahead, months } = useClassTasks(providerClassId, now);
+  const { loading, ahead, behind } = useClassTasks(providerClassId, now);
   const children = useTreeChildren(folderId, { sortKey: "updated", direction: "desc", pageSize: 100, withoutThreads: true });
   const shared = useSharedWorks(workspaceId);
   // Cards and folders here can be dragged onto a folder, a workspace or a
@@ -113,12 +120,28 @@ export function ClassShelf({
 
   const folders = children.nodes.filter((node) => node.kind === "folder");
   const work = children.nodes.filter((node) => node.kind !== "folder" && node.source?.blueprintKey !== "planner_task");
-  const allTasks = useMemo(() => ahead.concat(months.flatMap((month) => month.tasks)), [ahead, months]);
-  // Tasks the student or Spectra added belong to the class too; those made for a ManageBac task show in To do.
-  const ownTasks = useMemo(() => {
+  const allTasks = useMemo(() => ahead.concat(behind), [ahead, behind]);
+  const planners = useMemo(() => children.nodes.filter((node) => node.source?.blueprintKey === "planner_task"), [children.nodes]);
+  const facts = usePlannerFacts(planners);
+  // Tasks the student or Spectra added belong to the class too; those made for
+  // a ManageBac task show in To do, or under Past tasks once School no longer
+  // lists them (an older school year's), never as the student's own.
+  const { ownTasks, olderSchool } = useMemo(() => {
     const school = new Set(allTasks.map((task) => task.title.trim()));
-    return children.nodes.filter((node) => node.source?.blueprintKey === "planner_task" && !school.has(node.name.trim()));
-  }, [allTasks, children.nodes]);
+    const own: TreeNode[] = [];
+    const older: PastTask[] = [];
+    for (const node of planners) {
+      if (school.has(node.name.trim())) continue;
+      const fact = node.sourceId ? facts?.get(node.sourceId) : undefined;
+      if (fact?.fromSchool) older.push({ recordId: `planner:${node.nodeId}`, title: node.name, dueAt: fact.dueAt, planner: node });
+      else own.push(node);
+    }
+    return { ownTasks: sortOwnTasks(own, facts, now), olderSchool: older };
+  }, [allTasks, facts, now, planners]);
+  const months = useMemo(
+    () => pastMonths([...behind.map((task): PastTask => ({ recordId: task.recordId, title: task.title, dueAt: task.dueAt, school: task })), ...olderSchool], now),
+    [behind, now, olderSchool],
+  );
   const ownTaskItems = useShelfStacks(ownTasks);
   const workItems = useShelfStacks(work);
   const shownWork = allWork ? workItems : workItems.slice(0, WORK_SHOWN);
@@ -228,7 +251,11 @@ export function ClassShelf({
                   <ul>
                     {(allMonths ? month.tasks : month.tasks.slice(0, MONTH_TASKS_SHOWN)).map((task) => (
                       <li key={task.recordId}>
-                        <TaskLink open={open(task)} picked={taskPicking?.picked(task)} className="class-past-task">
+                        <TaskLink
+                          open={task.school ? open(task.school) : { onClick: () => task.planner && onOpen(task.planner) }}
+                          picked={task.school ? taskPicking?.picked(task.school) : undefined}
+                          className="class-past-task"
+                        >
                           <span className="min-w-0 flex-1 truncate">{task.title}</span>
                           {task.dueAt !== null ? <span className="class-past-day">{new Date(task.dueAt).getDate()}</span> : null}
                         </TaskLink>
@@ -267,6 +294,41 @@ function usePlannerWorks(nodes: readonly TreeNode[]) {
     }
     return (task: SchoolTask) => byTitle.get(task.title.trim()) ?? null;
   }, [nodes]);
+}
+
+/** What each planner work is (due when, made for a school task, done), by its work id. */
+function usePlannerFacts(planners: readonly TreeNode[]) {
+  const artifactIds = useMemo(
+    () => [...new Set(planners.flatMap((node) => (node.sourceId ? [node.sourceId] : [])))].sort().slice(0, 100),
+    [planners],
+  );
+  const rows = useQuery(api.calendar.plannerFacts, useAuthedArgs(artifactIds.length ? { artifactIds } : "skip"));
+  return useMemo(() => (rows ? new Map(rows.map((row) => [row.artifactId, row])) : undefined), [rows]);
+}
+
+/**
+ * The student's own tasks by their dates, the year counted: what is still to
+ * come first (soonest first), then those without a date, then done or past
+ * ones, most recent first. Until the dates are known, the shelf's own order.
+ */
+function sortOwnTasks(
+  nodes: TreeNode[],
+  facts: ReturnType<typeof usePlannerFacts>,
+  now: number,
+) {
+  if (!facts) return nodes;
+  const today = startOfDay(now);
+  const rank = (node: TreeNode) => {
+    const fact = node.sourceId ? facts.get(node.sourceId) : undefined;
+    if (!fact || fact.dueAt === null) return { group: fact?.done ? 2 : 1, at: 0 };
+    if (fact.done || fact.dueAt < today) return { group: 2, at: -fact.dueAt };
+    return { group: 0, at: fact.dueAt };
+  };
+  return [...nodes].sort((a, b) => {
+    const left = rank(a);
+    const right = rank(b);
+    return left.group - right.group || left.at - right.at;
+  });
 }
 
 /** Whether a folder is a class's workspace, for the organizer to choose the shelf. */

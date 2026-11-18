@@ -1880,6 +1880,10 @@ export function SpectraShell({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- hub bootstrap once per requestedHome
   }, [requestedHome]);
 
+  // The place last asked for by the address. Switching tabs changes the active
+  // tab before the address follows; that moment must not point the newly
+  // chosen tab at the old place (the rail would then drop it as a duplicate).
+  const addressPlaceRef = useRef<string | undefined | null>(null);
   useEffect(() => {
     if (
       !hubTabsRestored ||
@@ -1891,6 +1895,8 @@ export function SpectraShell({
       ? overview?.workspaces.find((item) => item._id === requestedWorkspaceId)
       : undefined;
     if (requestedWorkspaceId && !target) return;
+    const addressMoved = addressPlaceRef.current !== requestedWorkspaceId;
+    addressPlaceRef.current = requestedWorkspaceId;
     const label = target?.title ?? LIBRARY_TAB_LABEL;
     setHubTabs((current) => {
       const active = current.find((tab) => tab.id === activeHubTabId);
@@ -1898,7 +1904,9 @@ export function SpectraShell({
       if (
         !active ||
         active.workSet ||
-        (active.label === label && active.workspaceId === requestedWorkspaceId)
+        (active.label === label && active.workspaceId === requestedWorkspaceId) ||
+        // Only a new address moves a tab; otherwise the tab is just renamed.
+        (!addressMoved && active.workspaceId !== requestedWorkspaceId)
       )
         return current;
       return current.map((tab) =>

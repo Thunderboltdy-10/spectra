@@ -79,21 +79,30 @@
   background: transparent;
 }
 
+/* In a narrow panel the tabs scroll sideways rather than running under the
+   bar's own buttons. The strip itself overlaps the divider by a pixel, so the
+   selected tab still joins it while the strip clips. */
 .spectra-editor-workbar .spectra-command-tabs {
   display: flex;
   min-width: 0;
   flex: 1 1 auto;
   align-items: flex-end;
   gap: 2px;
+  margin-bottom: -1px;
   padding: 0;
-  overflow: visible;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
   border: 0;
   background: transparent;
+}
+.spectra-editor-workbar .spectra-command-tabs::-webkit-scrollbar {
+  display: none;
 }
 .spectra-editor-workbar .spectra-command-tab {
   position: relative;
   height: 30px;
-  margin-bottom: -1px;
+  flex: 0 0 auto;
   padding: 0 14px;
   border: 1px solid transparent;
   border-bottom: 0;

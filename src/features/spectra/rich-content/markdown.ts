@@ -373,6 +373,11 @@ function splitRow(row: string) {
       const end = codeSpanEnd(trimmed, index);
       if (end > 0) { current += trimmed.slice(index, end); index = end - 1; continue; }
     }
+    // A citation or reference ([[cite:id|Source]]) is one cell's text, pipe and all.
+    if (char === "[" && trimmed[index + 1] === "[") {
+      const end = trimmed.indexOf("]]", index + 2);
+      if (end > 0) { current += trimmed.slice(index, end + 2); index = end + 1; continue; }
+    }
     if (char === "|") { cells.push(current.trim()); current = ""; continue; }
     current += char;
   }
@@ -547,6 +552,9 @@ function parseBlockDrafts(lines: string[]): RichBlockDraft[] {
       const rows: RichInline[][][] = [splitRow(current).map((cell) => parseMarkdownInlines(cell))];
       line += 2;
       while (line < lines.length && lines[line]!.includes("|") && lines[line]!.trim()) rows.push(splitRow(lines[line++]!).map((cell) => parseMarkdownInlines(cell)));
+      // Every row as wide as the widest, so no row is missing a cell and none sticks out.
+      const width = Math.max(...rows.map((row) => row.length));
+      for (const row of rows) while (row.length < width) row.push([]);
       blocks.push({ type: "table", raw: lines.slice(start, line).join("\n"), header: true, rows });
       continue;
     }

@@ -268,9 +268,23 @@ function safeHex(value: unknown) {
   return /^[0-9a-f]{6}$/iu.test(hex) ? hex.toUpperCase() : undefined;
 }
 
+// CT_RPr child order: Word rejects a run whose properties are out of sequence.
 const RUN_ORDER = [
-  "rStyle", "rFonts", "b", "bCs", "i", "iCs", "strike", "color", "sz", "szCs", "highlight", "u", "shd",
+  "rStyle", "rFonts", "b", "bCs", "i", "iCs", "caps", "smallCaps", "strike", "color", "sz", "szCs", "highlight", "u", "shd",
+  "vertAlign",
 ];
+
+/** The editor's font size ("18pt", "24px", "1.5em") in points. */
+function fontSizePoints(value: unknown) {
+  if (typeof value === "number" && value > 0) return value;
+  if (typeof value !== "string") return undefined;
+  const match = value.trim().match(/^(\d+(?:\.\d+)?)\s*(pt|px|em|rem)?$/i);
+  if (!match) return undefined;
+  const amount = Number(match[1]);
+  const unit = (match[2] ?? "pt").toLowerCase();
+  const points = unit === "px" ? amount * 0.75 : unit === "em" || unit === "rem" ? amount * 11 : amount;
+  return points > 0 && points <= 1638 ? Math.round(points * 2) / 2 : undefined;
+}
 
 function orderedRunChild(parent: XmlElement, name: string) {
   const existing = parent.find(WML_NAMESPACE, name);
@@ -295,6 +309,10 @@ function writeRunFormat(run: XmlElement, format: Record<string, unknown>) {
   toggle("b", "bold");
   toggle("i", "italic");
   toggle("strike", "strike");
+  toggle("caps", "allCaps");
+  toggle("smallCaps", "smallCaps");
+  if (format.verticalAlign === "superscript" || format.verticalAlign === "subscript")
+    orderedRunChild(properties, "vertAlign").setAttribute("w:val", format.verticalAlign);
   if (format.underline === true) orderedRunChild(properties, "u").setAttribute("w:val", "single");
   if (typeof format.fontFamily === "string") {
     const family = format.fontFamily.split(",")[0]!.trim().replace(/["']/g, "");
@@ -302,8 +320,9 @@ function writeRunFormat(run: XmlElement, format: Record<string, unknown>) {
     const fonts = orderedRunChild(properties, "rFonts");
     for (const slot of ["ascii", "hAnsi", "eastAsia", "cs"]) fonts.setAttribute(`w:${slot}`, family);
   }
-  if (typeof format.fontSizePoints === "number" && format.fontSizePoints > 0) {
-    const halfPoints = String(Math.round(format.fontSizePoints * 2));
+  const size = fontSizePoints(format.fontSizePoints ?? format.fontSize);
+  if (size) {
+    const halfPoints = String(Math.round(size * 2));
     orderedRunChild(properties, "sz").setAttribute("w:val", halfPoints);
     orderedRunChild(properties, "szCs").setAttribute("w:val", halfPoints);
   }
@@ -326,11 +345,17 @@ function appendTextRun(
   const mark = (type: string) => marks.find((candidate) => candidate.type === type);
   const style = record(mark("textStyle")?.attrs);
   const highlight = record(mark("highlight")?.attrs).color;
+  const code = Boolean(mark("code"));
   writeRunFormat(run, {
     ...(mark("bold") ? { bold: true } : {}),
     ...(mark("italic") ? { italic: true } : {}),
     ...(mark("underline") ? { underline: true } : {}),
     ...(mark("strike") ? { strike: true } : {}),
+    ...(mark("superscript") ? { verticalAlign: "superscript" } : mark("subscript") ? { verticalAlign: "subscript" } : {}),
+    ...(mark("smallCaps") ? { smallCaps: true } : {}),
+    ...(mark("allCaps") ? { allCaps: true } : {}),
+    // Inline code reads as code in Word too: a monospace face on a light ground.
+    ...(code ? { fontFamily: "Consolas", shading: "F2F2F2" } : {}),
     ...style,
     ...(typeof highlight === "string" && WORD_HIGHLIGHTS.has(highlight)
       ? { highlight }
@@ -477,11 +502,88 @@ async function appendParagraph(
 const QUOTE_LOOK = { indentLevel: 1, border: "left" } as const;
 const CODE_LOOK = { shading: "F2F2F2" } as const;
 const CALLOUT_LOOK = { border: "all", shading: "EEF3FB" } as const;
+const DIVIDER_LOOK = { border: "bottom" } as const;
+
+function taskItemParagraphs(
+  list: DocumentJsonNode,
+  level: number,
+): { paragraph: DocumentJsonNode; level: number; checked: boolean }[] {
+  return (list.content ?? []).flatMap((item) =>
+    (item.content ?? []).flatMap((child) =>
+      child.type === "taskList"
+        ? taskItemParagraphs(child, Math.min(8, level + 1))
+        : child.type === "paragraph"
+          ? [{ paragraph: child, level, checked: item.attrs?.checked === true }]
+          : [],
+    ),
+  );
+}
 
 function monospace(node: DocumentJsonNode): DocumentJsonNode {
   if (node.type === "text")
     return { ...node, marks: [...(node.marks ?? []), { type: "textStyle", attrs: { fontFamily: "Consolas" } }] };
   return node.content ? { ...node, content: node.content.map(monospace) } : node;
+}
+
+type CellPlacement = { row: number; column: number; colspan: number; rowspan: number; cell: DocumentJsonNode };
+
+/** Where each editor cell sits on the table's grid, after the cells merged into rows above. */
+function tableGrid(rows: readonly DocumentJsonNode[]) {
+  const taken = new Set<string>();
+  const placements: CellPlacement[] = [];
+  let columns = 1;
+  rows.forEach((row, rowIndex) => {
+    let column = 0;
+    for (const cell of row.content ?? []) {
+      while (taken.has(`${rowIndex}:${column}`)) column += 1;
+      const colspan = Math.max(1, Math.min(63, Math.round(Number(cell.attrs?.colspan) || 1)));
+      const rowspan = Math.max(1, Math.min(rows.length - rowIndex, Math.round(Number(cell.attrs?.rowspan) || 1)));
+      for (let r = rowIndex; r < rowIndex + rowspan; r += 1)
+        for (let c = column; c < column + colspan; c += 1) taken.add(`${r}:${c}`);
+      placements.push({ row: rowIndex, column, colspan, rowspan, cell });
+      column += colspan;
+      columns = Math.max(columns, column);
+    }
+  });
+  for (const key of taken) columns = Math.max(columns, Number(key.split(":")[1]) + 1);
+  return { placements, columns };
+}
+
+/** Word's merges: `gridSpan` across columns, `vMerge` down rows; the covered cells go. */
+function mergeTableCells(table: XmlElement, placements: readonly CellPlacement[]) {
+  const rows = table.elements().filter((child) => child.localName === "tr");
+  const cells = rows.map((row) => row.elements().filter((child) => child.localName === "tc"));
+  const covered = new Set<XmlElement>();
+  const mark = (cell: XmlElement | undefined, colspan: number, vMerge: "restart" | "continue" | null) => {
+    if (!cell || (colspan === 1 && !vMerge)) return;
+    let properties = cell.find(WML_NAMESPACE, "tcPr");
+    if (!properties) {
+      properties = new XmlElement("tcPr", cell.prefix);
+      cell.insertBefore(properties, cell.children[0] ?? null);
+    }
+    const after = properties.elements().find((child) => !["cnfStyle", "tcW"].includes(child.localName)) ?? null;
+    if (colspan > 1) {
+      const span = new XmlElement("gridSpan", cell.prefix);
+      span.setAttribute("w:val", String(colspan));
+      properties.insertBefore(span, after);
+    }
+    if (vMerge) {
+      const merge = new XmlElement("vMerge", cell.prefix);
+      if (vMerge === "restart") merge.setAttribute("w:val", "restart");
+      properties.insertBefore(merge, after);
+    }
+  };
+  for (const { row, column, colspan, rowspan } of placements) {
+    if (colspan === 1 && rowspan === 1) continue;
+    for (let r = row; r < row + rowspan; r += 1) {
+      mark(cells[r]?.[column], colspan, rowspan > 1 ? (r === row ? "restart" : "continue") : null);
+      for (let c = column + 1; c < column + colspan; c += 1) {
+        const cell = cells[r]?.[c];
+        if (cell) covered.add(cell);
+      }
+    }
+  }
+  for (const cell of covered) cell.parent?.removeChild(cell);
 }
 
 /** Cell paragraphs joined by Word line breaks, so their text stays apart. */
@@ -518,9 +620,14 @@ function writeCopyTableShape(document: Document, table: XmlElement, node: Docume
       header.setAttributeNs(WML_NAMESPACE, "val", "1");
     }
   }
-  const widths = (firstRow?.content ?? []).map((cell) => {
-    const width = Number(Array.isArray(cell.attrs?.colwidth) ? cell.attrs.colwidth[0] : NaN);
-    return Number.isFinite(width) && width > 0 ? width : null;
+  // `colwidth` holds one width per column a cell spans.
+  const widths = (firstRow?.content ?? []).flatMap((cell) => {
+    const span = Math.max(1, Math.round(Number(cell.attrs?.colspan) || 1));
+    const given = Array.isArray(cell.attrs?.colwidth) ? cell.attrs.colwidth : [];
+    return Array.from({ length: span }, (_, index) => {
+      const width = Number(given[index]);
+      return Number.isFinite(width) && width > 0 ? width : null;
+    });
   });
   if (widths.some((width) => width !== null)) applyTableColumnWidths(document, table, widths);
 }
@@ -653,10 +760,9 @@ export async function exportDocxCopy(
     try {
       if (node.type === "table") {
         const rows = node.content ?? [];
-        const columns = Math.max(1, ...rows.map((row) => row.content?.length ?? 0));
+        const { placements, columns } = tableGrid(rows);
         const table = document.addTable(Math.max(1, rows.length), columns);
-        for (const [rowIndex, row] of rows.entries())
-          for (const [columnIndex, cell] of (row.content ?? []).entries()) {
+        for (const { row: rowIndex, column: columnIndex, cell } of placements) {
             const paragraph = table.cell(rowIndex, columnIndex).paragraphElements()[0];
             if (paragraph) {
               clearParagraph(paragraph);
@@ -671,6 +777,7 @@ export async function exportDocxCopy(
               }
             }
           }
+        mergeTableCells(table.element, placements);
         writeCopyTableShape(document, table.element, node);
         continue;
       }
@@ -742,6 +849,34 @@ export async function exportDocxCopy(
       }
       if (node.type === "codeBlock") {
         await appendParagraph(document, monospace(node), undefined, options.resolveAsset, CODE_LOOK);
+        continue;
+      }
+      if (node.type === "horizontalRule") {
+        // Word's own divider: an empty paragraph with a bottom border.
+        await appendParagraph(document, { type: "paragraph", content: [] }, undefined, options.resolveAsset, DIVIDER_LOOK);
+        continue;
+      }
+      if (node.type === "pageBreak") {
+        const paragraph = await appendParagraph(document, { type: "paragraph", content: [] }, undefined, options.resolveAsset);
+        const run = new XmlElement("r", "w");
+        const pageBreak = new XmlElement("br", "w");
+        pageBreak.setAttribute("w:type", "page");
+        run.appendChild(pageBreak);
+        paragraph.element.appendChild(run);
+        continue;
+      }
+      if (node.type === "taskList") {
+        // Word has no checklist outside content controls; a ballot box keeps the state readable.
+        for (const { paragraph, level, checked } of taskItemParagraphs(node, 0)) {
+          const box: DocumentJsonNode = { type: "text", text: checked ? "☒ " : "☐ " };
+          await appendParagraph(
+            document,
+            { ...paragraph, content: [box, ...(paragraph.content ?? [])] },
+            undefined,
+            options.resolveAsset,
+            level ? { indentLevel: level } : undefined,
+          );
+        }
         continue;
       }
       if (

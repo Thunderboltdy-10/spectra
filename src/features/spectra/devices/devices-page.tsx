@@ -83,6 +83,9 @@ export function DevicesPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [alreadySynced, setAlreadySynced] = useState<BridgeFile[] | null>(null);
   const [notice, setNotice] = useState<string>();
+  // An update's answer is said on the computer's own card, beside its button.
+  const [updateMessage, setUpdateMessage] = useState<string>();
+  const latestVersion = useLatestBridgeVersion();
   const [confirm, setConfirm] = useState<Confirm | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [removeFiles, setRemoveFiles] = useState(false);
@@ -177,7 +180,8 @@ export function DevicesPage() {
     setBusy(request.grantId ? `${request.action}:${request.grantId}` : request.action);
     const outcome = await runLocalDeviceAction(request);
     setBusy(null);
-    setNotice(outcome.message);
+    if (request.action === "update") setUpdateMessage(outcome.message);
+    else setNotice(outcome.message);
     if (request.action === "add_files") noteAlreadySynced(outcome);
   }
 
@@ -339,8 +343,10 @@ export function DevicesPage() {
       onAction={(request) => void act(request)}
       onRemove={() => setConfirm({ kind: "remove-device", device })}
       onReconnect={device.isThisComputer && !connecting && isAuthenticated ? reconnect : undefined}
-      downloadUrl={local.reachability === "not-running" ? downloadUrl : null}
+      downloadUrl={local.reachability === "not-running" || device.updateRequired || updateMessage ? downloadUrl : null}
       backlog={backlog}
+      latestVersion={latestVersion}
+      updateMessage={device.isThisComputer ? updateMessage : undefined}
     />
   );
 
@@ -480,4 +486,22 @@ export function DevicesPage() {
 /** Bridge is not on this computer (or not started): the page leads with the download. */
 function bridgeMissing(reachability: BridgeReachability) {
   return reachability === "not-running" || reachability === "not-set-up";
+}
+
+/** The newest published Bridge version, or null while unknown. */
+function useLatestBridgeVersion() {
+  const [version, setVersion] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    void fetch("/bridge/latest")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((body: { version?: string | null } | null) => {
+        if (live && typeof body?.version === "string") setVersion(body.version);
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, []);
+  return version;
 }

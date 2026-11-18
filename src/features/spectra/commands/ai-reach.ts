@@ -1078,6 +1078,8 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
 const DEVICE_WORK_PLUMBING = "Moving and backing up work on this computer is the owner's own choice on the Devices page; the AI writes to device work through its normal artifact tools.";
 
 export const SERVER_PLUMBING: Readonly<Record<string, string>> = {
+  "semantic:rankTexts":
+    "Ranks Settings rows by meaning for the Settings search field; reads no tables. The AI changes settings through its own commands.",
   "spectraArtifactLinks:establish":
     "Keeps the links an artifact's own references imply; Spectra links work through spectraArtifactLinks:create.",
   "deviceWorks:choose": DEVICE_WORK_PLUMBING,

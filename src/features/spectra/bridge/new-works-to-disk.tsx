@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@/features/spectra/data/use-kept-query";
 import { api } from "../../../../convex/_generated/api";
-import type { Id } from "../../../../convex/_generated/dataModel";
 
 /** A work still being written (by a person or the AI) waits this long after its last change. */
 const QUIET_MS = 60_000;
@@ -18,7 +17,7 @@ const asked = new Set<string>();
  * server lists only the works that do.
  */
 export function NewWorksToDisk({ deviceId }: { deviceId: string }) {
-  const waiting = useQuery(api.bridgeSync.waitingForDisk, { deviceId: deviceId as Id<"bridgeDevices"> });
+  const waiting = useQuery(api.bridgeSync.waitingForDisk, { deviceId });
   const [tick, setTick] = useState(0);
   useEffect(() => {
     if (!waiting?.length) return;

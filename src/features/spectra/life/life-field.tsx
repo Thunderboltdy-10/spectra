@@ -45,7 +45,7 @@ function handOver(formed: Formed, content: HTMLElement) {
   // Content that is forming itself (a landing, an arrival) brings its own light.
   if (!r.width || r.bottom < 0 || r.top > window.innerHeight || isVeiled(content)) return formed.release();
   const reveal = veil(content);
-  const morph = life.morph(formed, figureOf(content, { bars: CONTENT_BARS, maxBars: 24, frame: hasVisibleFrame(content) }));
+  const morph = life.pin(life.morph(formed, figureOf(content, { bars: CONTENT_BARS, maxBars: 24, frame: hasVisibleFrame(content) })), content);
   // The ghost's lines set off toward the content's and give way as it shows: they never stand over real text.
   const show = () => {
     reveal();

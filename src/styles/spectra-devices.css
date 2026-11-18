@@ -123,8 +123,116 @@
   color: var(--text-tertiary);
 }
 
+/* Sync activity: what this computer's Bridge did lately, as a ledger. */
+.device-activity {
+  margin-top: 20px;
+}
+
+.device-activity-list {
+  display: grid;
+  gap: 2px;
+}
+
+.device-activity-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, max-content) minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.device-activity-row > svg {
+  align-self: center;
+  color: var(--text-tertiary);
+}
+
+.device-activity-row[data-kind="toSpectra"] > svg {
+  color: var(--ink-green);
+}
+
+.device-activity-row[data-kind="fromSpectra"] > svg {
+  color: var(--accent);
+}
+
+.device-activity-row[data-kind="conflict"] > svg {
+  color: var(--ink-violet);
+}
+
+.device-activity-row[data-kind="error"] > svg,
+.device-activity-row[data-kind="error"] .device-activity-detail {
+  color: var(--warning);
+}
+
+.device-activity-folder {
+  max-width: 14ch;
+  overflow: hidden;
+  font-weight: 500;
+  color: var(--text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.device-activity-detail {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.device-activity-repeats,
+.device-activity-when {
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.device-activity-when {
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .device-activity-row {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .device-activity-detail {
+    grid-column: 2 / -1;
+    white-space: normal;
+  }
+}
+
+/* An update's answer, said on the card whose button asked for it. */
+.device-card-update {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 16px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: color-mix(in oklab, var(--accent) 8%, var(--card-paper));
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.device-card-update > svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--accent);
+}
+
+.device-card-update[data-problem] {
+  background: color-mix(in oklab, var(--warning) 9%, var(--card-paper));
+}
+
+.device-card-update[data-problem] > svg {
+  color: var(--warning);
+}
+
 .device-card-foot {
   display: flex;
+  flex-wrap: wrap;
   min-width: 0;
   align-items: center;
   gap: 4px;
@@ -918,19 +1026,31 @@
   background: color-mix(in oklab, var(--ink-green) 16%, transparent);
 }
 
+/* Edited in both places is Spectra's to combine when the file is opened:
+   said calmly, in its own ink, never in warning. */
+.device-folder-lane[data-way="both"] > svg,
+.device-browser-waiting[data-way="conflict"],
+.device-browser-backlog-group[data-way="conflict"] h5 > svg {
+  color: var(--ink-violet);
+  background: color-mix(in oklab, var(--ink-violet) 14%, transparent);
+}
+
 .device-folder-lane[data-way="stuck"],
-.device-browser-backlog-group[data-way="conflict"] h5,
 .device-browser-backlog-group[data-way="problem"] h5 {
   color: var(--warning);
 }
 
 .device-folder-lane[data-way="stuck"] > svg,
-.device-browser-waiting[data-way="conflict"],
 .device-browser-waiting[data-way="problem"],
-.device-browser-backlog-group[data-way="conflict"] h5 > svg,
 .device-browser-backlog-group[data-way="problem"] h5 > svg {
   color: var(--warning);
   background: color-mix(in oklab, var(--warning) 14%, transparent);
+}
+
+.device-browser-backlog-hint {
+  margin: -2px 0 4px;
+  font-size: 12px;
+  color: var(--text-tertiary);
 }
 
 .device-browser-waiting {

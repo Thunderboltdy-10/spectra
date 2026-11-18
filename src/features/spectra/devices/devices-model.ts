@@ -11,6 +11,7 @@ import {
   type BridgeOfficeFile,
   type BridgeReachability,
   type BridgeStatus,
+  type BridgeSyncLogEntry,
 } from "../bridge/client";
 import { humanizePublicFailure } from "../bridge/humanize";
 import type { ContentDirection } from "../../../../shared/sync-policy";
@@ -111,6 +112,10 @@ export type DeviceView = {
   lastSeenAt?: number;
   folders: FolderView[];
   officeFiles: BridgeOfficeFile[];
+  /** What syncing did lately, newest first; only this computer's Bridge keeps one. */
+  syncLog: BridgeSyncLogEntry[];
+  /** What the last update attempt said, when it needs saying. */
+  updateNote?: string;
 };
 
 export type DevicesModel = {
@@ -234,6 +239,8 @@ function thisComputerView(local: LocalBridge, cloud: CloudDevice | undefined, mo
     lastSeenAt: cloud?.lastSeenAt,
     folders,
     officeFiles: live ? (status?.officeFiles ?? []) : [],
+    syncLog: live ? (status?.syncLog ?? []) : [],
+    updateNote: live ? (status?.updateNote ?? undefined) : undefined,
     paused: allPaused,
   };
   if (updateRequired)
@@ -285,6 +292,7 @@ function otherDeviceView(device: CloudDevice, mounts: CloudMount[], now: number)
     lastSeenAt: device.lastSeenAt,
     folders: mounts.map((mount) => remoteFolder(mount, false, online ? "On that computer" : "Offline")),
     officeFiles: [],
+    syncLog: [],
     paused: Boolean(online && health?.paused),
   };
   if (!online) return { ...base, tone: "offline", label: "Offline", detail: seen };

@@ -105,6 +105,7 @@ const appearanceSchema = z.object({
   /** Library's workspace tiles, the same way. */
   workspaceOrder: z.array(z.string().max(64)).max(300).default([]),
   /** Folders on a shelf: their contents peek out and show on hover, or they stay plain. */
+  /** No longer read: folders always show what's inside. Kept so saved preferences still parse. */
   folderLook: z.enum(["peek", "plain"]).default("peek"),
   /** Folders switched to the other look from the folder itself. */
   folderLookFlipped: z.array(z.string().max(64)).max(300).default([]),

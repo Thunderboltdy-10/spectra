@@ -27,6 +27,7 @@ import { SetupMount } from "@/features/spectra/onboarding/setup";
 import { AppChoreographyMount } from "@/features/spectra/collaboration/app-choreography-host";
 import { spectraBus } from "@/features/spectra/events";
 import { Rail, rememberLibraryPlace } from "./rail";
+import { ScrollMemory } from "./scroll-memory";
 
 const under = (pathname: string, roots: readonly string[]) =>
   roots.some((root) => pathname === root || pathname.startsWith(`${root}/`));
@@ -110,6 +111,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
         <LivePulseMount />
         <AppChoreographyMount />
         <ViewportReadinessMount />
+        <ScrollMemory />
         <div style={{ minHeight: 0 }} className="spectra-global-stage flex min-h-0 flex-1 overflow-hidden">
           <div className="relative min-h-0 min-w-0 flex-1" data-spectra-app-surface="true">
             {children}

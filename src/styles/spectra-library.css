@@ -1044,41 +1044,6 @@
   position: relative;
 }
 
-/* The folder's own switch between showing what's inside and staying plain. */
-.folder-card-look {
-  position: absolute;
-  bottom: 10px;
-  right: 10px;
-  display: grid;
-  width: 26px;
-  height: 26px;
-  place-items: center;
-  border-radius: 8px;
-  color: var(--folder-ink, var(--text-secondary));
-  opacity: 0;
-  transition: opacity 140ms var(--ease-standard), background-color 140ms var(--ease-standard);
-}
-
-.folder-card-slot:hover .folder-card-look,
-.folder-card-look:focus-visible {
-  opacity: 1;
-}
-
-.folder-card-look:hover {
-  background: color-mix(in oklab, var(--card-paper) 70%, transparent);
-}
-
-.folder-card-look:focus-visible {
-  outline: 2px solid var(--focus-ring-color);
-  outline-offset: 1px;
-}
-
-@media (hover: none) {
-  .folder-card-look {
-    opacity: 1;
-  }
-}
-
 /* What a folder holds, beside it while the pointer rests there. */
 .folder-peek {
   --folder-kraft: #c08a52;
@@ -1092,18 +1057,24 @@
   box-shadow:
     0 0 0 1px var(--card-border),
     0 14px 32px -14px rgb(40 28 14 / 0.35);
-  pointer-events: none;
   animation: folder-peek-in 160ms var(--ease-standard);
 }
 
 .folder-peek-title {
-  overflow: hidden;
-  margin: 0 10px 6px;
+  display: flex;
+  max-width: calc(100% - 8px);
+  align-items: center;
+  gap: 4px;
+  margin: 0 4px 6px;
+  padding: 2px 6px;
+  border-radius: 6px;
   color: var(--text-secondary);
   font-size: 12px;
   font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+.folder-peek-title:hover {
+  color: var(--text-primary);
 }
 
 .folder-peek ul {
@@ -1114,17 +1085,33 @@
   list-style: none;
 }
 
-.folder-peek li {
+.folder-peek-item {
   display: flex;
+  width: 100%;
   min-width: 0;
   align-items: center;
   gap: 8px;
   padding: 6px 10px;
   border-radius: 8px;
   font-size: 13px;
+  text-align: left;
+  transition: background-color 120ms var(--ease-standard);
 }
 
-.folder-peek li > svg {
+.folder-peek-item:hover,
+.folder-peek-title:hover,
+.folder-peek-more:is(button):hover {
+  background: color-mix(in oklab, var(--sheet-hue, var(--text-primary)) 9%, transparent);
+}
+
+.folder-peek-item:focus-visible,
+.folder-peek-title:focus-visible,
+.folder-peek-more:is(button):focus-visible {
+  outline: 2px solid var(--focus-ring-color);
+  outline-offset: -2px;
+}
+
+.folder-peek-item > svg {
   flex: none;
   color: var(--sheet-hue);
 }
@@ -1146,7 +1133,9 @@
 }
 
 .folder-peek-more {
-  margin: 4px 10px 0;
+  margin: 4px 4px 0;
+  padding: 2px 6px;
+  border-radius: 6px;
   color: var(--text-tertiary);
   font-size: 12px;
 }

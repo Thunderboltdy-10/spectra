@@ -542,7 +542,13 @@ export const registerMount = mutation({
         const classNode = matchClass(input.rootLabel, await classWorkspaceNodes(ctx, actor.accountId));
         if (classNode) await moveNode(ctx, (await ctx.db.get(existingRoot._id))!, { parentId: classNode._id });
       }
-      await ctx.db.patch(existing._id, { rootLabel: input.rootLabel, grantId: input.grantId, rootKey: input.rootKey, fileCount: input.fileCount, doubleSyncRisk: input.doubleSyncRisk, state: "active", lastScanAt: now, lastScanId: input.scanId, updatedAt: now });
+      // A rescan that finds the folder as it was only moves its scan time, and
+      // only now and then: every write here wakes each page watching the folder.
+      const same = existing.rootLabel === input.rootLabel && existing.grantId === input.grantId &&
+        existing.rootKey === input.rootKey && existing.fileCount === input.fileCount &&
+        existing.doubleSyncRisk === input.doubleSyncRisk && existing.state === "active" &&
+        now - (existing.lastScanAt ?? 0) < MOUNT_SCAN_STAMP_MS;
+      if (!same) await ctx.db.patch(existing._id, { rootLabel: input.rootLabel, grantId: input.grantId, rootKey: input.rootKey, fileCount: input.fileCount, doubleSyncRisk: input.doubleSyncRisk, state: "active", lastScanAt: now, lastScanId: input.scanId, updatedAt: now });
       for (const ownerLockPath of input.ownerLockPaths) {
         const staleOwnerLocks = await ctx.db.query("workReplicas")
           .withIndex("by_device_mount_path", (q) =>
@@ -831,6 +837,30 @@ export const sweepStaleBridgeWork = internalMutation({
 
 /** How long an unchanged file's replica goes between writes of its last-verified time. */
 const REPLICA_VERIFY_REFRESH_MS = 24 * 60 * 60 * 1000;
+/** How far before a replica's last change a late external-edit operation can still sit. */
+const SYNC_OPERATION_RECONCILE_MARGIN_MS = 60 * 60 * 1000;
+/** How often an unchanged folder's rescan time is written. */
+const MOUNT_SCAN_STAMP_MS = 15 * 60 * 1000;
+/** How long an unchanged discovery page's answer is reused for the same folder. */
+const DISCOVERY_DIGEST_TTL_MS = 15 * 60 * 1000;
+
+/** ctx with its database writes counted, so a pass that changed nothing can be told apart. */
+function countingWrites(ctx: MutationCtx) {
+  const seen = { writes: 0 };
+  const db = new Proxy(ctx.db, {
+    get(target, key, receiver) {
+      const value = Reflect.get(target, key, receiver);
+      if (typeof value !== "function") return value;
+      if (key === "insert" || key === "patch" || key === "replace" || key === "delete")
+        return (...args: unknown[]) => {
+          seen.writes += 1;
+          return (value as (...inner: unknown[]) => unknown).apply(target, args);
+        };
+      return value.bind(target);
+    },
+  });
+  return { ctx: { ...ctx, db } as MutationCtx, seen };
+}
 
 const discoveredResourceSchema = z.object({
   localResourceId: z.string().regex(/^lr_[a-f0-9]+$/),
@@ -895,10 +925,18 @@ async function discoverResourceForMount(
       }
       return { skipped: true as const, reason: "office-lock" as const };
     }
-    const [byResource, byPath] = await Promise.all([
-      ctx.db.query("workReplicas").withIndex("by_device_resource", (q) => q.eq("deviceId", device._id).eq("localResourceId", input.localResourceId)).take(20),
-      ctx.db.query("workReplicas").withIndex("by_device_mount_path", (q) => q.eq("deviceId", device._id).eq("mountId", mount._id).eq("relativePath", input.relativePath)).take(20),
-    ]);
+    const byResource = await ctx.db.query("workReplicas")
+      .withIndex("by_device_resource", (q) => q.eq("deviceId", device._id).eq("localResourceId", input.localResourceId))
+      .take(20);
+    // The usual case: this file is already one replica, right where it was.
+    // Looking it up again by path would read the same document twice.
+    const settled = byResource.length === 1 &&
+      byResource[0].mountId === mount._id &&
+      byResource[0].relativePath === input.relativePath &&
+      byResource[0].state !== "unavailable";
+    const byPath = settled ? [] : await ctx.db.query("workReplicas")
+      .withIndex("by_device_mount_path", (q) => q.eq("deviceId", device._id).eq("mountId", mount._id).eq("relativePath", input.relativePath))
+      .take(20);
     const pathContinuity = byPath.filter((candidate) =>
       candidate.state !== "unavailable" || candidate.contentHash === input.contentHash,
     );
@@ -912,6 +950,41 @@ async function discoverResourceForMount(
       creationTime: candidate._creationTime,
       hasCloudReplica: Boolean(cloud),
     })));
+    if (existingReplica && settled && !depth) {
+      // A file both sides already agree on, checked within the day: nothing to
+      // decide and nothing to write, so skip the access, policy and history
+      // reads a change would need. The daily re-verification takes the long way.
+      const cloud = scored[0]?.cloud;
+      const quiet =
+        Boolean(input.contentHash) &&
+        existingReplica.contentHash === input.contentHash &&
+        existingReplica.state === "current" &&
+        existingReplica.errorCode === undefined &&
+        Boolean(existingReplica.payloadRef) &&
+        Date.now() - (existingReplica.lastVerifiedAt ?? 0) < REPLICA_VERIFY_REFRESH_MS &&
+        cloud?.state === "current" &&
+        Boolean(cloud.payloadRef) &&
+        cloud.contentHash === input.contentHash &&
+        !(await activeWriteForReplica(ctx, existingReplica));
+      if (quiet) {
+        const node = await findPrimaryNode(ctx, actor.accountId, "work", String(existingReplica.workId));
+        // A watcher echo journaled after both sides agreed is settled here too.
+        if (node?.deletedAt === undefined) await verifyReconciledExternalOperations(ctx, {
+          workId: existingReplica.workId,
+          replicaId: existingReplica._id,
+          revision: input.contentHash!,
+          now: Date.now(),
+          since: existingReplica.updatedAt - SYNC_OPERATION_RECONCILE_MARGIN_MS,
+        });
+        if (node?.deletedAt === undefined) return {
+          workId: existingReplica.workId,
+          replicaId: existingReplica._id,
+          revision: existingReplica.revision,
+          payloadHash: existingReplica.contentHash,
+          needsPayload: false,
+        };
+      }
+    }
     if (existingReplica) {
       if (!(await hasArtifactModify(ctx, actor, existingReplica.workId)))
         return { skipped: true as const, reason: "artifact-access-revoked" as const };
@@ -1003,6 +1076,8 @@ async function discoverResourceForMount(
           replicaId: existingReplica._id,
           revision: input.contentHash,
           now: verifiedAt,
+          // Anything older was reconciled by the pass that last touched this replica.
+          since: existingReplica.updatedAt - SYNC_OPERATION_RECONCILE_MARGIN_MS,
         });
       }
       if (unexpectedDuringWrite && activeWrite) {
@@ -1016,7 +1091,10 @@ async function discoverResourceForMount(
         if (operation) await ctx.db.patch(operation._id, { state: "conflicted", errorCode: "external-save-during-write", updatedAt: verifiedAt });
       }
       if ((unexpectedDuringWrite || replicasDisagree) && input.contentHash && existingCloud?.contentHash) {
-        await ctx.db.patch(existingCloud._id, { state: "diverged", updatedAt: verifiedAt });
+        // An open conflict is rescanned as is; marking it again would wake
+        // everything watching the work for nothing.
+        if (existingCloud.state !== "diverged")
+          await ctx.db.patch(existingCloud._id, { state: "diverged", updatedAt: verifiedAt });
         const existingConflict = await ctx.db.query("syncConflicts")
           .withIndex("by_work_state", (q) => q.eq("workId", existingReplica.workId).eq("state", "open"))
           .filter((q) => q.and(
@@ -1188,8 +1266,21 @@ export const discoverResourcesPage = mutation({
       throw new Error("MOUNT_NOT_ACTIVE");
     if (!args.resources.length || args.resources.length > 100)
       throw new Error("DISCOVERY_PAGE_SIZE_INVALID");
-    const lookups = resourceDiscoveryLookups(ctx, actor, mount);
-    const registrations = [];
+    // An older Bridge rescans the same unchanged folder over and over; the
+    // same page within a few minutes gets the same answer without a pass over
+    // every file. Any change on disk changes the page, so it misses.
+    const now = Date.now();
+    const pageDigest = await digest(JSON.stringify(args.resources.map((resource) => [
+      resource.localResourceId, resource.relativePath, resource.size, resource.contentHash ?? "", resource.nativeFormat,
+    ])));
+    const cached = await ctx.db.query("bridgeDiscoveryDigests")
+      .withIndex("by_mount_digest", (q) => q.eq("mountId", mount._id).eq("digest", pageDigest))
+      .first();
+    type Registration = Awaited<ReturnType<typeof discoverResourceForMount>>;
+    if (cached && cached.expiresAt > now) return { registrations: cached.registrations as Registration[] };
+    const counted = countingWrites(ctx);
+    const lookups = resourceDiscoveryLookups(counted.ctx, actor, mount);
+    const registrations: Registration[] = [];
     for (const rawResource of args.resources) {
       const parsed = discoveredResourceSchema.safeParse(rawResource);
       if (!parsed.success) {
@@ -1203,7 +1294,7 @@ export const discoverResourcesPage = mutation({
       // infrastructure failure rolls the page back for replay instead of
       // leaving a half-created work after an in-handler catch.
       registrations.push(await discoverResourceForMount(
-        ctx,
+        counted.ctx,
         device,
         actor,
         mount as Doc<"bridgeMounts"> & { rootOrgNodeId: Id<"orgNodes"> },
@@ -1211,7 +1302,34 @@ export const discoverResourcesPage = mutation({
         lookups,
       ));
     }
+    // Only a page that changed nothing and names only works already in
+    // Spectra is kept: approvals and folder rules never wait on it.
+    const keep = counted.seen.writes === 0 && registrations.every((registration) => registration.workId !== undefined);
+    const kept = await ctx.db.query("bridgeDiscoveryDigests")
+      .withIndex("by_mount_digest", (q) => q.eq("mountId", mount._id))
+      .take(20);
+    await Promise.all(kept
+      .filter((row) => row.expiresAt <= now || row.digest === pageDigest)
+      .map((row) => ctx.db.delete(row._id)));
+    if (keep) await ctx.db.insert("bridgeDiscoveryDigests", {
+      mountId: mount._id,
+      digest: pageDigest,
+      registrations,
+      expiresAt: now + DISCOVERY_DIGEST_TTL_MS,
+    });
     return { registrations };
+  },
+});
+
+/** Answers kept for folders that stopped scanning. */
+export const purgeDiscoveryDigests = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const expired = await ctx.db.query("bridgeDiscoveryDigests")
+      .withIndex("by_expires", (q) => q.lt("expiresAt", Date.now()))
+      .take(500);
+    await Promise.all(expired.map((row) => ctx.db.delete(row._id)));
+    return { purged: expired.length };
   },
 });
 
@@ -2582,11 +2700,15 @@ function bridgeMakesFolders(version: string | undefined) {
  * types qualify.
  */
 export const waitingForDisk = query({
-  args: { deviceId: v.id("bridgeDevices") },
+  // A string, not an id: the local Bridge reports whatever device it was paired as, which may be
+  // a device this deployment never had (removed, or paired elsewhere). That must not crash the app.
+  args: { deviceId: v.string() },
   handler: async (ctx, args) => {
     const actor = await getAuthenticatedActor(ctx).catch(() => null);
     if (!actor) return [];
-    const device = await ctx.db.get(args.deviceId);
+    const deviceId = ctx.db.normalizeId("bridgeDevices", args.deviceId);
+    if (!deviceId) return [];
+    const device = await ctx.db.get(deviceId);
     if (!device || device.accountId !== actor.accountId || device.state !== "active") return [];
     const accountPolicy = await ctx.db.query("syncPolicies")
       .withIndex("by_account_scope", (q) => q.eq("accountId", actor.accountId).eq("scopeKind", "account").eq("scopeId", String(actor.accountId)))

@@ -184,15 +184,30 @@ describe("Native DOCX table insertion", () => {
     expect(base.preservedCarry.payload).toEqual(before);
   });
 
-  it.each(["merged", "nested", "mixed-header"])("rejects %s editor structures rather than flattening them", async (kind) => {
-    const base = await blank();
+  const editorTable = (kind: string) => {
     const cell = { type: "tableCell", content: [{ type: "paragraph", content: [{ type: "text", text: "A" }] }] };
     const json = { type: "doc", content: [{ type: "table", content: [{ type: "tableRow", content: [
       kind === "merged" ? { ...cell, attrs: { colspan: 2, rowspan: 1 } } : kind === "nested" ? { ...cell, content: [{ type: "table", content: [] }] } : { ...cell, type: "tableHeader" }, cell,
     ] }] }] };
-    const block = documentBlocksFromJson(json)[0]! as DocxProjectionBlock;
+    return documentBlocksFromJson(json)[0]! as DocxProjectionBlock;
+  };
+
+  it("rejects nested editor tables rather than flattening them", async () => {
+    const base = await blank();
+    const block = editorTable("nested");
     expect(block.attrs?.unsupportedTableStructure).toBe(true);
     await expect(docxLens.materialize({ carry: base.preservedCarry, projection: insertProjection(base.projection, block) })).rejects.toThrow(/Merged, nested or irregular/);
+  });
+
+  // A merged or mixed-header table used to abort the whole Word sync; it now lands as a regular
+  // grid with every cell's text, so the rest of the document still syncs.
+  it.each(["merged", "mixed-header"])("writes %s editor tables as a regular grid", async (kind) => {
+    const base = await blank();
+    const block = editorTable(kind);
+    expect(block.attrs?.unsupportedTableStructure).not.toBe(true);
+    const bytes = await docxLens.materialize({ carry: base.preservedCarry, projection: insertProjection(base.projection, block) });
+    const table = (await docxLens.open(bytes)).projection.blocks.find((candidate) => candidate.type === "table");
+    expect(table?.text).toContain("A");
   });
 
   it("keeps existing header transformations unavailable", async () => {

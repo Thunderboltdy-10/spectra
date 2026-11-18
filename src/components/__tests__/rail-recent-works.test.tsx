@@ -4,11 +4,11 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const convex = vi.hoisted(() => ({ query: vi.fn() }));
-vi.mock("convex/react", () => ({ useConvex: () => convex, useConvexAuth: () => ({ isAuthenticated: true }) }));
+vi.mock("convex/react", () => ({ useAction: () => async () => ({ results: [] }), useConvex: () => convex, useConvexAuth: () => ({ isAuthenticated: true }) }));
 vi.mock("next/navigation", () => ({ usePathname: () => "/home" }));
 vi.mock("next/link", () => ({ default: ({ href, children, prefetch: _prefetch, ...rest }: { href: string; children: ReactNode; prefetch?: boolean }) => <a href={href} {...rest}>{children}</a> }));
 vi.mock("@/components/ui/tooltip", () => ({ Tooltip: ({ children }: { children: ReactNode }) => <>{children}</> }));
-vi.mock("../../../convex/_generated/api", () => ({ api: { orgTree: { recentWorks: "orgTree:recentWorks", search: "orgTree:search" } } }));
+vi.mock("../../../convex/_generated/api", () => ({ api: { orgTree: { recentWorks: "orgTree:recentWorks", search: "orgTree:search" }, semantic: { search: "semantic:search", searchThreads: "semantic:searchThreads" } } }));
 import { RailRecentWorks } from "../layout/rail-recent-works";
 
 const work = (workId: string, title: string, activityAt: number) => ({ workId, title, typeKey: "document", activityAt });
@@ -40,7 +40,7 @@ describe("the rail's recent artifacts", () => {
     render(<RailRecentWorks />);
     await screen.findAllByRole("link");
     fireEvent.click(screen.getByRole("button", { name: "Search your artifacts" }));
-    fireEvent.change(screen.getByRole("searchbox", { name: "Find artifact by name" }), { target: { value: "physics" } });
+    fireEvent.change(screen.getByRole("searchbox", { name: "Find an artifact" }), { target: { value: "physics" } });
     expect(screen.getAllByRole("link").map((link) => link.textContent)).toEqual(["Physics progress"]);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(300);

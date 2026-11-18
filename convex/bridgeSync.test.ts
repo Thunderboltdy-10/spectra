@@ -1525,6 +1525,29 @@ describe("Bridge incremental cloud seam", () => {
     expect(await t.run(async (ctx) => ctx.db.get(lateOperationId))).toMatchObject({
       state: "verified",
     });
+
+    // That pass wrote, so it was not kept; the next identical one is, and a
+    // repeat is answered from it.
+    const page = {
+      credential,
+      mountId: fixture.mountId,
+      resources: [{
+        localResourceId: "lr_eeeeeeeeeeeeeeee",
+        relativePath: "Essay.docx",
+        size: 42,
+        contentHash: hash,
+        nativeFormat: "docx",
+      }],
+    };
+    const first = await t.mutation(api.bridgeSync.discoverResourcesPage, page);
+    expect(await t.run(async (ctx) => ctx.db.query("bridgeDiscoveryDigests").collect())).toHaveLength(1);
+    expect(await t.mutation(api.bridgeSync.discoverResourcesPage, page)).toEqual(first);
+    // A changed file is a different page and is worked out afresh.
+    const changed = await t.mutation(api.bridgeSync.discoverResourcesPage, {
+      ...page,
+      resources: [{ ...page.resources[0], contentHash: "d".repeat(64), size: 43 }],
+    });
+    expect(changed.registrations[0]).toMatchObject({ workId: registration.workId, needsPayload: true });
   });
 });
 

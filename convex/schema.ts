@@ -2626,6 +2626,18 @@ export default defineSchema({
     .index("by_mount_state", ["mountId", "state"])
     .index("by_device_resource", ["deviceId", "localResourceId"]),
 
+  /** A Bridge's last answer for an unchanged discovery page, so an older
+   * Bridge rescanning the same files costs one small read, not a pass over
+   * every replica. Short-lived; any change to the files misses it. */
+  bridgeDiscoveryDigests: defineTable({
+    mountId: v.id("bridgeMounts"),
+    digest: v.string(),
+    registrations: v.array(v.any()),
+    expiresAt: v.number(),
+  })
+    .index("by_mount_digest", ["mountId", "digest"])
+    .index("by_expires", ["expiresAt"]),
+
   workReplicas: defineTable({
     accountId: v.id("accounts"),
     workId: v.id("spectraArtifacts"),

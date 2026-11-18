@@ -31,7 +31,7 @@ vi.mock("@/features/spectra/island/run-tabs", () => ({ useRunTabs: () => [], isA
 vi.mock("@/features/spectra/data/use-catalog-pages", () => ({ useWorkspaceCatalog: () => ({ items: [] }) }));
 vi.mock("@/features/spectra/components/catalog-progress", () => ({ CatalogProgress: () => null }));
 const pinned = vi.hoisted(() => ({ nodes: [] as Array<Record<string, unknown>> }));
-vi.mock("convex/react", () => ({ useConvex: () => ({ query: async () => [], mutation: async () => null }), useConvexAuth: () => ({ isAuthenticated: false, isLoading: false }), useQuery: () => undefined, useMutation: () => vi.fn() }));
+vi.mock("convex/react", () => ({ useAction: () => async () => ({ results: [] }), useConvex: () => ({ query: async () => [], mutation: async () => null }), useConvexAuth: () => ({ isAuthenticated: false, isLoading: false }), useQuery: () => undefined, useMutation: () => vi.fn() }));
 vi.mock("@/features/spectra/organization/tree-client", () => ({ useTreeQuickView: () => ({ nodes: pinned.nodes }) }));
 
 beforeEach(() => {

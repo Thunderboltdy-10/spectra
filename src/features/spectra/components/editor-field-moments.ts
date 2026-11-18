@@ -275,11 +275,14 @@ export function useEditorFieldMoments(rootRef: RefObject<HTMLElement | null>, { 
       if (source.kind === "prism") {
         markArrival(element);
       } else {
-        life.form(figure, {
-          from: source.point,
-          // Yours and a person's are ink; Spectra's is its light.
-          colour: source.kind === "peer" && source.ai ? "spectrum" : inkOf(),
-        });
+        life.pin(
+          life.form(figure, {
+            from: source.point,
+            // Yours and a person's are ink; Spectra's is its light.
+            colour: source.kind === "peer" && source.ai ? "spectrum" : inkOf(),
+          }),
+          element,
+        );
       }
     };
 

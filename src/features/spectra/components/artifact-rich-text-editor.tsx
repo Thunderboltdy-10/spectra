@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { cleanOfficeHtml } from "../rich-content/clipboard";
 import { EditorContent, useEditor } from "@tiptap/react";
 import { fieldExtensions, INCOMING_META } from "../editor/field-extensions";
 import { fieldContent, fieldDocument, fieldValue, type FieldFormat } from "../editor/field-format";
@@ -71,6 +72,7 @@ export function ArtifactRichTextEditor({
     autofocus: autoFocus ? "end" : false,
     immediatelyRender: false,
     editorProps: {
+      transformPastedHTML: cleanOfficeHtml,
       attributes: {
         role: "textbox",
         "aria-multiline": "true",

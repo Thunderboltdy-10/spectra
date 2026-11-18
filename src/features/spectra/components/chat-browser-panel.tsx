@@ -8,6 +8,8 @@ import type { SpectraThread } from "../data/api";
 import { getSpectraThread, getSpectraThreads, keptSpectraThreads } from "../data/api";
 import { formatRelativeTime } from "./spectra-view-model";
 import { ProductErrorState } from "./product-state";
+import { matchesAllWords } from "../semantic/meaning-matches";
+import { useThreadSearch } from "../semantic/use-semantic";
 
 type ChatBrowserScope = "library" | "workspace" | "artifact";
 
@@ -186,8 +188,10 @@ export function ChatBrowserPanel({
     };
   }, []);
 
+  const meaning = useThreadSearch(query, { limit: 30 });
   const filtered = useMemo(() => {
-    const needle = query.trim().toLowerCase();
+    const needle = query.trim();
+    const meant = new Set(meaning.results.map((result) => (result.anchor.kind === "thread" ? result.anchor.threadId : result.itemId)));
     const scoped = threads.filter((thread) => {
       if (scope === "workspace" && workspaceId) {
         return thread.workspaceId === workspaceId || thread.contextWorkspaceIds?.includes(workspaceId);
@@ -198,7 +202,7 @@ export function ChatBrowserPanel({
       return true;
     });
     return scoped
-      .filter((thread) => !needle || `${thread.title} ${thread.summaryShort ?? ""}`.toLowerCase().includes(needle))
+      .filter((thread) => !needle || meant.has(thread._id) || matchesAllWords(`${thread.title} ${thread.summaryShort ?? ""}`, needle))
       .filter((thread) =>
         filter === "all"
           ? true
@@ -207,7 +211,7 @@ export function ChatBrowserPanel({
             : Date.now() - (thread.lastMessageAt ?? thread.updatedAt) < 7 * 86_400_000,
       )
       .sort((a, b) => (b.lastMessageAt ?? b.updatedAt) - (a.lastMessageAt ?? a.updatedAt));
-  }, [artifactId, filter, query, scope, threads, workspaceId]);
+  }, [artifactId, filter, meaning.results, query, scope, threads, workspaceId]);
 
   const groups = useMemo(() => {
     const map = new Map<string, SpectraThread[]>();

@@ -187,13 +187,13 @@ export function DeviceFolderBrowser({
 }
 
 function badgeLabel(direction: BacklogDirection, computer: string) {
-  return direction === "toComputer" ? `Going to ${computer}` : BACKLOG_BADGE[direction].label;
+  return direction === "toComputer" ? `Spectra's edits on the way to ${computer}` : BACKLOG_BADGE[direction].label;
 }
 
 function WaitingBadge({ direction, computer }: { direction: BacklogDirection; computer: string }) {
   const badge = BACKLOG_BADGE[direction];
   return (
-    <span className="device-browser-waiting" data-way={direction} title={badgeLabel(direction, computer)}>
+    <span className="device-browser-waiting" data-way={direction} title={`${badgeLabel(direction, computer)}. ${badge.hint}`}>
       <Icon name={badge.icon} size={12} />
       <span className="sr-only">{badgeLabel(direction, computer)}</span>
     </span>
@@ -222,6 +222,7 @@ function StillToSync({ backlog, computer }: { backlog: FolderBacklog; computer: 
             {badgeLabel(direction, computer)}
             <span className="device-browser-backlog-count">{list.length.toLocaleString()}</span>
           </h5>
+          <p className="device-browser-backlog-hint">{BACKLOG_BADGE[direction].hint}</p>
           <ul>
             {list.slice(0, 8).map((file) => (
               <li key={file.workId} title={file.path}>

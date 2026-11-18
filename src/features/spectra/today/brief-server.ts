@@ -3,6 +3,7 @@ import { callSpectraModel } from "../ai/harness/model";
 import { calendarItemFromWire, type CalendarItem } from "../calendar/domain/model";
 import { plainTextFromStored } from "../rich-content/adapters";
 import { convexMutation, convexQuery } from "@/lib/convex-server";
+import type { MemoryHead } from "../../../../shared/memory-files";
 import {
   briefMessages,
   nextDay,
@@ -47,12 +48,13 @@ export async function gatherBriefContext(day: string, timeZone: string): Promise
   const farHorizon = zonedInstant(nextDay(day, LOOK_AHEAD_DAYS), "00:00", timeZone);
   const yesterday = (at: number | undefined) => at !== undefined && at >= yesterdayStart && at < todayStart;
 
-  const [threadPage, artifacts, calendar, school, workspaces] = await Promise.all([
+  const [threadPage, artifacts, calendar, school, workspaces, memory] = await Promise.all([
     optional(convexQuery<object, unknown>("spectraThreads:list", { limit: 30 }), null),
     optional(convexQuery<object, unknown>("spectraArtifacts:list", { placement: "all", limit: 40 }), null),
     optional(convexQuery<object, unknown>("calendar:overview", { from: todayStart, to: farHorizon }), null),
     optional(convexQuery<object, unknown>("school:tasks", { view: "current" }), null),
     optional(convexQuery<object, unknown>("spectraWorkspaces:list", {}), null),
+    optional(readMemory(), ""),
   ]);
 
   const threads = rows(threadPage, "threads").filter((thread) => text(thread.status) === "active");
@@ -123,7 +125,40 @@ export async function gatherBriefContext(day: string, timeZone: string): Promise
       .map(calendarItemFromWire)
       .filter((item) => item.status === "active")
       .map(agendaItem),
+    ...(memory ? { memory } : {}),
   };
+}
+
+/** Topics read in full: the ones touched most lately, where "that task is done" lands. */
+const MEMORY_TOPICS_READ = 3;
+const MEMORY_TOPIC_CHARS = 1_000;
+
+/**
+ * The student's memory as the brief reads it: what Spectra knows about them,
+ * their preferences, every topic's summary and the latest topics in full.
+ * Nothing when they turned memory off.
+ */
+async function readMemory() {
+  const head = await convexQuery<object, MemoryHead>("spectraMemory:head", {});
+  if (!head?.enabled) return "";
+  const latest = [...head.topics].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, MEMORY_TOPICS_READ);
+  const topics = await Promise.all(
+    latest.map((topic) =>
+      optional(
+        convexQuery<object, { title: string; content: string } | null>("spectraMemory:readTopic", { slug: topic.slug }),
+        null,
+      ),
+    ),
+  );
+  const parts = [
+    head.about.trim() ? `About them:\n${head.about.trim()}` : "",
+    head.preferences.trim() ? `Their preferences:\n${head.preferences.trim()}` : "",
+    head.topics.length ? `Topics:\n${head.topics.map((topic) => `- ${topic.title}: ${topic.summary}`).join("\n")}` : "",
+    ...topics.flatMap((topic) =>
+      topic?.content.trim() ? [`${topic.title}:\n${topic.content.trim().slice(0, MEMORY_TOPIC_CHARS)}`] : [],
+    ),
+  ];
+  return parts.filter(Boolean).join("\n\n");
 }
 
 /** The model's brief, topped up where it came back thin; the plain one if the model can't. */

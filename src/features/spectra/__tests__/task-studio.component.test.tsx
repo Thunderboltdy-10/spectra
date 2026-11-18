@@ -8,6 +8,7 @@ import { TaskStudio, dueDistance, taskInputs, taskInstant } from "../components/
 import { isSingleTask } from "../plan/model";
 
 vi.mock("convex/react", () => ({
+  useAction: () => async () => ({ results: [] }),
   useMutation: () => vi.fn(async () => ({})),
   useQuery: () => undefined,
   useConvexAuth: () => ({ isAuthenticated: false, isLoading: false }),

@@ -342,6 +342,17 @@ export function ArtifactWorkbar({
     // array when layout preferences are resolved.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectionContext, tabSignature]);
+  const tabStrip = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    // A tab that appears or is chosen off the edge of a narrow strip scrolls into view.
+    const strip = tabStrip.current;
+    const tab = strip?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
+    if (!strip || !tab) return;
+    const left = tab.offsetLeft - strip.offsetLeft;
+    if (left < strip.scrollLeft) strip.scrollLeft = left;
+    else if (left + tab.offsetWidth > strip.scrollLeft + strip.clientWidth)
+      strip.scrollLeft = left + tab.offsetWidth - strip.clientWidth;
+  }, [activeTab, tabSignature]);
 
   const arranged = useMemo(
     () => arrangeWorkbar({ type: contract.type, tab: activeTab, actions: placedActions, layout: storedLayout }),
@@ -504,7 +515,7 @@ export function ArtifactWorkbar({
     >
       {/* Rail one: the tab strip, and the bar's own settings at its right edge. */}
       <div className="spectra-workbar-rail-tabs">
-        <div className="spectra-command-tabs" role="tablist" aria-label={`${label} categories`}>
+        <div ref={tabStrip} className="spectra-command-tabs" role="tablist" aria-label={`${label} categories`}>
           {tabs.map((tab) => (
             <button
               key={tab}

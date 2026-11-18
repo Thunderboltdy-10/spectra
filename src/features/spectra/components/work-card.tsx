@@ -276,7 +276,10 @@ function TaskFace({ task }: { task: Extract<WorkPreview, { kind: "task" }> }) {
     <span className="work-preview-task-face" data-status={task.status}>
       {due ? (
         <span className="work-preview-leaf">
-          <span className="work-preview-leaf-month">{due.toLocaleDateString(undefined, { month: "short" })}</span>
+          {/* Another year's leaf says its year, so an old task never reads as this year's. */}
+          <span className="work-preview-leaf-month">
+            {due.toLocaleDateString(undefined, { month: "short", ...(due.getFullYear() === new Date().getFullYear() ? {} : { year: "2-digit" }) })}
+          </span>
           <span className="work-preview-leaf-day">{due.getDate()}</span>
         </span>
       ) : null}

@@ -190,9 +190,9 @@ describe("Devices page", () => {
     ] };
     render(<DevicesPage />);
     const lanes = screen.getByLabelText("Still to sync");
-    expect(within(lanes).getByText("2 files to this computer")).toBeTruthy();
-    expect(within(lanes).getByText("1 file to Spectra")).toBeTruthy();
-    expect(within(lanes).getByText("1 file changed on both sides")).toBeTruthy();
+    expect(within(lanes).getByText("Spectra's edits to 2 files on the way to this computer")).toBeTruthy();
+    expect(within(lanes).getByText("Edits to 1 file on the way to Spectra")).toBeTruthy();
+    expect(within(lanes).getByText("1 file edited in both places, open in Spectra to combine")).toBeTruthy();
   });
 
   it("keeps the page when the backlog can't be read", () => {

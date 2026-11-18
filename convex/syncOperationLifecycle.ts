@@ -98,11 +98,14 @@ export async function verifyReconciledExternalOperations(
     replicaId: Id<"workReplicas">;
     revision: string;
     now: number;
+    /** Only operations made since then can still need reconciling. */
+    since?: number;
   },
 ) {
   const recent = await ctx.db
     .query("syncOperations")
-    .withIndex("by_work_created", (q) => q.eq("workId", input.workId))
+    .withIndex("by_work_created", (q) =>
+      input.since === undefined ? q.eq("workId", input.workId) : q.eq("workId", input.workId).gt("createdAt", input.since))
     .order("desc")
     .take(50);
   const reconciled = recent.filter((operation) =>

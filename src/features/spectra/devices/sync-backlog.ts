@@ -61,9 +61,25 @@ export function files(count: number) {
 }
 
 /** A file's own badge in a folder's list. */
-export const BACKLOG_BADGE: Record<BacklogDirection, { label: string; icon: "arrowDown" | "arrowUp" | "problem" }> = {
-  toComputer: { label: "Going to the computer", icon: "arrowDown" },
-  toSpectra: { label: "Going to Spectra", icon: "arrowUp" },
-  conflict: { label: "Changed on both sides", icon: "problem" },
-  problem: { label: "Couldn't sync", icon: "problem" },
+export const BACKLOG_BADGE: Record<BacklogDirection, { label: string; hint: string; icon: "arrowDown" | "arrowUp" | "problem" | "info" }> = {
+  toComputer: {
+    label: "Spectra's edits on the way",
+    hint: "Saved to the file once the computer is on and the file isn't open in Office.",
+    icon: "arrowDown",
+  },
+  toSpectra: {
+    label: "Edits on the way to Spectra",
+    hint: "Spectra takes in the saved file within a minute, or when it's next opened there.",
+    icon: "arrowUp",
+  },
+  conflict: {
+    label: "Edited in both places",
+    hint: "Nothing is lost: open it in Spectra to keep both sets of changes.",
+    icon: "info",
+  },
+  problem: {
+    label: "Couldn't sync",
+    hint: "Retry the folder. If it keeps failing, Show logs says why.",
+    icon: "problem",
+  },
 };

@@ -179,6 +179,8 @@ async function boundedJson(response: Response, maxBytes: number) {
 export class QueryVectorCache {
   private entries = new Map<string, { expiresAt: number; vector: number[] }>();
 
+  constructor(private readonly capacity = CACHE_CAPACITY, private readonly ttlMs = CACHE_TTL_MS) {}
+
   get(scope: string, query: string, version: string, now = Date.now()) {
     const key = JSON.stringify([scope, version, query]);
     const entry = this.entries.get(key);
@@ -194,9 +196,9 @@ export class QueryVectorCache {
     this.entries.delete(key);
     for (const [entryKey, entry] of this.entries)
       if (entry.expiresAt <= now) this.entries.delete(entryKey);
-    while (this.entries.size >= CACHE_CAPACITY)
+    while (this.entries.size >= this.capacity)
       this.entries.delete(this.entries.keys().next().value!);
-    this.entries.set(key, { expiresAt: now + CACHE_TTL_MS, vector: [...vector] });
+    this.entries.set(key, { expiresAt: now + this.ttlMs, vector: [...vector] });
   }
 }
 

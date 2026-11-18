@@ -125,4 +125,10 @@ crons.interval(
   internal.secretStore.purgeExpiredNonces,
   {},
 );
+crons.interval(
+  "purge-bridge-discovery-digests",
+  { hours: 6 },
+  internal.bridgeSync.purgeDiscoveryDigests,
+  {},
+);
 export default crons;

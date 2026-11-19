@@ -216,7 +216,9 @@ describe("DOCX preservation lens", () => {
     }, opened.projection);
     const output = await docxLens.mutate(opened.preservedCarry, { kind: "ai-edit", operations: update.operations });
     const readback = await docxLens.open(output);
-    expect(readback.projection.blocks.at(-1)?.inlineContent).toEqual([{ kind: "text", text: "Appended in Spectra.", format: { fontFamily: "Calibri", fontSizePoints: 11 } }]);
+    // Word's document font is the style's, not the run's: the new words carry nothing of their own.
+    expect(readback.projection.blocks.at(-1)?.inlineContent).toEqual([{ kind: "text", text: "Appended in Spectra." }]);
+    expect(readback.projection.styles?.paragraph[readback.projection.styles.defaultStyleId]).toMatchObject({ fontFamily: "Calibri", fontSizePoints: 11 });
     const expected = await docxProjectionSemanticDigest(update.projection);
     expect(await docxProjectionReadbackDigest(readback.projection, update.projection)).toBe(expected);
     const wrongText = structuredClone(readback.projection);
@@ -1124,13 +1126,17 @@ describe("DOCX preservation lens", () => {
     const source = await fixture("complex-structure.docx");
     const opened = await docxLens.open(source);
     const target = opened.projection.blocks.find(
-      (block) => block.type !== "table" && block.attrs?.nativeReadOnly !== true && Boolean(block.attrs?.format),
+      (block) => {
+        const styles = opened.projection.styles;
+        const style = styles?.paragraph[String(block.attrs?.nativeStyleId ?? block.attrs?.styleId ?? styles.defaultStyleId)];
+        return block.type === "paragraph" && block.attrs?.nativeReadOnly !== true && Boolean(block.text.trim()) && !style?.bold &&
+          !(block.attrs?.format as DocxRunFormat | undefined)?.bold;
+      },
     )!;
-    const previousFormat = target.attrs?.format as DocxRunFormat;
     const formatted = await docxLens.mutate(opened.preservedCarry, {
       kind: "format-runs",
       regionId: target.id,
-      format: { ...previousFormat, bold: !previousFormat.bold },
+      format: { bold: true },
     });
     const external = await docxLens.open(formatted);
     const diff = await docxLens.diffExternal(source, formatted);

@@ -55,6 +55,24 @@ describe("a Word document's own styles", () => {
     expect(docxProjectionFromContent({ ...base, tiptap: json, blocks: documentBlocksFromJson(json), nativeProjectionComplete: true }, base).operations).toEqual([]);
   });
 
+  it("opens runs with only their own formatting and writes nothing for older content that spelled out the style's font", async () => {
+    const opened = await docxLens.open(await styledEssay());
+    const base = opened.projection;
+    // Each run's font is its style's, so no run carries one.
+    expect(base.blocks.flatMap((block) => block.inlineContent ?? []).some((item) => "format" in item && item.format?.fontFamily)).toBe(false);
+    const json = documentContentToProseMirrorJson(base) as DocumentJsonNode;
+    // Content stored before direct-only formats carried every run's resolved font and size.
+    const resolved: Record<string, { fontFamily: string; fontSize: string }> = {
+      EssayTitle: { fontFamily: "Cambria", fontSize: "28pt" },
+      BodyText: { fontFamily: "Georgia", fontSize: "11pt" },
+    };
+    for (const node of json.content!) {
+      const style = resolved[String(node.attrs?.styleId ?? "")] ?? { fontFamily: "Cambria", fontSize: "12pt" };
+      for (const child of node.content ?? []) if (child.type === "text") child.marks = [{ type: "textStyle", attrs: style }];
+    }
+    expect(docxProjectionFromContent({ ...base, tiptap: json, blocks: documentBlocksFromJson(json), nativeProjectionComplete: true }, base).operations).toEqual([]);
+  });
+
   it("writes a new paragraph in the style the writer continued", async () => {
     const opened = await docxLens.open(await styledEssay());
     const base = opened.projection;

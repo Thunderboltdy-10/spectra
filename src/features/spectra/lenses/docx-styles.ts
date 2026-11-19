@@ -40,7 +40,7 @@ const points = (twips: number | null) => (twips === null ? undefined : Math.roun
 function resolveStyle(document: Document, styleId: string): Omit<DocxStyleEntry, "name"> {
   const safe = styleId.replace(/[^\p{L}\p{N}_ .-]/gu, "");
   const probe = parseXml(
-    `<w:p xmlns:w="${WML_NAMESPACE}"><w:pPr><w:pStyle w:val="${safe}"/></w:pPr><w:r><w:t>x</w:t></w:r></w:p>`,
+    `<w:p xmlns:w="${WML_NAMESPACE}"><w:pPr><w:pStyle w:val="${safe}"/><w:numPr><w:numId w:val="0"/></w:numPr></w:pPr><w:r><w:t>x</w:t></w:r></w:p>`,
   );
   const paragraph = Paragraph._wrap(document, probe.root);
   const format = paragraph.format();

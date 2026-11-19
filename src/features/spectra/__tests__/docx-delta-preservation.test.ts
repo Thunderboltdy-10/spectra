@@ -72,7 +72,9 @@ describe("Shared DOCX delta and insertion policy", () => {
   it("keeps native style inheritance on a text edit and writes only explicitly changed formatting", async () => {
     const base = await blank(true);
     const styled = await docxLens.open(await docxLens.mutate(base.preservedCarry, { kind: "apply-style", regionId: base.projection.blocks[0]!.id, style: "Heading1" }));
-    expect(styled.projection.blocks[0]?.attrs?.format).toMatchObject({ bold: true });
+    // The heading's bold is its style's: the run says nothing of it, the catalogue does.
+    expect(styled.projection.styles?.paragraph.Heading1).toMatchObject({ bold: true });
+    expect((styled.projection.blocks[0]?.attrs?.format as { bold?: boolean } | undefined)?.bold).toBeUndefined();
     const desired: DocxProjection = { ...styled.projection, blocks: styled.projection.blocks.map((block, index) => index ? block : { ...block, text: "Changed heading", inlineContent: undefined }) };
     const operations = docxOperationsBetween(styled.projection, desired);
     expect(operations.some((operation) => operation.kind === "format-runs")).toBe(false);
@@ -80,7 +82,9 @@ describe("Shared DOCX delta and insertion policy", () => {
     const xml = strFromU8(unzipSync(output)["word/document.xml"]!);
     expect(xml).toContain("Changed heading");
     expect(xml).not.toMatch(/<w:b(?:\s|\/|>)/u);
-    expect((await docxLens.open(output)).projection.blocks[0]?.attrs?.format).toMatchObject({ bold: true });
+    const reopened = await docxLens.open(output);
+    expect(reopened.projection.styles?.paragraph.Heading1).toMatchObject({ bold: true });
+    expect((reopened.projection.blocks[0]?.attrs?.format as { bold?: boolean } | undefined)?.bold).toBeUndefined();
     expect(unzipSync(output)["word/styles.xml"]).toEqual(unzipSync(styled.preservedCarry.payload)["word/styles.xml"]);
     const missingAttrs: DocxProjection = { ...styled.projection, blocks: styled.projection.blocks.map(({ attrs: _attrs, ...block }) => block) };
     expect(docxOperationsBetween(styled.projection, missingAttrs)).toEqual([]);

@@ -189,7 +189,7 @@ export function authoredSemanticValue(value, parentKey) {
         return [];
       if (key === "ommlXml" || key === "ommlSourceLatex" || key === "ommlRef") return [];
       if (source.kind === "citation" && key === "instruction") return [];
-      if (key === "nativePath" || key === "nativeReadOnly" || key === "nativeStyleId" || key === "readOnlyReason" || key === "number")
+      if (key === "nativePath" || key === "nativeReadOnly" || key === "nativeStyleId" || key === "readOnlyReason" || key === "number" || key === "cellStyles")
         return [];
       // Inline runs are the authored formatting source. attrs.format is a
       // resolved native convenience value and would otherwise disagree with a
@@ -777,11 +777,14 @@ function plainOrRichBlockToJson(blockValue, index, nativeBinding) {
   const attrs = record(block.attrs);
   const richNode = docxRichBlockToJson(block, nativeBinding);
   if (richNode) return richNode;
+  // Plain words keep the block's native standing: a read-only Word paragraph
+  // (a table of contents line) stays read-only however simple its text.
+  const native = { blockId: id, ...(attrs.nativeReadOnly === true ? { nativeReadOnly: true } : {}) };
   if (block.type === "heading")
-    return {
+    return withBlockFormatting({
       type: "heading",
       attrs: {
-        blockId: id,
+        ...native,
         level: [1, 2, 3, 4, 5, 6].includes(Number(attrs.level))
           ? Number(attrs.level)
           : Number(
@@ -790,7 +793,7 @@ function plainOrRichBlockToJson(blockValue, index, nativeBinding) {
         ...headingNumberAttrs(attrs),
       },
       content: inlineText(value),
-    };
+    }, attrs);
   if (block.type === "quote")
     return {
       type: "blockquote",
@@ -798,8 +801,8 @@ function plainOrRichBlockToJson(blockValue, index, nativeBinding) {
       content: [{ type: "paragraph", content: inlineText(value) }],
     };
   if (block.type === "list")
-    return {
-      ...wordListShell(attrs.list, { blockId: id }),
+    return withBlockFormatting({
+      ...wordListShell(attrs.list, native),
       content: (value.split(/\r?\n/).filter(Boolean).length
         ? value.split(/\r?\n/).filter(Boolean)
         : [""]
@@ -807,7 +810,7 @@ function plainOrRichBlockToJson(blockValue, index, nativeBinding) {
         type: "listItem",
         content: [{ type: "paragraph", content: inlineText(entry) }],
       })),
-    };
+    }, attrs);
   if (block.type === "callout")
     return {
       type: "callout",
@@ -858,11 +861,11 @@ function plainOrRichBlockToJson(blockValue, index, nativeBinding) {
       })), attrs.cellSpans),
     };
   }
-  return {
+  return withBlockFormatting({
     type: "paragraph",
-    attrs: { blockId: id },
+    attrs: native,
     content: inlineText(value),
-  };
+  }, attrs);
 }
 
 export function documentNodeText(node) {

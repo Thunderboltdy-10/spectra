@@ -13,6 +13,7 @@ import { applyDocumentAcademicOperations } from "../commands/office/document-aca
 import { latexToEquation } from "./equation-interchange";
 import { docxOperationsBetween } from "./document-projection";
 import { docxStyleCatalogue, paragraphStyleRoles, wordListCounter } from "./docx-styles";
+import { blockStyle, directFormatBlocks, styleParagraphValue } from "./direct-run-format";
 import type {
   LensCapabilitySet,
   LensCompatibilityProfile,
@@ -1008,6 +1009,22 @@ function cellSpansOf(table: NativeTable) {
     }),
   );
   return { cellSpans };
+}
+
+/**
+ * Each cell's paragraph style, kept only when a cell names one. A cell's words
+ * are compared against it, so text typed in an Arial cell style reads as plain.
+ */
+function cellStylesOf(table: { rows(): readonly { cells(): readonly NativeTableCell[] }[] }) {
+  let styled = false;
+  const cellStyles = table.rows().map((row) =>
+    row.cells().map((cell) => {
+      const id = cell.paragraphElements()[0]?.find(WML_NAMESPACE, "pPr")?.find(WML_NAMESPACE, "pStyle")?.getAttributeNs(WML_NAMESPACE, "val");
+      if (id) styled = true;
+      return id ?? null;
+    }),
+  );
+  return styled ? { cellStyles } : {};
 }
 
 /** How each table cell lines up, read once and kept only when one isn't left-aligned. */
@@ -3695,6 +3712,7 @@ async function projectDocument(
             })(),
             ...(readOnly ? { nativeReadOnly: true } : {}),
             ...cellAlignmentsOf(document, table),
+            ...cellStylesOf(table),
             ...cellSpansOf(table),
           },
         });
@@ -3852,17 +3870,20 @@ async function projectDocument(
       ? []
       : featurePlaceholders.filter((entry) => entry.feature === "trackedChanges")),
   ];
-  const semanticDigest = await docxProjectionSemanticDigest({
-    blocks,
-    pageSetup: pageSetupFromDocument(document),
-  });
   const styles = docxStyleCatalogue(
     document,
     blocks.flatMap((block) => {
       const id = block.attrs?.nativeStyleId ?? block.attrs?.styleId;
-      return typeof id === "string" ? [id] : [];
+      const cells = Array.isArray(block.attrs?.cellStyles) ? (block.attrs.cellStyles as unknown[][]).flat() : [];
+      return [id, ...cells].filter((value): value is string => typeof value === "string");
     }),
   );
+  // Runs keep only what their paragraph style does not already show.
+  blocks.splice(0, blocks.length, ...directFormatBlocks(blocks, styles));
+  const semanticDigest = await docxProjectionSemanticDigest({
+    blocks,
+    pageSetup: pageSetupFromDocument(document),
+  });
   const projection = docxProjectionSchema.parse({
     blocks,
     outline: blocks.flatMap((block) =>
@@ -3949,14 +3970,6 @@ export async function docxProjectionSemanticDigest(projection: Pick<DocxProjecti
 }
 
 /**
- * Compare a reopened Word projection to the semantic intent that produced it.
- * Word assigns stable region ids and exposes inherited style defaults when it
- * reopens new paragraphs. Those values are not authored edits when the intent
- * omitted them, while explicit text, rich content, and formatting remain part
- * of the digest.
- */
-const INHERITED_RUN_FORMAT = new Set(["fontFamily", "fontSizePoints", "color"]);
-/**
  * An equation as Word reads it back, ignoring spacing. Word holds its own form
  * of an equation (`\\hat{x}` is an accented x, `\\quad` is a space), so the
  * two sides are compared after both have been through that form.
@@ -3971,23 +3984,18 @@ function equationForm(latex: string) {
     .replace(/[{}\s\u2003\u2002\u2009]+/g, "");
 }
 
-/** A named paragraph style, like a heading, can also make its text bold or italic. */
-const STYLE_RUN_FORMAT = new Set(["bold", "italic"]);
-
 const isBlankFormat = (value: unknown) => value === undefined || value === null || value === false;
 
 /**
- * Word merges and resolves runs when it reopens them: a bold word followed by
- * plain words in a heading comes back as one bold run, because the style is
- * bold. Compare what each character of the request asked for against what
- * Word shows there. Anything the request set must hold; anything it left out
- * may be resolved from the style, and only that.
+ * Word merges runs when it reopens them: a bold word followed by plain words
+ * comes back as two runs or one, as Word likes. Compare what each character of
+ * the request asked for against what Word shows there, both reduced to what the
+ * paragraph style does not already give.
  */
 function runsAgree(
   readback: DocxRichInline[],
   requested: DocxRichInline[],
   requestedRunFormat: Record<string, unknown>,
-  styled: boolean,
 ) {
   const spans = (items: DocxRichInline[]) => items.flatMap((item) =>
     item.kind === "text"
@@ -4012,7 +4020,6 @@ function runsAgree(
       const shown = got.format[key];
       const wanted = asked.format[key] ?? requestedRunFormat[key];
       if (shown === wanted || (isBlankFormat(shown) && isBlankFormat(wanted))) continue;
-      if (isBlankFormat(wanted) && (INHERITED_RUN_FORMAT.has(key) || (styled && STYLE_RUN_FORMAT.has(key)))) continue;
       return false;
     }
     readAt += length; wantAt += length;
@@ -4039,9 +4046,14 @@ export async function docxReadbackDifference(readback: DocxProjection, requested
 }
 
 export async function docxProjectionReadbackDigest(
-  readback: DocxProjection,
-  requested: DocxProjection,
+  readbackProjection: DocxProjection,
+  requestedProjection: DocxProjection,
 ) {
+  // Both sides compare by how the text looks: what a run's paragraph style
+  // already gives it is not part of what was written.
+  const catalogue = readbackProjection.styles ?? requestedProjection.styles;
+  const readback = { ...readbackProjection, blocks: directFormatBlocks(readbackProjection.blocks, catalogue) };
+  const requested = { ...requestedProjection, blocks: directFormatBlocks(requestedProjection.blocks, catalogue) };
   const blocks = readback.blocks.map((block, index) => {
     const intent = requested.blocks[index];
     if (!intent) return block;
@@ -4051,6 +4063,7 @@ export async function docxProjectionReadbackDigest(
       if (intent.attrs?.headerRow === undefined && attrs.headerRow === false) delete attrs.headerRow;
       if (intent.attrs?.rowCount === undefined && attrs.rowCount === block.rows?.length) delete attrs.rowCount;
       if (intent.attrs?.cellAlignments === undefined) delete attrs.cellAlignments;
+      if (intent.attrs?.cellStyles === undefined) delete attrs.cellStyles;
       if (intent.attrs?.columnCount === undefined && attrs.columnCount === block.rows?.[0]?.length) delete attrs.columnCount;
     }
     // Where Word put a new paragraph is its own business.
@@ -4070,27 +4083,18 @@ export async function docxProjectionReadbackDigest(
     else if (attrs?.paragraphFormat) {
       const requestedFormat = intent.attrs?.paragraphFormat as Record<string, unknown>;
       const paragraphFormat = { ...(attrs.paragraphFormat as Record<string, unknown>) };
-      // Sparse authored paragraph properties reopen with Word's defaults. Only
-      // remove omitted defaults; requested values and unexpected changes stay.
-      const defaults = { alignment: "left", lineSpacing: 1, spacingAfterPoints: 0, spacingBeforePoints: 0, firstLineIndentPoints: 0, indentLevel: 0, border: null, shading: null };
-      for (const [key, value] of Object.entries(defaults)) {
-        if (!(key in requestedFormat) && paragraphFormat[key] === value) delete paragraphFormat[key];
+      // Sparse authored paragraph properties reopen resolved through the
+      // paragraph's style. A field the request left out may read back as the
+      // style gives it, and only that; requested values and anything else stay.
+      const style = blockStyle(catalogue, block.attrs);
+      for (const key of Object.keys(paragraphFormat)) {
+        const value = styleParagraphValue(style, key);
+        if (!(key in requestedFormat) && value !== undefined && paragraphFormat[key] === value) delete paragraphFormat[key];
       }
       attrs.paragraphFormat = paragraphFormat;
     }
     const requestedRunFormat = (authoredSemanticValue({ format: intent.attrs?.format ?? {} }) as { format?: Record<string, unknown> }).format ?? {};
-    // Word resolves an omitted font, size or colour from the document default
-    // or the paragraph style (a heading's colour) when it reopens new runs.
-    // Those are not authored changes; explicit values still have to match.
-    const pairedInline = intent.inlineContent?.length === block.inlineContent?.length ? intent.inlineContent : undefined;
-    const inlineContent = block.inlineContent?.map((item, itemIndex) => {
-      const requested = pairedInline?.[itemIndex];
-      if (!requested || requested.kind !== item.kind || !("format" in item) || !item.format) return item;
-      const requestedFormat = ("format" in requested ? requested.format : undefined) as Record<string, unknown> | undefined;
-      const format = Object.fromEntries(Object.entries(item.format).filter(([key]) =>
-        !INHERITED_RUN_FORMAT.has(key) || requestedFormat?.[key] !== undefined || requestedRunFormat[key] !== undefined));
-      return { ...item, format } as typeof item;
-    });
+    const inlineContent = block.inlineContent;
     const semanticInline = inlineContent?.map(
       (item) => authoredSemanticValue(item) as Record<string, unknown>,
     );
@@ -4102,13 +4106,7 @@ export async function docxProjectionReadbackDigest(
           return item.kind === "text" &&
             Object.keys(item).every((key) => key === "kind" || key === "text" || key === "format") &&
             Object.entries(requestedRunFormat).every(([key, value]) => value === format[key]) &&
-            Object.entries(format).every(([key, value]) =>
-              value === requestedRunFormat[key] ||
-              // Word resolves the document's default font on a newly inserted
-              // plain paragraph. An omitted font/size inherits that default; it is
-              // not an authored font change. Explicit fonts and every other
-              // mark still have to match exactly.
-              (INHERITED_RUN_FORMAT.has(key) && requestedRunFormat[key] === undefined));
+            Object.entries(format).every(([key, value]) => value === requestedRunFormat[key]);
         },
       ) &&
       semanticInline
@@ -4128,17 +4126,15 @@ export async function docxProjectionReadbackDigest(
       intent.inlineContent ?? [{ kind: "text", text: intent.text }],
       // Runs of their own say what they want; the paragraph summary speaks only for bare text.
       intent.inlineContent ? {} : requestedRunFormat,
-      // A named style (a heading, a title) resolves what new words left unset.
-      block.type === "heading" || typeof intent.attrs?.styleId === "string",
     );
     // The paragraph's run summary follows its runs: when they agree, so does it.
     if (agreed && attrs && intent.attrs?.format !== undefined) attrs.format = intent.attrs.format;
-    // A cell's new runs resolve an omitted font, size or colour the same way.
+    // A cell's runs agree the same way, character by character.
     const agreedRows = block.type === "table" && intent.type === "table" && block.richRows && intent.richRows &&
       block.richRows.length === intent.richRows.length
       ? block.richRows.map((row, r) => row.map((cell, c) => {
           const wanted = intent.richRows![r]?.[c];
-          return wanted && cell.length && runsAgree(cell, wanted.length ? wanted : [{ kind: "text", text: "" }], {}, false) ? wanted : cell;
+          return wanted && cell.length && runsAgree(cell, wanted.length ? wanted : [{ kind: "text", text: "" }], {}) ? wanted : cell;
         }))
       : undefined;
     return {

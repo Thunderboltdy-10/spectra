@@ -16,6 +16,7 @@ import {
   CELL_PARAGRAPH_BREAK,
 } from "../../../../shared/document-projection.mjs";
 import { equationNodeToLatex, latexToEquation } from "./equation-interchange";
+import { directFormatBlocks } from "./direct-run-format";
 import {
   docxProjectionBlockSchema,
   docxProjectionSchema,
@@ -998,8 +999,11 @@ function comparableBlock(block: unknown) {
  */
 function untouchedAfterEditorTrip(base: DocxProjection) {
   try {
-    const trip = documentBlocksFromJson(
-      documentContentToProseMirrorJson(compactDocxProjectionForStorage(base) as unknown as Record<string, unknown>),
+    const trip = directFormatBlocks(
+      documentBlocksFromJson(
+        documentContentToProseMirrorJson(compactDocxProjectionForStorage(base) as unknown as Record<string, unknown>),
+      ) as Array<{ id: string; type: string; attrs?: Record<string, unknown> }>,
+      base.styles,
     );
     return new Map(trip.map((block) => [block.id, comparableBlock(block)]));
   } catch {
@@ -1054,12 +1058,25 @@ export function docxProjectionFromContent(
     const id = (block as { id?: unknown } | null)?.id;
     return typeof id === "string" && baseById.has(id) && untouched.get(id) === comparableBlock(block);
   };
+  // Formats compare by how the text looks: a run stored with its style's own
+  // font (older content) is the same run as one stored without it.
+  const catalogue = base.styles;
+  const directBlocks = (blocks: unknown[]) =>
+    directFormatBlocks(
+      blocks.map((block) =>
+        block && typeof block === "object" && typeof (block as { type?: unknown }).type === "string"
+          ? block
+          : { type: "", attrs: undefined },
+      ) as Array<{ type: string; attrs?: Record<string, unknown> }>,
+      catalogue,
+      (block) => baseById.get((block as { id?: string }).id ?? "")?.attrs?.cellStyles,
+    ).map((block, index) => ((block as { type: string }).type === "" ? blocks[index] : block));
   // Settled before the schema: a block kind only Word has must not refuse the save.
   const withUntouched =
     value && typeof value === "object" && Array.isArray((value as { blocks?: unknown }).blocks)
       ? {
           ...(value as Record<string, unknown>),
-          blocks: ((value as { blocks: unknown[] }).blocks).map((block) =>
+          blocks: directBlocks((value as { blocks: unknown[] }).blocks).map((block) =>
             isUntouched(block) ? baseById.get((block as { id: string }).id) : block,
           ),
         }

@@ -2700,6 +2700,17 @@ export function applyParagraphFormat(
   format: DocxParagraphFormat,
 ) {
   const properties = paragraphProperties(paragraph);
+  // A list paragraph's level lives in its own numbering properties; one Word
+  // gives it through its style has no level of its own to move.
+  const numbering = format.listLevel !== undefined ? properties.find(WML_NAMESPACE, "numPr") : undefined;
+  if (numbering) {
+    let level = numbering.find(WML_NAMESPACE, "ilvl");
+    if (!level) {
+      level = new XmlElement("ilvl", properties.prefix);
+      numbering.insertBefore(level, numbering.children[0] ?? null);
+    }
+    level.setAttributeNs(WML_NAMESPACE, "val", String(format.listLevel));
+  }
   if (format.alignment !== undefined) {
     if (!format.alignment || format.alignment === "left") dropChild(properties, "jc");
     else
@@ -2842,6 +2853,13 @@ export function applyParagraphFormat(
     run.appendChild(pageBreak);
     paragraph.element.appendChild(run);
   }
+  // The editor's section break: this paragraph now ends a section that keeps
+  // the page setup, headers and footers of the section it splits.
+  if (format.sectionBreak === true && !properties.find(WML_NAMESPACE, "sectPr")) {
+    const split = followingSectionProperties(document, paragraph.element).clone();
+    for (const type of split.findAll(WML_NAMESPACE, "type")) type.parent?.removeChild(type);
+    properties.insertBefore(split, properties.find(WML_NAMESPACE, "pPrChange") ?? null);
+  }
   if (!properties.elements().length) paragraph.element.removeChild(properties);
   document._markMainDirty();
 }
@@ -2901,6 +2919,22 @@ function agreedRun<T>(runs: Run[], read: (run: Run) => T) {
   return runs.every((run) => read(run) === value) ? value : undefined;
 }
 
+/** The section a paragraph sits in: the first section properties after it in the body. */
+function followingSectionProperties(document: Document, element: XmlElement) {
+  const ordered = descendants(document.body());
+  const start = ordered.indexOf(element);
+  return ordered.slice(start + 1).find((candidate) => candidate.namespaceUri() === WML_NAMESPACE && candidate.localName === "sectPr")
+    ?? finalSectionProperties(document);
+}
+
+/** An empty paragraph whose only job is to end a Word section. */
+function holdsSectionBreak(paragraph: Paragraph) {
+  return Boolean(paragraph.element.find(WML_NAMESPACE, "pPr")?.find(WML_NAMESPACE, "sectPr"))
+    && !paragraph.text().trim()
+    && !hasWml(paragraph.element, "drawing", "pict", "object", "oMath", "oMathPara", "fldChar", "fldSimple", "footnoteReference", "endnoteReference")
+    && !holdsPageBreak(paragraph);
+}
+
 function holdsPageBreak(paragraph: Paragraph) {
   return descendants(paragraph.element).some(
     (element) =>
@@ -2943,6 +2977,7 @@ function projectedParagraphFormat(paragraph: Paragraph): DocxParagraphFormat | u
     shading: fill && fill.toLowerCase() !== "auto" ? fill.toUpperCase() : null,
     ...(properties?.find(WML_NAMESPACE, "pageBreakBefore") ? { pageBreakBefore: true } : {}),
     ...(!paragraph.text().trim() && holdsPageBreak(paragraph) ? { pageBreak: true } : {}),
+    ...(holdsSectionBreak(paragraph) ? { sectionBreak: true } : {}),
   };
   return format;
 }
@@ -3136,30 +3171,137 @@ function setSectionPageSetup(document: Document, setup: {
   document._markMainDirty();
 }
 
-function setPlainChromeText(root: XmlElement, text: string) {
-  const paragraph = shallowWmlChildren(root, "p")[0] ?? (() => {
-    const created = new XmlElement("p", root.prefix);
-    root.appendChild(created);
+/** A header or footer's paragraphs in reading order, as Word reads its text: table cells included. */
+function chromeParagraphs(root: XmlElement) {
+  const found: XmlElement[] = [];
+  const visit = (element: XmlElement) => {
+    for (const child of element.elements()) {
+      if (child.namespaceUri() !== WML_NAMESPACE) continue;
+      if (child.localName === "p") found.push(child);
+      else if (!WML_PROPERTY_ELEMENTS.has(child.localName)) visit(child);
+    }
+  };
+  visit(root);
+  return found;
+}
+
+/** Content a plain rewrite would lose: a page number or other field, a picture, a control, a link. */
+function chromeParagraphIsRich(paragraph: XmlElement) {
+  return hasWml(paragraph, "fldChar", "fldSimple", "instrText", "drawing", "pict", "object", "sdt", "hyperlink", "ins", "del");
+}
+
+/** Replace one paragraph's words, keeping its properties and its first run's formatting. */
+function setChromeParagraphText(paragraph: XmlElement, text: string) {
+  const runs = shallowWmlChildren(paragraph, "r");
+  const run = runs[0] ?? (() => {
+    const created = new XmlElement("r", paragraph.prefix);
+    paragraph.appendChild(created);
     return created;
   })();
-  const existingRun = paragraph.find(WML_NAMESPACE, "r");
-  const run = existingRun ?? new XmlElement("r", paragraph.prefix);
-  if (!existingRun) paragraph.appendChild(run);
+  for (const extra of runs.slice(1)) paragraph.removeChild(extra);
   const runProperties = run.find(WML_NAMESPACE, "rPr");
   for (const child of [...run.children])
     if (child !== runProperties) run.removeChild(child);
-  const chunks = text.split(/(\n)/u);
-  for (const chunk of chunks) {
-    if (chunk === "\n") {
-      run.appendChild(new XmlElement("br", run.prefix));
+  for (const chunk of text.split(/(\t)/u)) {
+    if (!chunk) continue;
+    if (chunk === "\t") {
+      run.appendChild(new XmlElement("tab", run.prefix));
       continue;
     }
-    if (!chunk) continue;
     const t = new XmlElement("t", run.prefix);
     if (/^\s|\s$/u.test(chunk)) t.setAttribute("xml:space", "preserve");
     t.appendChild(new XmlText(chunk));
     run.appendChild(t);
   }
+}
+
+/**
+ * Change the words of a paragraph that holds a field (a page number, a date)
+ * or another object, in the one text run the change falls in. A field's shown
+ * result is Word's to recompute, so it is never the place of an edit.
+ */
+function spliceChromeParagraph(paragraph: XmlElement, before: string, after: string) {
+  let start = 0;
+  while (start < before.length && start < after.length && before[start] === after[start]) start += 1;
+  let end = 0;
+  while (end < before.length - start && end < after.length - start && before[before.length - 1 - end] === after[after.length - 1 - end]) end += 1;
+  const from = start;
+  const to = before.length - end;
+  const inserted = after.slice(start, after.length - end);
+  let offset = 0;
+  let depth = 0;
+  const candidates: Array<{ element: XmlElement; start: number; end: number }> = [];
+  for (const element of descendants(paragraph)) {
+    if (element.namespaceUri() !== WML_NAMESPACE || insideProperties(element, paragraph)) continue;
+    if (element.localName === "fldChar") {
+      const type = wordAttr(element, "fldCharType");
+      if (type === "begin") depth += 1;
+      else if (type === "end") depth = Math.max(0, depth - 1);
+      continue;
+    }
+    const inField = depth > 0 || element.parent?.parent?.localName === "fldSimple" || element.parent?.localName === "fldSimple";
+    const length = element.localName === "t" ? element.text().length : ["tab", "br", "cr"].includes(element.localName) ? 1 : 0;
+    if (element.localName === "t" && !inField) candidates.push({ element, start: offset, end: offset + length });
+    offset += length;
+  }
+  const target = candidates.find((candidate) => candidate.start <= from && to <= candidate.end && !inserted.includes("\n"));
+  if (!target)
+    throw new DocxLensError(
+      "DOCX_REGION_READ_ONLY",
+      "This header or footer holds a page number or another Word field next to the change. Change one stretch of its words at a time, or edit it in Word.",
+    );
+  const value = target.element.text();
+  const next = value.slice(0, from - target.start) + inserted + value.slice(to - target.start);
+  for (const child of [...target.element.children]) target.element.removeChild(child);
+  target.element.appendChild(new XmlText(next));
+  if (/^\s|\s$/u.test(next)) target.element.setAttribute("xml:space", "preserve");
+}
+
+/**
+ * Write a header or footer's new text, one line per paragraph. Lines that did
+ * not change keep their paragraph exactly; a changed line next to a field is
+ * spliced into its own run; only a header of plain paragraphs gains or loses
+ * paragraphs when the writer adds or removes lines.
+ */
+function setChromeText(root: XmlElement, text: string) {
+  const paragraphs = chromeParagraphs(root);
+  const before = paragraphs.map((paragraph) => projectedWmlText(paragraph));
+  if (before.join("\n") === text) return;
+  const lines = text.split("\n");
+  if (lines.length === paragraphs.length) {
+    paragraphs.forEach((paragraph, index) => {
+      if (before[index] === lines[index]) return;
+      if (chromeParagraphIsRich(paragraph) || hasWml(paragraph, "br", "cr")) spliceChromeParagraph(paragraph, before[index]!, lines[index]!);
+      else setChromeParagraphText(paragraph, lines[index]!);
+    });
+    return;
+  }
+  const shallow = paragraphs.every((paragraph) => paragraph.parent === root);
+  if (!shallow || paragraphs.some((paragraph) => chromeParagraphIsRich(paragraph) || hasWml(paragraph, "br", "cr")))
+    throw new DocxLensError(
+      "DOCX_REGION_READ_ONLY",
+      "This header or footer is laid out in Word (a table, a field or line breaks). Change its words without adding or removing lines, or edit it in Word.",
+    );
+  const template = paragraphs.at(-1);
+  lines.forEach((line, index) => {
+    let paragraph = paragraphs[index];
+    if (!paragraph) {
+      paragraph = new XmlElement("p", template?.prefix ?? root.prefix);
+      const after = paragraphs[index - 1] ?? null;
+      root.insertBefore(paragraph, after ? root.children[root.children.indexOf(after) + 1] ?? null : null);
+      const properties = template?.find(WML_NAMESPACE, "pPr");
+      if (properties) paragraph.appendChild(properties.clone());
+      const firstRun = template ? shallowWmlChildren(template, "r")[0]?.find(WML_NAMESPACE, "rPr") : undefined;
+      if (firstRun) {
+        const run = new XmlElement("r", paragraph.prefix);
+        paragraph.appendChild(run);
+        run.appendChild(firstRun.clone());
+      }
+      paragraphs[index] = paragraph;
+    }
+    if (before[index] !== line) setChromeParagraphText(paragraph, line);
+  });
+  for (const extra of paragraphs.slice(lines.length)) root.removeChild(extra);
 }
 
 function referencePart(document: Document, reference: XmlElement) {
@@ -3210,7 +3352,7 @@ async function updateHeaderFooter(
       reference.setAttributeNs(OFFICE_RELATIONSHIP_NAMESPACE, "id", next.relId);
       part = next.pd.part;
       const partDom = next.pd.doc.root;
-      setPlainChromeText(partDom, operation.text);
+      setChromeText(partDom, operation.text);
       internal.markDirty(next.pd);
       document._markMainDirty();
       return;
@@ -3233,12 +3375,12 @@ async function updateHeaderFooter(
     reference.setAttributeNs(WML_NAMESPACE, "type", "default");
     reference.setAttributeNs(OFFICE_RELATIONSHIP_NAMESPACE, "id", next.relId);
     part = next.pd.part;
-    setPlainChromeText(next.pd.doc.root, operation.text);
+    setChromeText(next.pd.doc.root, operation.text);
     internal.markDirty(next.pd);
   } else {
     const loaded = internal.headerFooterParts().find((candidate) => candidate.pd.part.name === part!.name);
     if (!loaded) throw new DocxLensError("DOCX_UNSUPPORTED_EDIT", `The existing ${kind} part cannot be loaded safely.`);
-    setPlainChromeText(loaded.pd.doc.root, operation.text);
+    setChromeText(loaded.pd.doc.root, operation.text);
     internal.markDirty(loaded.pd);
   }
   document._markMainDirty();

@@ -498,6 +498,7 @@ export function paragraphFormatFromAttrs(value) {
     shading: colorHex(attrs.frameShading) ?? null,
     ...(attrs.pageBreak === true ? { pageBreak: true } : {}),
     ...(attrs.pageBreakBefore === true ? { pageBreakBefore: true } : {}),
+    ...(attrs.sectionBreak === true ? { sectionBreak: true } : {}),
   };
 }
 
@@ -701,11 +702,46 @@ function isPageBreakBlock(blockValue) {
   );
 }
 
+// An empty Word paragraph drawn as a single bottom border is a divider line, the way Word's
+// own "---" autoformat and most templates make one.
+function isDividerBlock(blockValue) {
+  const block = record(blockValue);
+  const attrs = record(block.attrs);
+  return (
+    block.type === "paragraph" &&
+    record(attrs.paragraphFormat).border === "bottom" &&
+    !record(attrs.paragraphFormat).pageBreak &&
+    !String(block.text ?? "").trim() &&
+    !(Array.isArray(block.inlineContent) && block.inlineContent.some((item) => record(item).kind !== "text")) &&
+    !record(attrs.list).numId &&
+    !attrs.nativeReadOnly
+  );
+}
+
+// An empty Word paragraph that ends a section.
+function isSectionBreakBlock(blockValue) {
+  const block = record(blockValue);
+  return (
+    block.type === "paragraph" &&
+    record(record(block.attrs).paragraphFormat).sectionBreak === true &&
+    !String(block.text ?? "").trim()
+  );
+}
+
+/** The editor node a Word paragraph stands for when it is a break or a divider, not text. */
+function breakNodeType(blockValue) {
+  if (isSectionBreakBlock(blockValue)) return "sectionBreak";
+  if (isPageBreakBlock(blockValue)) return "pageBreak";
+  if (isDividerBlock(blockValue)) return "horizontalRule";
+  return undefined;
+}
+
 function blockToJson(blockValue, index, nativeBinding) {
   const attrs = record(record(blockValue).attrs);
-  if (isPageBreakBlock(blockValue)) {
+  const breakType = breakNodeType(blockValue);
+  if (breakType) {
     const id = record(blockValue).id;
-    return { type: "pageBreak", attrs: { blockId: typeof id === "string" && id ? id : `block-${index + 1}` } };
+    return { type: breakType, attrs: { blockId: typeof id === "string" && id ? id : `block-${index + 1}` } };
   }
   const node = plainOrRichBlockToJson(blockValue, index, nativeBinding);
   const formatted = withBlockFormatting(node, attrs);
@@ -1232,13 +1268,13 @@ export function documentBlocksFromJson(json) {
 
     // Blocks Word holds as paragraph properties: a divider is a bottom border, a page break an
     // empty paragraph holding one.
-    if (node?.type === "horizontalRule" || node?.type === "pageBreak")
+    if (node?.type === "horizontalRule" || node?.type === "pageBreak" || node?.type === "sectionBreak")
       return {
         id,
         type: "paragraph",
         text: "",
         attrs: {
-          paragraphFormat: paragraphFormatFromAttrs(node.type === "pageBreak" ? { pageBreak: true } : { frameBorder: "bottom" }),
+          paragraphFormat: paragraphFormatFromAttrs(node.type === "pageBreak" ? { pageBreak: true } : node.type === "sectionBreak" ? { sectionBreak: true } : { frameBorder: "bottom" }),
         },
       };
     if (node?.type === "taskList") {
@@ -1484,7 +1520,7 @@ export function documentContentToProseMirrorJson(contentValue) {
             for (const covered of coveredBlockIds(node)) coveredBy.set(covered, node);
           // One block with no node here must not cost the others their structure:
           // a mirror cannot describe a list's items, so a rebuild would run them together.
-          if (node && !duplicateIds.has(block.id) && (blockMirrorsNode(block, node, byId) || (node.type === "pageBreak" && isPageBreakBlock(block)))) return node;
+          if (node && !duplicateIds.has(block.id) && (blockMirrorsNode(block, node, byId) || (node.type === breakNodeType(block)))) return node;
           return blockToJson(block, index, content.nativeBinding);
         }
         if (emittedReferenceIds.has(block.id))
@@ -1516,17 +1552,17 @@ export function documentContentToProseMirrorJson(contentValue) {
       });
       return {
         ...existing,
-        content: renumberWordLists([...rebuiltContent, ...(before.get(null) ?? []).reverse()], byId),
+        content: shapeWordLists([...rebuiltContent, ...(before.get(null) ?? []).reverse()], byId),
       };
     }
     return {
       ...existing,
-      content: renumberWordLists(existingContent.flatMap((node) => {
+      content: shapeWordLists(existingContent.flatMap((node) => {
         const blockId = node?.attrs?.blockId;
         const block =
           typeof blockId === "string" ? byId.get(blockId) : undefined;
         if (referenceNodes.has(node)) return retainCanonicalReference(node, block);
-        if (node?.type === "pageBreak" && block && isPageBreakBlock(block)) return node;
+        if (block && node?.type && node.type === breakNodeType(block)) return node;
         // A mirror that is exactly this node's own projection says nothing
         // new. Rebuilding from it would drop what the mirror cannot carry
         // (an inline code mark beside an equation, a colour, a task state).
@@ -1588,7 +1624,7 @@ export function documentContentToProseMirrorJson(contentValue) {
   const source = blocks.length ? blocks : [{ id: "intro", type: "paragraph", text: "" }];
   return {
     type: "doc",
-    content: renumberWordLists(
+    content: shapeWordLists(
       source.map((block, index) => blockToJson(block, index, content.nativeBinding)),
       blockIndex(source),
     ),
@@ -1646,4 +1682,65 @@ export function renumberWordLists(nodes, blockById) {
     counters.set(list.numId, levels);
     return node.attrs?.start === first ? node : { ...node, attrs: { ...node.attrs, start: first } };
   });
+}
+
+/** The Word list and level of a node that is one Word list paragraph, or null. */
+function wordListParagraph(node, blockById) {
+  if ((node?.type !== "bulletList" && node?.type !== "orderedList") || node.attrs?.nativeReadOnly === true) return null;
+  if (node.content?.length !== 1 || node.content[0]?.type !== "listItem") return null;
+  if ((node.content[0].content ?? []).some((child) => child?.type === "bulletList" || child?.type === "orderedList")) return null;
+  const blockId = node.attrs?.blockId;
+  const list = record(record(typeof blockId === "string" ? blockById.get(blockId)?.attrs : undefined).list);
+  return typeof list.numId === "string" && list.numId ? { numId: list.numId, level: wordListLevel(list), blockId } : null;
+}
+
+/**
+ * Consecutive paragraphs of one Word list open as one list node, nested by
+ * their Word level, so Enter, Tab and Backspace work on the list as a whole.
+ * The first paragraph's id stays the list node's; every later one is its
+ * list item's, where `documentBlocksFromJson` reads it back. A nested list
+ * node takes no id and no level: its place in the tree is its level.
+ */
+function groupWordLists(nodes, blockById) {
+  const output = [];
+  let stack = [];
+  const item = (node, info) => ({ ...node.content[0], attrs: { ...node.content[0].attrs, blockId: info.blockId } });
+  const nested = (node, info) => {
+    const { listLevel: _level, blockId: _id, ...attrs } = node.attrs ?? {};
+    return { ...node, attrs, content: [item(node, info)] };
+  };
+  for (const node of nodes) {
+    const info = wordListParagraph(node, blockById);
+    if (!info) {
+      stack = [];
+      output.push(node);
+      continue;
+    }
+    while (stack.length && (stack.at(-1).level > info.level || stack.at(-1).numId !== info.numId)) stack.pop();
+    // The same level in another shape (bullets under numbers) is its own list beside it.
+    if (stack.at(-1)?.level === info.level && stack.at(-1).list.type !== node.type) stack.pop();
+    // A level Word skips has no place in the tree: that item opens its own list at its level.
+    if (stack.length && info.level > stack.at(-1).level + 1) stack = [];
+    const top = stack.at(-1);
+    if (top && top.level === info.level) {
+      top.list.content.push(item(node, info));
+      continue;
+    }
+    if (top) {
+      const parentItem = top.list.content.at(-1);
+      const child = nested(node, info);
+      top.list.content[top.list.content.length - 1] = { ...parentItem, content: [...(parentItem.content ?? []), child] };
+      stack.push({ ...info, list: child });
+      continue;
+    }
+    const root = { ...node, content: [...node.content] };
+    output.push(root);
+    stack = [{ ...info, list: root }];
+  }
+  return output;
+}
+
+/** Word list paragraphs as the editor shows them: numbered as Word counts, grouped as Word draws them. */
+export function shapeWordLists(nodes, blockById) {
+  return groupWordLists(renumberWordLists(nodes, blockById), blockById);
 }

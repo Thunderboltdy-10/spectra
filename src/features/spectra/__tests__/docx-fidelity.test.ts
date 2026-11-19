@@ -60,8 +60,9 @@ describe("Word fidelity", () => {
 
     const back = (await importDocxPayload(bytes)).json;
     expect(marksOf(back, "2")).toContain("superscript");
+    // The Word list opens again as one list of two items.
     const lists = (back.content ?? []).filter((node) => node.type === "orderedList");
-    expect(lists.map((node) => node.attrs?.start)).toEqual([1, 2]);
+    expect(lists.map((node) => [node.attrs?.start, node.content?.length])).toEqual([[1, 2]]);
   });
 
   it("syncs the same content into a linked Word file, merged table included", async () => {
@@ -104,13 +105,18 @@ describe("Word fidelity", () => {
     expect(numbering).toMatch(/<w:lvl w:ilvl="1"><w:start w:val="1"\/><w:numFmt w:val="bullet"\/>/);
 
     const back = (await importDocxPayload(bytes)).json.content ?? [];
-    const summary = back.filter((node) => String(node.type).endsWith("List")).map((node) => [node.type, node.attrs?.start ?? null, node.attrs?.listLevel ?? 0]);
-    expect(summary).toEqual([
-      ["orderedList", 3, 0],
-      ["orderedList", 4, 0],
-      ["bulletList", null, 1],
-      ["bulletList", null, 1],
-      ["orderedList", 1, 2],
+    // Lists as [type, start, level, items]; items as [text, ...nested lists].
+    const outline = (node: DocumentJsonNode): unknown => node.type === "listItem"
+      ? [node.content?.[0]?.content?.[0]?.text, ...(node.content ?? []).slice(1).map(outline)]
+      : [node.type, node.attrs?.start ?? null, node.attrs?.listLevel ?? 0, (node.content ?? []).map(outline)];
+    expect(back.filter((node) => String(node.type).endsWith("List")).map(outline)).toEqual([
+      ["orderedList", 3, 0, [
+        ["three"],
+        ["four", ["bulletList", null, 0, [
+          ["nested a"],
+          ["nested b", ["orderedList", 1, 0, [["deep 1"]]]],
+        ]]],
+      ]],
     ]);
     expect(back.map((node) => node.type)).toContain("pageBreak");
     expect(back.some((node) => node.type === "paragraph" && !node.content?.length)).toBe(false);

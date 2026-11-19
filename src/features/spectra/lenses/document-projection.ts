@@ -11,7 +11,7 @@ import {
   paragraphFormatFromAttrs as sharedParagraphFormatFromAttrs,
   authoredSemanticsEqual,
   restoreDocxEquationCarryMetadata,
-  renumberWordLists as sharedRenumberWordLists,
+  shapeWordLists as sharedShapeWordLists,
   wordListShell as sharedWordListShell,
   CELL_PARAGRAPH_BREAK,
 } from "../../../../shared/document-projection.mjs";
@@ -133,13 +133,13 @@ export function wordListShell(list: unknown, attrs: Record<string, unknown>) {
   return sharedWordListShell(list, attrs) as { type: "bulletList" | "orderedList"; attrs: Record<string, unknown> };
 }
 
-/** Number one-item Word lists on from the items before them, per Word list and level. */
-export function renumberWordLists<T extends { type?: string; attrs?: Record<string, unknown> }>(
+/** Word list paragraphs numbered as Word counts them and grouped into nested lists as Word draws them. */
+export function shapeWordLists<T extends { type?: string; attrs?: Record<string, unknown> }>(
   nodes: readonly T[],
   blocks: ReadonlyArray<Record<string, unknown>>,
 ): T[] {
   const byId = new Map(blocks.flatMap((block) => typeof block.id === "string" && block.id ? [[block.id, block] as const] : []));
-  return sharedRenumberWordLists(nodes, byId) as T[];
+  return sharedShapeWordLists(nodes, byId) as T[];
 }
 
 export function documentNodeText(node?: DocumentJsonNode): string {
@@ -624,6 +624,7 @@ const PARAGRAPH_FORMAT_FIELDS = [
   "shading",
   "pageBreak",
   "pageBreakBefore",
+  "sectionBreak",
 ] as const;
 
 /**
@@ -651,6 +652,11 @@ function changedFormatFields<T extends Record<string, unknown>>(
     if (next !== current) patch[field] = incoming[field];
   }
   return Object.keys(patch).length ? (patch as T) : undefined;
+}
+
+function wordListLevelOf(block: DocxProjection["blocks"][number] | undefined) {
+  const list = block?.type === "list" ? block.attrs?.list as { numId?: unknown; level?: unknown } | undefined : undefined;
+  return typeof list?.numId === "string" ? Math.max(0, Math.min(8, Number(list.level) || 0)) : undefined;
 }
 
 export function docxOperationsBetween(
@@ -853,6 +859,11 @@ export function docxOperationsBetween(
     if (runFormat) operations.push({ kind: "format-runs", regionId: block.id, format: runFormat });
     const paragraphFormat = changedFormatFields<DocxParagraphFormat>(old?.attrs?.paragraphFormat, block.attrs?.paragraphFormat, PARAGRAPH_FORMAT_FIELDS);
     if (paragraphFormat) operations.push({ kind: "format-paragraph", regionId: block.id, format: paragraphFormat });
+    // Tab and Shift+Tab in a Word list move the item to another level of the same list.
+    const oldLevel = wordListLevelOf(old);
+    const newLevel = wordListLevelOf(block);
+    if (oldLevel !== undefined && newLevel !== undefined && oldLevel !== newLevel)
+      operations.push({ kind: "format-paragraph", regionId: block.id, format: { listLevel: newLevel } });
   }
   operations.push(
     ...[...previous.keys()].map((regionId) => ({
@@ -1060,12 +1071,23 @@ export function docxProjectionFromContent(
   const insertLike = new Map<string, { likeRegionId: string; listLevel?: number }>();
   const mergeBlock = (requested: DocxProjection["blocks"][number]) => {
     const previous = baseById.get(requested.id);
-    const like = !previous && typeof requested.attrs?.listItemOf === "string" ? baseById.get(requested.attrs.listItemOf) : undefined;
+    const root = typeof requested.attrs?.listItemOf === "string" ? baseById.get(requested.attrs.listItemOf) : undefined;
+    const like = !previous ? root : undefined;
     const incoming = requested.attrs?.listItemOf !== undefined || requested.attrs?.listDepth !== undefined
       ? (() => {
           const { listItemOf: _of, listDepth, ...attrs } = requested.attrs ?? {};
+          // An item of a Word list sits as deep below the list's first item as the editor nests it.
+          const rootList = root?.attrs?.list as { numId?: unknown; level?: unknown } | undefined;
+          const previousList = previous?.attrs?.list as { numId?: unknown; level?: unknown } | undefined;
+          if (previous && typeof previousList?.numId === "string" && previousList.numId === rootList?.numId) {
+            const level = Math.min(8, (Number(rootList.level) || 0) + (typeof listDepth === "number" ? listDepth : 0));
+            if (level !== (Number(previousList.level) || 0))
+              return { ...requested, attrs: { ...previous.attrs, ...attrs, list: { ...previousList, level } } };
+          }
           if (!like) return { ...requested, attrs };
-          const level = typeof listDepth === "number" ? Math.min(8, listDepth) : undefined;
+          // Depth counts from the list's first item, which sits at its own Word level.
+          const rootLevel = Number((like.attrs?.list as { level?: unknown } | undefined)?.level) || 0;
+          const level = typeof listDepth === "number" ? Math.min(8, rootLevel + listDepth) : undefined;
           insertLike.set(requested.id, { likeRegionId: like.id, ...(level !== undefined ? { listLevel: level } : {}) });
           // The neighbour's paragraph shape, not its runs: the new words are plain.
           const inherited = Object.fromEntries(Object.entries(like.attrs ?? {})

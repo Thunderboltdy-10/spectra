@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { documentJsonFromContent } from "../components/artifact-studio";
-import { documentContentToProseMirrorJson } from "../lenses/document-projection";
+import { documentBlocksFromJson, documentContentToProseMirrorJson, type DocumentJsonNode } from "../lenses/document-projection";
 
 const item = (id: string, text: string, list: Record<string, unknown>) => ({
   id, type: "list", text,
@@ -14,14 +14,20 @@ const blocks = [
   item("docx:paragraph:00000004", "Three", {}),
   { id: "docx:paragraph:00000005", type: "list", text: "Dot", inlineContent: [{ kind: "text", text: "Dot" }], attrs: { list: { numId: "3", level: 0, isBullet: true } } },
 ];
-const shape = (json: { content?: Array<{ type?: string; attrs?: Record<string, unknown> }> }) =>
-  json.content?.map((node) => [node.type, node.attrs?.start ?? null, node.attrs?.type ?? null, node.attrs?.listLevel ?? null]);
+type Node = { type?: string; text?: string; attrs?: Record<string, unknown>; content?: Node[] };
+/** Lists as [type, start, numbering, level, items]; items as [id, text, ...nested lists]. */
+const outline = (node: Node): unknown => node.type === "listItem"
+  ? [node.attrs?.blockId ?? null, node.content?.[0]?.content?.[0]?.text ?? "", ...(node.content ?? []).slice(1).map(outline)]
+  : [node.type, node.attrs?.start ?? null, node.attrs?.type ?? null, node.attrs?.listLevel ?? null, (node.content ?? []).map(outline)];
+const shape = (json: Node) => json.content?.map(outline);
+// One Word list is one list node: "Two a" nests under "Two", and "Three" counts on as 3.
 const expected = [
-  ["orderedList", 1, null, null],
-  ["orderedList", 2, null, null],
-  ["orderedList", 1, "a", 1],
-  ["orderedList", 3, null, null],
-  ["bulletList", null, null, null],
+  ["orderedList", 1, null, null, [
+    [null, "One"],
+    ["docx:paragraph:00000002", "Two", ["orderedList", 1, "a", null, [["docx:paragraph:00000003", "Two a"]]]],
+    ["docx:paragraph:00000004", "Three"],
+  ]],
+  ["bulletList", null, null, null, [[null, "Dot"]]],
 ];
 
 describe("Word numbered lists open numbered on every path", () => {
@@ -38,5 +44,10 @@ describe("Word numbered lists open numbered on every path", () => {
     expect(shape(documentJsonFromContent({ blocks }, "Worksheet") as never)).toEqual(expected);
     const tiptap = documentContentToProseMirrorJson({ blocks });
     expect(shape(documentJsonFromContent({ blocks, tiptap }, "Worksheet") as never)).toEqual(expected);
+  });
+
+  it("reads every grouped item back as its own Word paragraph", () => {
+    const json = documentContentToProseMirrorJson({ blocks }) as DocumentJsonNode;
+    expect(documentBlocksFromJson(json).map((block) => [block.id, block.text])).toEqual(blocks.map((block) => [block.id, block.text]));
   });
 });

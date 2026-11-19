@@ -73,7 +73,7 @@ describe("Word table cells keep their paragraphs", () => {
     // Enter at the end of the cell: a fourth paragraph.
     cellNode(json)!.content!.push({ type: "paragraph", content: [{ type: "text", text: "Step four" }] });
     const blocks = documentBlocksFromJson(json);
-    const { operations } = docxProjectionFromContent({ ...base, blocks }, base);
+    const { operations } = docxProjectionFromContent({ ...base, tiptap: json, blocks, nativeProjectionComplete: true }, base);
     expect(operations.map((operation) => operation.kind)).toEqual(["edit-table-cell"]);
     const output = await docxLens.mutate(opened.preservedCarry, { kind: "ai-edit", operations });
     expect(await lastCellParagraphs(output)).toEqual([

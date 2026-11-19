@@ -32,7 +32,7 @@ import type { Editor as TiptapEditor, JSONContent } from "@tiptap/core";
 import {
   documentBlocksFromJson,
   docxRichBlockToJson,
-  renumberWordLists,
+  shapeWordLists,
   wordListShell,
 } from "../lenses/document-projection";
 import type { LucideIcon } from "lucide-react";
@@ -1547,7 +1547,7 @@ export function documentJsonFromContent(
     const normalized = normalizeDocumentInlineMarkup(tiptap as JSONContent);
     const semanticallyMapped = {
       ...normalized,
-      content: renumberWordLists(normalized.content?.map(nativeBlockSemantics) ?? [], blocks),
+      content: shapeWordLists(normalized.content?.map(nativeBlockSemantics) ?? [], blocks),
     };
     if (!protectedIds.size) return semanticallyMapped;
     return {
@@ -1714,7 +1714,7 @@ export function documentJsonFromContent(
           },
           { type: "paragraph" },
         ];
-  return { type: "doc", content: renumberWordLists(contentNodes, blocks) };
+  return { type: "doc", content: shapeWordLists(contentNodes, blocks) };
 }
 
 export const blocksFromJson = documentBlocksFromJson;

@@ -85,6 +85,10 @@ const docxParagraphFormatSchema = z
     /** Read from the file. A paragraph that only holds a page break, or starts a page. */
     pageBreak: z.boolean().nullable().optional(),
     pageBreakBefore: z.boolean().nullable().optional(),
+    /** An empty paragraph that ends a Word section (its `w:pPr` holds `w:sectPr`). */
+    sectionBreak: z.boolean().nullable().optional(),
+    /** Written only: the Word level (`w:ilvl`) a list paragraph moves to. */
+    listLevel: z.number().int().min(0).max(8).optional(),
   })
   .strict();
 

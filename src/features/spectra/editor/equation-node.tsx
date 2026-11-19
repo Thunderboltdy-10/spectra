@@ -62,7 +62,7 @@ function InlineEquationView({ node, editor, getPos, selected, updateAttributes }
 
 export const Equation = Node.create({
   name: "equation", group: "block", atom: true, draggable: true, selectable: true,
-  addAttributes() { return { latex: { default: "" }, display: { default: "block" }, alignment: { default: "center" }, nativeReadOnly: { default: false } }; },
+  addAttributes() { return { latex: { default: "" }, display: { default: "block" }, alignment: { default: "center" }, ommlRef: { default: null, rendered: false }, nativeReadOnly: { default: false } }; },
   parseHTML() { return [{ tag: "div[data-equation]" }, { tag: "span[data-equation]" }]; },
   renderHTML({ HTMLAttributes }) { return [HTMLAttributes.display === "inline" ? "span" : "div", mergeAttributes(HTMLAttributes, { "data-equation": "true" })]; },
   addNodeView() {
@@ -72,7 +72,7 @@ export const Equation = Node.create({
 
 export const InlineEquation = Node.create({
   name: "inlineEquation", group: "inline", inline: true, atom: true, selectable: true,
-  addAttributes() { return { latex: { default: "" }, nativeReadOnly: { default: false } }; },
+  addAttributes() { return { latex: { default: "" }, display: { default: "inline", rendered: false }, ommlRef: { default: null, rendered: false }, nativeReadOnly: { default: false } }; },
   parseHTML() { return [{ tag: "span[data-inline-equation]" }]; },
   renderHTML({ HTMLAttributes }) { return ["span", mergeAttributes(HTMLAttributes, { "data-inline-equation": "true" })]; },
   addNodeView() {

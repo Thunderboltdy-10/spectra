@@ -622,6 +622,7 @@ function changedFormatFields<T extends Record<string, unknown>>(
 export function docxOperationsBetween(
   before: DocxProjection,
   after: DocxProjection,
+  insertLike?: ReadonlyMap<string, { likeRegionId: string; listLevel?: number }>,
 ): DocxOperation[] {
   const previous = new Map(before.blocks.map((block) => [block.id, block]));
   after = { ...after, blocks: after.blocks.map((block) => {
@@ -688,6 +689,7 @@ export function docxOperationsBetween(
           ? { style: block.attrs.styleId }
           : {}),
         ...(block.type === "list" && isNewDocxList(block.attrs?.list) ? { list: block.attrs.list } : {}),
+        ...(insertLike?.get(block.id) ?? {}),
       });
       const equation = block.inlineContent?.find((item) => item.kind === "equation");
       if (equation) operations.push({
@@ -804,7 +806,8 @@ export function docxOperationsBetween(
   });
   const oldBlocks = new Map(before.blocks.map((block) => [block.id, block]));
   for (const block of after.blocks) {
-    if (block.type === "table") continue;
+    // A paragraph shaped like its neighbour already carries that shape.
+    if (block.type === "table" || insertLike?.has(block.id)) continue;
     const old = oldBlocks.get(block.id);
     const style = block.attrs?.styleId;
     if (old && typeof style === "string" && style !== old.attrs?.styleId)
@@ -1016,14 +1019,34 @@ export function docxProjectionFromContent(
   const parsedContent = documentContentSchema.parse(wordRepresentableBlocks(withUntouched));
   const parsed = { ...parsedContent, blocks: expandNewDocxListBlocks(parsedContent.blocks,
     parsedContent.tiptap, new Set(base.blocks.map((block) => block.id))) };
-  const mergeBlock = (incoming: DocxProjection["blocks"][number]) => {
-    const previous = baseById.get(incoming.id);
+  // Enter in a Word list makes a paragraph shaped like its neighbour item.
+  const insertLike = new Map<string, { likeRegionId: string; listLevel?: number }>();
+  const mergeBlock = (requested: DocxProjection["blocks"][number]) => {
+    const previous = baseById.get(requested.id);
+    const like = !previous && typeof requested.attrs?.listItemOf === "string" ? baseById.get(requested.attrs.listItemOf) : undefined;
+    const incoming = requested.attrs?.listItemOf !== undefined || requested.attrs?.listDepth !== undefined
+      ? (() => {
+          const { listItemOf: _of, listDepth, ...attrs } = requested.attrs ?? {};
+          if (!like) return { ...requested, attrs };
+          const level = typeof listDepth === "number" ? Math.min(8, listDepth) : undefined;
+          insertLike.set(requested.id, { likeRegionId: like.id, ...(level !== undefined ? { listLevel: level } : {}) });
+          // The neighbour's paragraph shape, not its runs: the new words are plain.
+          const inherited = Object.fromEntries(Object.entries(like.attrs ?? {})
+            .filter(([key]) => key === "styleId" || key === "list" || key === "paragraphFormat"));
+          const list = inherited.list && typeof inherited.list === "object" && level !== undefined
+            ? { ...(inherited.list as Record<string, unknown>), level }
+            : inherited.list;
+          return { ...requested, attrs: { ...inherited, ...(list ? { list } : {}), ...attrs } };
+        })()
+      : requested;
     if (previous && isExactly(previous, incoming)) return previous;
     if (previous && isReadOnlyProjectionPrefix(previous, incoming))
       return previous;
-    const recovered = previous
-      ? restoreDocxBlockCarryMetadata(previous, incoming)
-      : incoming;
+    // A new block has nothing to carry, but its equations may still name OMML by reference.
+    const recovered = restoreDocxBlockCarryMetadata(
+      previous ?? { ...incoming, inlineContent: undefined, richRows: undefined },
+      incoming,
+    );
     const inlineContent = canonicalRichContent(recovered.inlineContent);
     const blockEquation = inlineContent?.find((item) => item.kind === "equation");
     // ProseMirror does not retain Word's invisible trailing run whitespace in
@@ -1113,7 +1136,7 @@ export function docxProjectionFromContent(
     ...(parsed.pageSetup ? { pageSetup: parsed.pageSetup } : base.pageSetup ? { pageSetup: base.pageSetup } : {}),
     nativeBinding: base.nativeBinding,
   });
-  const inferredOperations = docxOperationsBetween(base, projection);
+  const inferredOperations = docxOperationsBetween(base, projection, insertLike);
   const explicitOperations = parsed.nativeIntent
     ? parsed.nativeIntent.kind === "ai-edit"
       ? parsed.nativeIntent.operations

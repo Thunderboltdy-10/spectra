@@ -11,6 +11,66 @@ function record(value) {
     : {};
 }
 
+/**
+ * A short, stable name for an exact native OMML subtree. The editor and Yjs
+ * carry this instead of the XML (which is a third or more of an equation-heavy
+ * paper); the lens finds the XML again in the base projection it writes from.
+ */
+export function ommlRefFor(xml) {
+  if (typeof xml !== "string" || !xml) return undefined;
+  let a = 0x811c9dc5;
+  let b = 0x01000193 ^ xml.length;
+  for (let index = 0; index < xml.length; index += 1) {
+    const code = xml.charCodeAt(index);
+    a = Math.imul(a ^ code, 0x01000193) >>> 0;
+    b = Math.imul(b ^ code, 0x5bd1e995) >>> 0;
+  }
+  return `${a.toString(16).padStart(8, "0")}${b.toString(16).padStart(8, "0")}`;
+}
+
+/**
+ * Put each equation's Word markup back into editor JSON. A copy that leaves
+ * Word (an import, an export) has no projection to look a reference up in.
+ */
+export function embedOmmlInJson(json, projection) {
+  const byRef = new Map();
+  const collect = (items) => {
+    for (const item of items ?? [])
+      if (item?.kind === "equation" && typeof item.ommlXml === "string") byRef.set(ommlRefFor(item.ommlXml), item);
+  };
+  for (const block of projection?.blocks ?? []) {
+    collect(block.inlineContent);
+    for (const row of block.richRows ?? []) for (const cell of row) collect(cell);
+  }
+  const visit = (node) => {
+    if (!node || typeof node !== "object") return node;
+    const ref = node.attrs?.ommlRef;
+    const equation = (node.type === "equation" || node.type === "inlineEquation") && typeof ref === "string" ? byRef.get(ref) : undefined;
+    const { ommlRef: _ref, ...attrs } = node.attrs ?? {};
+    return {
+      ...node,
+      ...(equation ? { attrs: { ...attrs, ommlXml: equation.ommlXml, ommlSourceLatex: equation.ommlSourceLatex ?? equation.latex } } : {}),
+      ...(Array.isArray(node.content) ? { content: node.content.map(visit) } : {}),
+    };
+  };
+  return visit(json);
+}
+
+/** A deterministic eight-digit `w14:paraId` (31-bit, as Word requires) for a Spectra block. */
+export function wordParagraphIdFor(seed) {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < seed.length; index += 1) {
+    hash ^= seed.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return Math.max(1, (hash >>> 0) & 0x7fffffff).toString(16).padStart(8, "0");
+}
+
+function ommlAttrs(item) {
+  const ref = typeof item?.ommlRef === "string" && item.ommlRef ? item.ommlRef : ommlRefFor(item?.ommlXml);
+  return ref ? { ommlRef: ref } : {};
+}
+
 function inlineText(value) {
   return value ? [{ type: "text", text: value }] : undefined;
 }
@@ -102,7 +162,7 @@ export function authoredSemanticValue(value, parentKey) {
         (key === "partName" || key === "assetId" || key === "occurrenceId")
       )
         return [];
-      if (key === "ommlXml" || key === "ommlSourceLatex") return [];
+      if (key === "ommlXml" || key === "ommlSourceLatex" || key === "ommlRef") return [];
       if (source.kind === "citation" && key === "instruction") return [];
       if (key === "nativePath" || key === "nativeReadOnly" || key === "nativeStyleId" || key === "readOnlyReason")
         return [];
@@ -175,25 +235,32 @@ export function restoreDocxEquationCarryMetadata(previousContent, nextContent) {
     ? previousContent.filter((item) => item?.kind === "equation")
     : [];
   const used = new Set();
+  const carries = (candidate, index, item) =>
+    !used.has(index) &&
+    typeof candidate?.ommlXml === "string" &&
+    typeof candidate?.ommlSourceLatex === "string" &&
+    candidate.ommlSourceLatex === item.latex;
   return nextContent.map((item) => {
     if (
       item?.kind !== "equation" ||
       typeof item.latex !== "string" ||
       typeof item.ommlXml === "string"
-    )
-      return item;
-    const matchIndex = previousEquations.findIndex(
-      (candidate, index) =>
-        !used.has(index) &&
-        typeof candidate?.ommlXml === "string" &&
-        typeof candidate?.ommlSourceLatex === "string" &&
-        candidate.ommlSourceLatex === item.latex,
-    );
-    if (matchIndex < 0) return item;
+    ) {
+      if (item?.kind !== "equation" || !("ommlRef" in item)) return item;
+      const { ommlRef: _ref, ...rest } = item;
+      return rest;
+    }
+    const { ommlRef, ...rest } = item;
+    // The subtree this equation was opened from, when it still says the same thing.
+    let matchIndex = typeof ommlRef === "string"
+      ? previousEquations.findIndex((candidate, index) => carries(candidate, index, item) && ommlRefFor(candidate.ommlXml) === ommlRef)
+      : -1;
+    if (matchIndex < 0) matchIndex = previousEquations.findIndex((candidate, index) => carries(candidate, index, item));
+    if (matchIndex < 0) return rest;
     used.add(matchIndex);
     const match = previousEquations[matchIndex];
     return {
-      ...item,
+      ...rest,
       ommlXml: match.ommlXml,
       ommlSourceLatex: match.ommlSourceLatex,
     };
@@ -227,7 +294,14 @@ export function docxRichInlineToJson(content, binding, nativeReadOnly = false) {
       if (!item.text) return [];
       const marks = marksFromRunFormat(item.format);
       if (item.href) marks.push({ type: "link", attrs: { href: item.href } });
-      return [{ type: "text", text: item.text, ...(marks.length ? { marks } : {}) }];
+      const withMarks = marks.length ? { marks } : {};
+      // Word's line break (w:br) is the editor's hard break, not a newline
+      // character the browser would fold into a space. It carries no marks:
+      // Yjs keeps none on it, so the break takes its neighbour's on the way back.
+      return item.text.split("\n").flatMap((part, index) => [
+        ...(index ? [{ type: "hardBreak" }] : []),
+        ...(part ? [{ type: "text", text: part, ...withMarks }] : []),
+      ]);
     }
     if (item.kind === "equation")
       return [
@@ -236,8 +310,7 @@ export function docxRichInlineToJson(content, binding, nativeReadOnly = false) {
           attrs: {
             latex: item.latex,
             display: item.display === "block" ? "block" : "inline",
-            ...(typeof item.ommlXml === "string" ? { ommlXml: item.ommlXml } : {}),
-            ...(typeof item.ommlSourceLatex === "string" ? { ommlSourceLatex: item.ommlSourceLatex } : {}),
+            ...ommlAttrs(item),
             ...(nativeReadOnly ? { nativeReadOnly: true } : {}),
           },
         },
@@ -302,12 +375,7 @@ function cellJsonFromRichContent(content, binding, nativeReadOnly) {
           latex: displayEquation.latex,
           display: "block",
           alignment: "center",
-          ...(typeof displayEquation.ommlXml === "string"
-            ? { ommlXml: displayEquation.ommlXml }
-            : {}),
-          ...(typeof displayEquation.ommlSourceLatex === "string"
-            ? { ommlSourceLatex: displayEquation.ommlSourceLatex }
-            : {}),
+          ...ommlAttrs(displayEquation),
           ...(nativeReadOnly ? { nativeReadOnly: true } : {}),
         },
       },
@@ -518,12 +586,7 @@ export function docxRichBlockToJson(value, binding) {
         latex: equation?.latex ?? block.text,
         display: attrs.display === "inline" ? "inline" : "block",
         alignment: attrs.alignment ?? "center",
-        ...(typeof equation?.ommlXml === "string"
-          ? { ommlXml: equation.ommlXml }
-          : {}),
-        ...(typeof equation?.ommlSourceLatex === "string"
-          ? { ommlSourceLatex: equation.ommlSourceLatex }
-          : {}),
+        ...ommlAttrs(equation),
       },
     };
   }
@@ -752,6 +815,10 @@ export function documentNodeText(node) {
 
 function appendRichInline(output, item) {
   const previous = output.at(-1);
+  if (previous?.leadingBreak && item.kind === "text") {
+    output[output.length - 1] = { ...item, text: previous.text + item.text };
+    return;
+  }
   if (
     item.kind === "text" &&
     previous?.kind === "text" &&
@@ -766,13 +833,15 @@ function appendRichInline(output, item) {
 
 function imageFromJsonNode(node) {
   const attrs = record(node.attrs);
-  const partName = attrs.partName;
-  const assetId = attrs.assetId;
+  // An empty locator is an absent one. The native image node used to default
+  // every locator to "", and treating that as a broken asset id deleted the
+  // picture from Word on the next save.
+  const partName = typeof attrs.partName === "string" && attrs.partName ? attrs.partName : undefined;
+  const assetId = typeof attrs.assetId === "string" && attrs.assetId.trim() ? attrs.assetId : undefined;
   const mediaType = attrs.mediaType;
   if (
-    (typeof partName !== "string" && typeof assetId !== "string") ||
-    (typeof partName === "string" && !/^\/word\/media\/[^/\\\u0000-\u001f]{1,400}$/u.test(partName)) ||
-    (typeof assetId === "string" && !assetId.trim()) ||
+    (!partName && !assetId) ||
+    (partName && !/^\/word\/media\/[^/\\\u0000-\u001f]{1,400}$/u.test(partName)) ||
     (mediaType !== "image/png" && mediaType !== "image/jpeg")
   )
     return null;
@@ -782,9 +851,9 @@ function imageFromJsonNode(node) {
   const altText = String(attrs.alt ?? "Word image").slice(0, 4_000);
   return {
     kind: "image",
-    ...(typeof partName === "string" ? { partName } : {}),
+    ...(partName ? { partName } : {}),
     ...(typeof attrs.occurrenceId === "string" && attrs.occurrenceId ? { occurrenceId: attrs.occurrenceId } : {}),
-    ...(typeof assetId === "string" ? { assetId } : {}),
+    ...(assetId ? { assetId } : {}),
     mediaType,
     altText,
     ...(Number.isSafeInteger(widthEmu) && widthEmu > 0 ? { widthEmu } : {}),
@@ -868,18 +937,34 @@ export function documentRichInlineFromJson(node) {
         });
       return;
     }
+    if (current?.type === "hardBreak") {
+      // Word's break sits in a run; a break that lost its marks on the way
+      // (Yjs keeps none on it) belongs to the run before it.
+      const previous = output.at(-1);
+      if (Array.isArray(current.marks) && current.marks.length)
+        appendRichInline(output, { kind: "text", text: "\n", ...runFormatFromMarks(current.marks) });
+      else if (previous?.kind === "text")
+        appendRichInline(output, { kind: "text", text: "\n", ...(previous.format ? { format: previous.format } : {}), ...(previous.href ? { href: previous.href } : {}) });
+      // A break that opens the run list joins the words after it.
+      else output.push({ kind: "text", text: "\n", leadingBreak: true });
+      return;
+    }
     if (current?.type === "inlineEquation" || current?.type === "equation") {
       appendRichInline(output, {
         kind: "equation",
         latex: String(current.attrs?.latex ?? ""),
+        // A Word display equation can share its paragraph with text.
         display: current.type === "equation"
           ? current.attrs?.display === "inline" ? "inline" : "block"
-          : "inline",
+          : current.attrs?.display === "block" ? "block" : "inline",
         ...(typeof current.attrs?.ommlXml === "string"
           ? { ommlXml: current.attrs.ommlXml }
           : {}),
         ...(typeof current.attrs?.ommlSourceLatex === "string"
           ? { ommlSourceLatex: current.attrs.ommlSourceLatex }
+          : {}),
+        ...(typeof current.attrs?.ommlRef === "string" && current.attrs.ommlRef && typeof current.attrs?.ommlXml !== "string"
+          ? { ommlRef: current.attrs.ommlRef }
           : {}),
       });
       return;
@@ -921,6 +1006,7 @@ export function documentRichInlineFromJson(node) {
     });
   };
   visit(node);
+  for (const item of output) delete item.leadingBreak;
   return output;
 }
 
@@ -997,7 +1083,8 @@ function tableCellSpans(node) {
 }
 
 function tableRows(node) {
-  return (physicalTableSlots(node) ?? tableGrid(node)).map((row) => row.map((cell) => (cell ? documentNodeText(cell).trim() : "")));
+  // A line break that opens a cell is the writer's; only the spaces around it are the editor's.
+  return (physicalTableSlots(node) ?? tableGrid(node)).map((row) => row.map((cell) => (cell ? documentNodeText(cell).replace(/^[ \t]+|[ \t]+$/gu, "") : "")));
 }
 
 function tableRichRows(node) {
@@ -1029,9 +1116,57 @@ function unsupportedTableStructure(node) {
     row.content.some((cell) => (cell.content ?? []).some(containsTable)));
 }
 
+/**
+ * A Word list paragraph opens as a one-item list. Enter inside it adds items to
+ * that list node, but each item is its own Word paragraph: one block per item,
+ * the first keeping the Word paragraph's id and every later one naming the
+ * paragraph it continues (`listItemOf`), so Word writes it into the same list.
+ */
+function wordListItemBlocks(node, id, seen) {
+  const items = [];
+  const visit = (list, depth) => {
+    for (const item of list?.content ?? []) {
+      if (item?.type !== "listItem") continue;
+      for (const child of item.content ?? []) {
+        if (child?.type === "bulletList" || child?.type === "orderedList") {
+          visit(child, depth + 1);
+          continue;
+        }
+        if (child?.type !== "paragraph") continue;
+        items.push({ item, paragraph: child, depth });
+      }
+    }
+  };
+  visit(node, 0);
+  return items.map(({ item, paragraph, depth }, index) => {
+    let itemId = id;
+    if (index > 0) {
+      const own = [item.attrs?.blockId, paragraph.attrs?.blockId]
+        .find((candidate) => typeof candidate === "string" && candidate && candidate !== id);
+      // A Word-shaped id, so the paragraph Word writes keeps it (`w14:paraId`).
+      itemId = /^docx:paragraph:[a-f0-9]{8}$/.test(own ?? "")
+        ? own
+        : `docx:paragraph:${wordParagraphIdFor(own ?? `${id}-item-${index}`)}`;
+      let salt = 1;
+      while (seen.has(itemId)) itemId = `docx:paragraph:${wordParagraphIdFor(`${own ?? id}:${index}:${salt++}`)}`;
+      seen.add(itemId);
+    }
+    const inlineContent = documentRichInlineFromJson(paragraph);
+    const hasRichContent = richInlineHasSemantics(inlineContent);
+    const text = (hasRichContent ? richInlineText(inlineContent) : documentNodeText(paragraph)).trimEnd();
+    return {
+      id: itemId,
+      type: "list",
+      text,
+      ...(hasRichContent ? { inlineContent } : {}),
+      ...(index > 0 ? { attrs: { listItemOf: id, ...(depth ? { listDepth: depth } : {}) } } : {}),
+    };
+  });
+}
+
 export function documentBlocksFromJson(json) {
   const seen = new Set();
-  return (json?.content ?? []).map((node, index) => {
+  return (json?.content ?? []).flatMap((node, index) => {
     let id =
       typeof node?.attrs?.blockId === "string" && node.attrs.blockId
         ? node.attrs.blockId
@@ -1120,6 +1255,10 @@ export function documentBlocksFromJson(json) {
         text,
         ...(hasRichContent ? { inlineContent } : {}),
       };
+    if ((node?.type === "bulletList" || node?.type === "orderedList") && id.startsWith("docx:")) {
+      const items = wordListItemBlocks(node, id, seen);
+      if (items.length > 1) return items;
+    }
     if (node?.type === "bulletList" || node?.type === "orderedList")
       return {
         id,
@@ -1222,10 +1361,20 @@ function sameJsonValue(left, right) {
     keys.every((key) => Object.hasOwn(right, key) && sameJsonValue(left[key], right[key]));
 }
 
-function blockMirrorsNode(block, node) {
-  const own = documentBlocksFromJson({ content: [node] })[0];
-  return MIRROR_KEYS.every((key) =>
-    sameJsonValue(block[key] ?? null, own?.[key] ?? null));
+function blockMirrorsNode(block, node, byId) {
+  const own = documentBlocksFromJson({ content: [node] });
+  const mirrors = (requested, ownBlock) => Boolean(requested) && MIRROR_KEYS.every((key) =>
+    sameJsonValue(requested[key] ?? null, ownBlock?.[key] ?? null));
+  // A Word list node with several items mirrors several blocks: all must agree.
+  return mirrors(block, own[0]) &&
+    own.slice(1).every((ownBlock) => mirrors(byId?.get(ownBlock.id), ownBlock));
+}
+
+/** The ids of the blocks a node projects to beyond its own (a Word list's later items). */
+function coveredBlockIds(node) {
+  const id = node?.attrs?.blockId;
+  if (typeof id !== "string" || !id.startsWith("docx:") || (node.type !== "bulletList" && node.type !== "orderedList")) return [];
+  return documentBlocksFromJson({ content: [node] }).slice(1).map((block) => block.id);
 }
 
 function containsCanonicalReference(node) {
@@ -1266,7 +1415,7 @@ export function documentContentToProseMirrorJson(contentValue) {
     const existingIds = new Set(
       existingContent.flatMap((node) => {
         const blockId = node?.attrs?.blockId;
-        return typeof blockId === "string" && blockId ? [blockId] : [];
+        return typeof blockId === "string" && blockId ? [blockId, ...coveredBlockIds(node)] : [];
       }),
     );
     const missingNativeBlocks = blocks.some(
@@ -1295,12 +1444,17 @@ export function documentContentToProseMirrorJson(contentValue) {
       }
       const requestedIds = new Set(blocks.map((block) => block.id));
       const emittedReferenceIds = new Set();
+      const coveredBy = new Map();
       const rebuilt = blocks.map((block, index) => {
         const node = existingById.get(block.id);
+        const owner = coveredBy.get(block.id);
+        if (!node && owner) return null;
         if (!referenceNodes.has(node)) {
+          if (node && blockMirrorsNode(block, node, byId))
+            for (const covered of coveredBlockIds(node)) coveredBy.set(covered, node);
           // One block with no node here must not cost the others their structure:
           // a mirror cannot describe a list's items, so a rebuild would run them together.
-          if (node && !duplicateIds.has(block.id) && (blockMirrorsNode(block, node) || (node.type === "pageBreak" && isPageBreakBlock(block)))) return node;
+          if (node && !duplicateIds.has(block.id) && (blockMirrorsNode(block, node, byId) || (node.type === "pageBreak" && isPageBreakBlock(block)))) return node;
           return blockToJson(block, index, content.nativeBinding);
         }
         if (emittedReferenceIds.has(block.id))
@@ -1324,6 +1478,7 @@ export function documentContentToProseMirrorJson(contentValue) {
         }
       }
       const rebuiltContent = rebuilt.flatMap((node, index) => {
+        if (node === null) return [];
         const id = blocks[index].id;
         const pending = before.get(id) ?? [];
         before.delete(id);
@@ -1336,7 +1491,7 @@ export function documentContentToProseMirrorJson(contentValue) {
     }
     return {
       ...existing,
-      content: existingContent.map((node) => {
+      content: existingContent.flatMap((node) => {
         const blockId = node?.attrs?.blockId;
         const block =
           typeof blockId === "string" ? byId.get(blockId) : undefined;
@@ -1345,7 +1500,13 @@ export function documentContentToProseMirrorJson(contentValue) {
         // A mirror that is exactly this node's own projection says nothing
         // new. Rebuilding from it would drop what the mirror cannot carry
         // (an inline code mark beside an equation, a colour, a task state).
-        if (block && blockMirrorsNode(block, node)) return node;
+        if (block && blockMirrorsNode(block, node, byId)) return node;
+        // A Word list's items are Word paragraphs of their own; when any of
+        // them changed, each opens again as the one-item list Word reads.
+        const covered = coveredBlockIds(node);
+        if (block && covered.length)
+          return [block, ...covered.map((id) => byId.get(id)).filter(Boolean)]
+            .map((entry, index) => blockToJson(entry, index, content.nativeBinding));
         const attrs = record(block?.attrs);
         const richNode = block
           ? docxRichBlockToJson(block, content.nativeBinding)

@@ -121,6 +121,8 @@ export const docxRichInlineSchema = z.discriminatedUnion("kind", [
       ommlXml: z.string().max(4_000_000).optional(),
       /** LaTeX value represented by the retained OMML subtree at open time. */
       ommlSourceLatex: z.string().max(2_000_000).optional(),
+      /** The editor's name for the retained OMML (`ommlRefFor`); the XML stays in the base projection. */
+      ommlRef: z.string().regex(/^[a-f0-9]{16}$/).optional(),
     })
     .strict(),
   z
@@ -271,7 +273,10 @@ export const docxOperationSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("edit-table-cell"), regionId: z.string(), row: z.number().int().nonnegative(), column: z.number().int().nonnegative(), text: z.string(), inlineContent: z.array(docxRichInlineSchema).optional() }).strict(),
   z.object({ kind: z.literal("insert-paragraph"), regionId: z.string().optional(), afterRegionId: z.string().nullable().optional(), text: z.string(), style: z.string().optional(), inlineContent: z.array(docxRichInlineSchema).optional(),
     // Items of one new list share `group`, so Word numbers them as one list.
-    list: z.object({ format: z.enum(["bullet", "decimal"]), level: z.number().int().min(0).max(8), group: z.string().min(1).max(300) }).strict().optional() }).strict(),
+    list: z.object({ format: z.enum(["bullet", "decimal"]), level: z.number().int().min(0).max(8), group: z.string().min(1).max(300) }).strict().optional(),
+    // A paragraph whose properties (list numbering, style, spacing) the new one copies.
+    likeRegionId: z.string().min(1).max(300).optional(),
+    listLevel: z.number().int().min(0).max(8).optional() }).strict(),
   docxInsertTableOperationSchema,
   z.object({ kind: z.literal("delete-region"), regionId: z.string() }).strict(),
   z.object({

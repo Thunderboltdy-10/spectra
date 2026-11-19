@@ -100,9 +100,10 @@ export const NativeDocxImage = Node.create({
   addAttributes() {
     return {
       src: { default: "" },
-      partName: { default: "" },
-      occurrenceId: { default: "" },
-      assetId: { default: "" },
+      // Absent, not empty: an empty id reads as "no picture" and Word lost the drawing.
+      partName: { default: null },
+      occurrenceId: { default: null },
+      assetId: { default: null },
       mediaType: { default: "" },
       alt: { default: "Word image" },
       widthEmu: { default: null },

@@ -2,7 +2,7 @@ import { Document, WML_NAMESPACE } from "@ariadng/office/docx";
 import { parseXml, serializeNode, XmlElement, XmlText } from "@ariadng/office/xml";
 import { latexToEquation } from "./equation-interchange";
 import { applyParagraphFormat, applyTableColumnWidths, docxLens, resolveParagraphStyleId, type DocxProjection } from "./docx-lens";
-import { TEXT_COLUMN_EMU, paragraphFormatForNode } from "../../../../shared/document-projection.mjs";
+import { TEXT_COLUMN_EMU, embedOmmlInJson, paragraphFormatForNode } from "../../../../shared/document-projection.mjs";
 import { documentContentToProseMirrorJson, type DocumentJsonNode } from "./document-projection";
 import { docxRichInlineSchema, type DocxParagraphFormat } from "./projection-contracts";
 import { appendNoteReference, upsertNativeNote } from "./docx-academic";
@@ -146,10 +146,10 @@ export async function importDocxPayload(payload: Uint8Array): Promise<DocxImport
   const document = await Document.open(opened.preservedCarry.safePayload ?? payload);
   const media = await mediaForDocument(document);
   const json = replaceNativeImages(
-    documentContentToProseMirrorJson({
+    embedOmmlInJson(documentContentToProseMirrorJson({
       blocks: opened.projection.blocks,
       nativeBinding: opened.projection.nativeBinding,
-    }),
+    }), opened.projection),
     media,
   );
   const unsupported = unsupportedNativeMedia(document);

@@ -207,9 +207,18 @@ function shallowWmlChildren(root: XmlElement, name: string) {
   return found;
 }
 
+/** WordprocessingML property containers: their children describe text, never are text. */
+const WML_PROPERTY_ELEMENTS = new Set(["pPr", "rPr", "sectPr", "tblPr", "tblGrid", "trPr", "tcPr", "tblPrEx"]);
+
+function insideProperties(element: XmlElement, root: XmlElement) {
+  for (let current: XmlElement | null = element; current && current !== root; current = current.parent)
+    if (current.namespaceUri() === WML_NAMESPACE && WML_PROPERTY_ELEMENTS.has(current.localName)) return true;
+  return false;
+}
+
 function projectedWmlText(root: XmlElement) {
   return [root, ...descendants(root)]
-    .filter((element) => element.namespaceUri() === WML_NAMESPACE)
+    .filter((element) => element.namespaceUri() === WML_NAMESPACE && !insideProperties(element, root))
     .map((element) => {
       if (element.localName === "t") return element.text();
       if (element.localName === "tab") return "\t";
@@ -730,8 +739,36 @@ function runVerticalAlign(run: Run): "superscript" | "subscript" | undefined {
   return value === "superscript" || value === "subscript" ? value : undefined;
 }
 
+/**
+ * A run's formatting as Word shows its text. The office library lets a list
+ * level's `w:rPr` (a bold "1.", a Symbol bullet) fall through to the item's
+ * words; in Word it formats only the number. Resolve with numbering switched
+ * off for the moment of the read, then put the paragraph back exactly.
+ */
+function textRunFormat(run: Run): ReturnType<Run["format"]> {
+  let paragraph = run.element.parent;
+  while (paragraph && !(paragraph.localName === "p" && paragraph.namespaceUri() === WML_NAMESPACE)) paragraph = paragraph.parent;
+  const properties = paragraph?.find(WML_NAMESPACE, "pPr");
+  // Numbering reaches a paragraph through its own numPr or its style.
+  if (!paragraph || !properties || !(properties.find(WML_NAMESPACE, "numPr") || properties.find(WML_NAMESPACE, "pStyle")))
+    return run.format();
+  const original = properties.find(WML_NAMESPACE, "numPr");
+  const off = new XmlElement("numPr", properties.prefix);
+  properties.insertBefore(off, original ?? properties.children[0] ?? null);
+  const numId = new XmlElement("numId", properties.prefix);
+  off.appendChild(numId);
+  numId.setAttributeNs(WML_NAMESPACE, "val", "0");
+  if (original) properties.removeChild(original);
+  try {
+    return run.format();
+  } finally {
+    if (original) properties.insertBefore(original, off);
+    properties.removeChild(off);
+  }
+}
+
 function compactRunFormat(run: Run): DocxRunFormat | undefined {
-  const resolved = run.format();
+  const resolved = textRunFormat(run);
   const format: DocxRunFormat = {
     ...(resolved.bold ? { bold: true } : {}),
     ...(resolved.italic ? { italic: true } : {}),
@@ -790,6 +827,8 @@ function projectedRichContent(
     if (fields?.skipped.has(element)) return;
     if (fields?.fields.has(element)) { content.push(fields.fields.get(element)!); return; }
     const namespace = element.namespaceUri();
+    // Properties are not words: a tab stop in w:pPr/w:tabs is not a tab.
+    if (namespace === WML_NAMESPACE && WML_PROPERTY_ELEMENTS.has(element.localName)) return;
     if (namespace === OMML_NAMESPACE && element.localName === "oMathPara") {
       content.push({
         kind: "equation",
@@ -1258,7 +1297,17 @@ function placeInsertedRegion(document: Document, element: XmlElement, afterRegio
     ? nativeRegions(document).find((region) => region.element !== element)?.carrier ?? body.find(WML_NAMESPACE, "sectPr")
     : (() => {
         const after = uniqueRegionById(document, afterRegionId);
-        const carrier = movableCarrier(document, after);
+        const sharing = nativeRegions(document).filter((candidate) => candidate.carrier === after.carrier);
+        // Inside a shared wrapper (a content control around several
+        // paragraphs) the new paragraph goes beside its neighbour, unless
+        // that neighbour is the wrapper's last region: then it follows the
+        // wrapper, so a refreshed field never swallows it.
+        if (after.carrier.parent === body && sharing.length > 1 && sharing.at(-1) !== after && after.element.parent) {
+          const parent = after.element.parent;
+          parent.insertBefore(element, parent.children[parent.children.indexOf(after.element) + 1] ?? null);
+          return element;
+        }
+        const carrier = after.carrier.parent === body ? after.carrier : movableCarrier(document, after);
         const position = body.children.indexOf(carrier);
         return body.children[position + 1] ?? null;
       })();
@@ -1295,12 +1344,32 @@ function insertListParagraph(document: Document, list: NonNullable<Extract<DocxS
   return paragraph;
 }
 
+/** A new paragraph shaped like an existing one: Enter in a Word list makes the next item of that same list. */
+function insertParagraphLike(document: Document, likeRegionId: string, text: string, listLevel?: number) {
+  const like = nativeRegions(document).find((region) => region.id === likeRegionId);
+  const paragraph = document.addParagraph(text);
+  const properties = like?.element.localName === "p" ? like.element.find(WML_NAMESPACE, "pPr") : undefined;
+  if (!properties) return paragraph;
+  const existing = paragraph.element.find(WML_NAMESPACE, "pPr");
+  if (existing) paragraph.element.removeChild(existing);
+  const copy = properties.clone();
+  paragraph.element.insertBefore(copy, paragraph.element.children[0] ?? null);
+  // A section break belongs to the paragraph that ends the section, never its twin.
+  const section = copy.find(WML_NAMESPACE, "sectPr");
+  if (section) copy.removeChild(section);
+  if (listLevel !== undefined)
+    copy.find(WML_NAMESPACE, "numPr")?.find(WML_NAMESPACE, "ilvl")?.setAttributeNs(WML_NAMESPACE, "val", String(listLevel));
+  return paragraph;
+}
+
 async function insertParagraph(
   document: Document,
   operation: Extract<DocxSemanticDelta, { kind: "insert-paragraph" }>,
   options?: DocxWriteOptions,
 ) {
-  const paragraph = operation.list
+  const paragraph = operation.likeRegionId
+    ? insertParagraphLike(document, operation.likeRegionId, operation.text, operation.listLevel)
+    : operation.list
     ? insertListParagraph(document, operation.list, operation.text)
     : document.addParagraph(operation.text, {
         ...(operation.style
@@ -2739,10 +2808,10 @@ export function applyParagraphFormat(
 function uniformRunFormat(paragraph: Paragraph): DocxRunFormat | undefined {
   const runs = paragraph.runs().filter((run) => run.text().length > 0);
   if (!runs.length) return undefined;
-  const first = runs[0]!.format();
+  const first = textRunFormat(runs[0]!);
   const agreed = <T>(read: (format: ReturnType<Run["format"]>) => T) => {
     const value = read(first);
-    return runs.every((run) => read(run.format()) === value) ? value : undefined;
+    return runs.every((run) => read(textRunFormat(run)) === value) ? value : undefined;
   };
   const bold = agreed((format) => format.bold);
   const italic = agreed((format) => format.italic);
@@ -3778,6 +3847,8 @@ export async function docxProjectionReadbackDigest(
       if (intent.attrs?.cellAlignments === undefined) delete attrs.cellAlignments;
       if (intent.attrs?.columnCount === undefined && attrs.columnCount === block.rows?.[0]?.length) delete attrs.columnCount;
     }
+    // Where Word put a new paragraph is its own business.
+    if (attrs && intent.attrs?.nativePath === undefined) delete attrs.nativePath;
     // A run format the intent omitted is resolved from the paragraph style.
     if (attrs && !intent.attrs?.format) delete attrs.format;
     // A new list item reopens with Word's numbering ids and list style; its
@@ -3849,11 +3920,24 @@ export async function docxProjectionReadbackDigest(
     const agreed = block.inlineContent && textMatchesRuns && block.type !== "table" && block.type === intent.type && runsAgree(
       block.inlineContent,
       intent.inlineContent ?? [{ kind: "text", text: intent.text }],
-      requestedRunFormat,
-      block.type === "heading",
+      // Runs of their own say what they want; the paragraph summary speaks only for bare text.
+      intent.inlineContent ? {} : requestedRunFormat,
+      // A named style (a heading, a title) resolves what new words left unset.
+      block.type === "heading" || typeof intent.attrs?.styleId === "string",
     );
+    // The paragraph's run summary follows its runs: when they agree, so does it.
+    if (agreed && attrs && intent.attrs?.format !== undefined) attrs.format = intent.attrs.format;
+    // A cell's new runs resolve an omitted font, size or colour the same way.
+    const agreedRows = block.type === "table" && intent.type === "table" && block.richRows && intent.richRows &&
+      block.richRows.length === intent.richRows.length
+      ? block.richRows.map((row, r) => row.map((cell, c) => {
+          const wanted = intent.richRows![r]?.[c];
+          return wanted && cell.length && runsAgree(cell, wanted.length ? wanted : [{ kind: "text", text: "" }], {}, false) ? wanted : cell;
+        }))
+      : undefined;
     return {
       ...semanticBlock,
+      ...(agreedRows ? { richRows: agreedRows } : {}),
       // Agreed text is the same text, however Word spells an equation in it.
       ...(agreed ? { text: intent.text, ...(intent.latex !== undefined ? { latex: intent.latex } : {}) } : {}),
       ...(attrs && Object.keys(attrs).length ? { attrs } : {}),

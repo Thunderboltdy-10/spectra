@@ -6,32 +6,16 @@ import { uniqueToken } from "@/lib/unique-token";
 import type { Editor, JSONContent } from "@tiptap/core";
 import Collaboration from "@tiptap/extension-collaboration";
 import { LocalTrailingParagraph } from "../editor/local-trailing-paragraph";
+import { documentSchemaExtensions } from "../editor/document-extensions";
 import { isLocalCollaborativeDocumentChange } from "../editor/collaboration-change";
 import { applyDocumentStudioProjection } from "../editor/document-studio-projection";
-import Highlight from "@tiptap/extension-highlight";
-import TiptapLink from "@tiptap/extension-link";
 import { LinkOpener } from "../editor/link-opener";
 import Placeholder from "@tiptap/extension-placeholder";
-import { Table } from "@tiptap/extension-table";
-import { TableCell } from "@tiptap/extension-table-cell";
-import { TableHeader } from "@tiptap/extension-table-header";
-import { TableRow } from "@tiptap/extension-table-row";
-import { TaskItem } from "@tiptap/extension-task-item";
-import { TaskList } from "@tiptap/extension-task-list";
-import TextAlign from "@tiptap/extension-text-align";
-import {
-  Color,
-  FontFamily,
-  FontSize,
-  TextStyle,
-} from "@tiptap/extension-text-style";
-import Underline from "@tiptap/extension-underline";
 import { EditorContent, useEditor } from "@tiptap/react";
 import { BubbleMenu } from "@tiptap/react/menus";
 import { useMutation } from "convex/react";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { api } from "../../../../convex/_generated/api";
-import StarterKit from "@tiptap/starter-kit";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -72,11 +56,7 @@ import {
   type CommandParam,
 } from "../commands";
 import { DOCUMENT_EXPORT_COPIES } from "../capabilities";
-import {
-  DOCUMENT_STYLE_OPTIONS,
-  documentCommandBindings,
-  type DocumentCommandHandlers,
-} from "../commands/office/document-commands";
+import { DOCUMENT_STYLE_OPTIONS, documentCommandBindings, type DocumentCommandHandlers } from "../commands/office/document-commands";
 import {
   abortArtifactImportUpload,
   beginArtifactImportOriginal,
@@ -84,19 +64,10 @@ import {
   uploadArtifactAsset,
   uploadArtifactImportOriginal,
 } from "../data/api";
-import {
-  AiRegionDecoration,
-  aiRegionDecorationKey,
-  type AiRegionDecorationTarget,
-} from "../editor/ai-region-decoration";
-import {
-  AiSpeculationDecoration,
-  aiSpeculationKey,
-  type SpeculativeBlockText,
-} from "../editor/ai-speculation-decoration";
+import { AiRegionDecoration, aiRegionDecorationKey, type AiRegionDecorationTarget } from "../editor/ai-region-decoration";
+import { AiSpeculationDecoration, aiSpeculationKey, type SpeculativeBlockText } from "../editor/ai-speculation-decoration";
 import { AiTextResolve } from "../editor/ai-text-resolve";
-import { Callout } from "../editor/callout-node";
-import { DocumentImage, NativeDocxImage, TEXT_COLUMN_EMU, resizedImageAttrs } from "../editor/document-image";
+import { TEXT_COLUMN_EMU, resizedImageAttrs } from "../editor/document-image";
 import {
   bibliographyFromNavigator,
   bibliographyNode,
@@ -109,37 +80,26 @@ import {
   type DocumentOutlineEntry,
   type FindOptions,
 } from "../editor/document-navigation";
-import { Endnote, Footnote, SpectraNotes } from "../editor/document-notes";
 import { academicSelection, executeAcademicEditorOperations } from "../editor/document-academic-commands";
 import type { DocumentAcademicOperation } from "../commands/office/document-academic-operations";
-import {
-  documentBlocksFromJson,
-  paragraphAttrsFromFormat,
-  paragraphFormatFromAttrs,
-} from "../lenses/document-projection";
+import { documentBlocksFromJson, paragraphAttrsFromFormat, paragraphFormatFromAttrs } from "../lenses/document-projection";
 import { nextWordNoteId, type WordTextAnchor } from "../lenses/docx-academic-schema";
 import type { WordSource } from "../lenses/docx-citation-schema";
 import { CitationSourcePickers } from "./document-citation-pickers";
-import { DocumentSpreadSheets, spreadStyle, useDocumentCanvas, useDocumentSpread } from "./document-spread";
-import { DocumentStatusRail, useDocumentZoom, usePageCount, useSheetFit } from "./document-status-rail";
+import {
+  DocumentSpreadSheets,
+  spreadStyle,
+  useDocumentCanvas,
+  useDocumentSpread,
+} from "./document-spread";
+import {
+  DocumentStatusRail,
+  useDocumentZoom,
+  usePageCount,
+  useSheetFit,
+} from "./document-status-rail";
 import { editNoteText } from "../editor/note-text-edit";
-import {
-  AllCaps,
-  PageBreak,
-  SmallCaps,
-  Subscript,
-  Superscript,
-  ParagraphFrame,
-  SectionBreak,
-} from "../editor/document-structure";
 import { DragHandle } from "../editor/drag-handle";
-import { Equation, InlineEquation } from "../editor/equation-node";
-import {
-  SpectraCitationNode,
-  WordCommentBoundary,
-  WordRevision,
-  SpectraReferenceNode,
-} from "../editor/reference-citation-nodes";
 import {
   SlashCommand,
   caretPoint,
@@ -150,7 +110,6 @@ import {
 import { createSlashCommandRenderer } from "../editor/slash-command-renderer";
 import { FORMAT_BAR_KEY, FormatMenu, formatMenuOpen } from "../editor/format-menu";
 import { PageFlow } from "../editor/page-flow";
-import { StableBlockId } from "../editor/stable-block-id";
 import { spectraBus } from "../events";
 import type { WorkRegion } from "../anchors/locate";
 import { documentBlockFor } from "../anchors/document-region";
@@ -161,10 +120,7 @@ import { enforcePdfInput, OFFICE_ARCHIVE_LIMITS, readBoundedArchive } from "../.
 import type { SourceRecord } from "../sources/records/source-record";
 import { createDocumentRelativeSelection } from "../work/models/yjs";
 import { availableWorkModes } from "../work/registry";
-import {
-  documentContentFromJson,
-  documentJsonFromContent,
-} from "./artifact-studio";
+import { documentContentFromJson, documentJsonFromContent } from "./artifact-studio";
 import { exportDocxCopy, importDocxPayload, type DocxAssetResolver } from "../lenses/docx-adapter";
 import { record } from "./artifact-content-model";
 import {
@@ -180,10 +136,7 @@ import { WorkbarCommandControl, isRenderedControl } from "./workbar-controls";
 import { useStudioContract } from "./artifact-studio-shell";
 import { useStudioViewportReady } from "./studio-viewport-ready";
 import { readPdfTextPages } from "../editor/pdf-text-pages";
-import {
-  imageEmuAttributes,
-  materializeJsonImages,
-} from "../organization/library-import";
+import { imageEmuAttributes, materializeJsonImages } from "../organization/library-import";
 import { requestSpectra } from "../data/request";
 import { cleanOfficeHtml } from "../rich-content/clipboard";
 import { documentReferenceIds } from "./document-reference-ids";
@@ -1064,12 +1017,9 @@ export function DocumentStudio({
   const editor = useEditor(
     {
       extensions: [
-        StarterKit.configure({
-          heading: { levels: [1, 2, 3] },
-          link: false,
-          underline: false,
-          undoRedo: collaborationDocument ? false : undefined,
-          trailingNode: false,
+        ...documentSchemaExtensions({
+          collaborative: Boolean(collaborationDocument),
+          nativeReadOnlyBlockIds: nativeReadOnlyRegionIds,
         }),
         LocalTrailingParagraph,
         ...(collaborationDocument
@@ -1081,74 +1031,10 @@ export function DocumentStudio({
               }),
             ]
           : []),
-        Underline,
-        TiptapLink.configure({ openOnClick: false, autolink: true, defaultProtocol: "https" }),
         LinkOpener,
-        Table.extend({
-          addAttributes() {
-            return {
-              ...this.parent?.(),
-              spectraAuthored: {
-                default: false,
-                parseHTML: (element) =>
-                  element.getAttribute("data-spectra-authored") === "true",
-                renderHTML: (attributes) =>
-                  attributes.spectraAuthored
-                    ? { "data-spectra-authored": "true" }
-                    : {},
-              },
-            };
-          },
-        }).configure({ resizable: true, lastColumnResizable: true }),
-        TableRow,
-        TableCell,
-        TableHeader,
-        TaskList,
-        TaskItem.configure({ nested: true }),
-        // DOCX pictures are authored image nodes inside their source
-        // paragraph. They must remain inline in ProseMirror or schema parsing
-        // drops the entire paragraph when the live Yjs editor reopens it.
-        // `setImage` still inserts at the current paragraph selection, while
-        // Word export continues to place the drawing in that paragraph.
-        DocumentImage.configure({ allowBase64: true, inline: true }),
-        NativeDocxImage,
-        TextAlign.configure({ types: ["heading", "paragraph"] }),
-        Highlight.configure({ multicolor: true }),
-        // Character formatting a writer expects in the first minute: the font,
-        // its size, its colour and the line height of the paragraph. These are
-        // marks rather than editor-wide settings, so two paragraphs can differ
-        // — which is what a document is for, and what Word does.
-        TextStyle,
-        FontFamily,
-        FontSize,
-        Color,
-        // Structure the page needs and Markdown does not have: an explicit
-        // break, a section boundary carrying its own page setup, and the
-        // paragraph frame (border / shading / indent / line spacing / space
-        // after) — all paragraph properties in Word too.
-        PageBreak,
-        SectionBreak,
-        ParagraphFrame,
-        Superscript,
-        Subscript,
-        SmallCaps,
-        AllCaps,
-        Footnote,
-        Endnote,
-        SpectraNotes,
-        Callout,
-        Equation,
-        InlineEquation,
-        SpectraReferenceNode,
-        SpectraCitationNode,
-        WordCommentBoundary,
-        WordRevision,
         DragHandle,
         FormatMenu,
         PageFlow,
-        StableBlockId.configure({
-          nativeReadOnlyBlockIds: nativeReadOnlyRegionIds,
-        }),
         AiRegionDecoration,
         AiSpeculationDecoration,
         AiTextResolve,

@@ -169,6 +169,22 @@ export const ParagraphFrame = Extension.create<Record<string, never>, { nextStyl
         },
       },
       {
+        // Word's outline number for a heading ("2.1"). Word keeps numbering
+        // it, so the page only shows it and a split never copies it.
+        types: ["heading"],
+        attributes: {
+          headingNumber: {
+            default: null,
+            keepOnSplit: false,
+            parseHTML: (element) => element.getAttribute("data-number") || null,
+            renderHTML: (attributes) =>
+              typeof attributes.headingNumber === "string" && attributes.headingNumber
+                ? { "data-number": attributes.headingNumber }
+                : {},
+          },
+        },
+      },
+      {
         // A Word paragraph style ("Body Text", "Caption"): the page draws its
         // font and spacing, and Enter carries it to the next paragraph.
         types: ["paragraph"],

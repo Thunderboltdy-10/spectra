@@ -189,7 +189,7 @@ export function authoredSemanticValue(value, parentKey) {
         return [];
       if (key === "ommlXml" || key === "ommlSourceLatex" || key === "ommlRef") return [];
       if (source.kind === "citation" && key === "instruction") return [];
-      if (key === "nativePath" || key === "nativeReadOnly" || key === "nativeStyleId" || key === "readOnlyReason")
+      if (key === "nativePath" || key === "nativeReadOnly" || key === "nativeStyleId" || key === "readOnlyReason" || key === "number")
         return [];
       // Inline runs are the authored formatting source. attrs.format is a
       // resolved native convenience value and would otherwise disagree with a
@@ -198,7 +198,7 @@ export function authoredSemanticValue(value, parentKey) {
       // the level is derived, and Word reopens the heading without it.
       if (key === "attrs" && !hasInlineContent && source.type === "heading" && child && typeof child === "object") {
         const attrs = { ...child };
-        if (attrs.level === Number(String(attrs.styleId ?? "").match(/^Heading([1-3])$/i)?.[1])) delete attrs.level;
+        if (attrs.level === Number(String(attrs.styleId ?? "").match(/^Heading([1-6])$/i)?.[1])) delete attrs.level;
         return [[key, authoredSemanticValue(attrs, key)]];
       }
       if (
@@ -210,7 +210,7 @@ export function authoredSemanticValue(value, parentKey) {
         const attrs = { ...child };
         delete attrs.format;
         if (source.type === "equation") delete attrs.paragraphFormat;
-        if (source.type === "heading" && attrs.level === Number(String(attrs.styleId ?? "").match(/^Heading([1-3])$/i)?.[1])) delete attrs.level;
+        if (source.type === "heading" && attrs.level === Number(String(attrs.styleId ?? "").match(/^Heading([1-6])$/i)?.[1])) delete attrs.level;
         return [[key, authoredSemanticValue(attrs, key)]];
       }
       if (
@@ -673,9 +673,10 @@ export function docxRichBlockToJson(value, binding) {
       attrs: {
         ...nativeAttrs,
         level:
-          Number(String(attrs.styleId ?? "").match(/^Heading([1-3])$/i)?.[1]) ||
+          Number(String(attrs.styleId ?? "").match(/^Heading([1-6])$/i)?.[1]) ||
           Number(attrs.level) ||
           2,
+        ...headingNumberAttrs(attrs),
       },
       content,
     }, attrs);
@@ -690,6 +691,13 @@ export function docxRichBlockToJson(value, binding) {
       ],
     }, attrs);
   return withBlockFormatting({ type: "paragraph", attrs: nativeAttrs, content }, attrs);
+}
+
+// Word's outline number for a heading ("2.1"): shown beside it, owned by Word.
+function headingNumberAttrs(attrs) {
+  return typeof attrs.number === "string" && attrs.number.length <= 32
+    ? { headingNumber: attrs.number }
+    : {};
 }
 
 // A Word paragraph holding only a page break is Spectra's page break, not an empty line.
@@ -774,11 +782,12 @@ function plainOrRichBlockToJson(blockValue, index, nativeBinding) {
       type: "heading",
       attrs: {
         blockId: id,
-        level: [1, 2, 3].includes(Number(attrs.level))
+        level: [1, 2, 3, 4, 5, 6].includes(Number(attrs.level))
           ? Number(attrs.level)
           : Number(
-              String(attrs.styleId ?? "").match(/^Heading([1-3])$/i)?.[1] ?? 2,
+              String(attrs.styleId ?? "").match(/^Heading([1-6])$/i)?.[1] ?? 2,
             ),
+        ...headingNumberAttrs(attrs),
       },
       content: inlineText(value),
     };
@@ -1307,6 +1316,9 @@ export function documentBlocksFromJson(json) {
         attrs: {
           level,
           styleId: `Heading${level}`,
+          ...(typeof node.attrs?.headingNumber === "string"
+            ? { number: node.attrs.headingNumber }
+            : {}),
           ...(node.attrs?.nativeReadOnly === true
             ? { nativeReadOnly: true }
             : {}),
@@ -1601,7 +1613,7 @@ export function documentContentToProseMirrorJson(contentValue) {
         }
         const styleId = typeof attrs.styleId === "string" ? attrs.styleId : "";
         const headingLevel = Number(
-          styleId.match(/^Heading([1-3])$/i)?.[1] ?? 0,
+          styleId.match(/^Heading([1-6])$/i)?.[1] ?? 0,
         );
         if (
           headingLevel &&

@@ -169,6 +169,15 @@
    --------------------------------------------------------------------------- */
 
 /* A Word list item's level: Word indents each level by half an inch. */
+/* Word numbers outline headings itself; the page shows that number beside the text. */
+.spectra-document-studio .ProseMirror :is(h1, h2, h3, h4, h5, h6)[data-number]::before {
+  content: attr(data-number);
+  display: inline-block;
+  min-width: 2.2em;
+  margin-right: 0.5em;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
 .spectra-document-studio .ProseMirror :is(ul, ol)[data-list-level] { margin-left: calc(var(--list-level, 0) * 12.7mm); }
 .spectra-document-studio .ProseMirror :is(ul, ol)[data-list-level="1"] { --list-level: 1; }
 .spectra-document-studio .ProseMirror :is(ul, ol)[data-list-level="2"] { --list-level: 2; }

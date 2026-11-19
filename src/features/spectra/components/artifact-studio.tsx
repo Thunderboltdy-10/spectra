@@ -1497,7 +1497,7 @@ export function documentJsonFromContent(
     const attrs = record(nativeBlock.attrs);
     const styleId =
       typeof attrs.styleId === "string" ? attrs.styleId : undefined;
-    const headingMatch = styleId?.match(/^Heading([1-3])$/i);
+    const headingMatch = styleId?.match(/^Heading([1-6])$/i);
     if (
       headingMatch &&
       (node.type === "paragraph" || node.type === "heading")
@@ -1654,14 +1654,14 @@ export function documentJsonFromContent(
             const styleId =
               typeof attrs.styleId === "string" ? attrs.styleId : "";
             const styleLevel = Number(
-              styleId.match(/^Heading([1-3])$/i)?.[1] ?? 0,
+              styleId.match(/^Heading([1-6])$/i)?.[1] ?? 0,
             );
             return {
               type: "heading",
               attrs: {
-                level: [1, 2, 3].includes(Number(attrs.level))
+                level: [1, 2, 3, 4, 5, 6].includes(Number(attrs.level))
                   ? Number(attrs.level)
-                  : [1, 2, 3].includes(styleLevel)
+                  : [1, 2, 3, 4, 5, 6].includes(styleLevel)
                     ? styleLevel
                     : 2,
                 ...nativeAttrs,

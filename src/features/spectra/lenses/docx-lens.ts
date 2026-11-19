@@ -12,7 +12,7 @@ import type { WordSource, WordCitationInline } from "./docx-citation-schema";
 import { applyDocumentAcademicOperations } from "../commands/office/document-academic-operations";
 import { latexToEquation } from "./equation-interchange";
 import { docxOperationsBetween } from "./document-projection";
-import { docxStyleCatalogue } from "./docx-styles";
+import { docxStyleCatalogue, paragraphStyleRoles, wordListCounter } from "./docx-styles";
 import type {
   LensCapabilitySet,
   LensCompatibilityProfile,
@@ -1510,8 +1510,12 @@ export async function resolveParagraphStyleId(document: Document, requested: str
     });
   const exact = definitions.find((definition) => definition.id === safeRequested);
   if (exact) return exact.id;
-  const headingAlias = safeRequested.match(/^Heading([1-3])$/i)?.[1];
+  const headingAlias = safeRequested.match(/^Heading([1-6])$/i)?.[1];
   if (headingAlias) {
+    // A localised file names its heading styles in its own language
+    // ("berschrift2"); Word's built-in name stays "heading 2".
+    const builtIn = definitions.find((definition) => definition.name?.trim().toLocaleLowerCase() === `heading ${headingAlias}`);
+    if (builtIn) return builtIn.id;
     const numeric = definitions.find((definition) => definition.id === headingAlias);
     if (numeric) return numeric.id;
   }
@@ -3496,6 +3500,8 @@ async function projectDocument(
   for (const item of projectAcademicFields(document.body(), "inventory", wordSources, mappings).fields.values()) if (item.kind === "citation") usedSourceMap.set(item.source.tag, item.source);
   const usedSources = [...usedSourceMap.values()];
   const bodyChildren = topLevelFlow(document.body());
+  const styleRoles = paragraphStyleRoles(document);
+  const countList = wordListCounter();
   const topLevelTables = new Map(
     document
       .tables()
@@ -3553,10 +3559,15 @@ async function projectDocument(
       // Some Word writers persist built-in Heading styles as the numeric
       // style IDs 1/2/3. Normalize those aliases to the semantic names used
       // by the editor, but never reinterpret protected TOC/field paragraphs.
-      const semanticStyleId =
-        !readOnly && /^[1-3]$/.test(styleId ?? "")
+      // A heading is a heading by its style's role, whatever the style is called
+      // in this language and whether or not Word numbers it.
+      const headingLevel = Number(styleRoles.get(styleId ?? "")?.match(/^heading([1-6])$/u)?.[1] ?? 0);
+      const semanticStyleId = headingLevel
+        ? `Heading${headingLevel}`
+        : !readOnly && /^[1-3]$/.test(styleId ?? "")
           ? `Heading${styleId}`
           : styleId;
+      const listNumber = list ? countList(list) : undefined;
       const runFormat = readOnly ? undefined : uniformRunFormat(paragraph);
       const paragraphFormat = readOnly ? undefined : projectedParagraphFormat(paragraph);
       const meaningfulRichContent = richContent.filter(
@@ -3573,10 +3584,10 @@ async function projectDocument(
         : undefined;
       blocks.push({
         id: regionId,
-        type: list
-          ? "list"
-          : /^heading[1-3]$/i.test(semanticStyleId ?? "")
-            ? "heading"
+        type: headingLevel || /^heading[1-6]$/i.test(semanticStyleId ?? "")
+          ? "heading"
+          : list
+            ? "list"
             : soleEquation
               ? "equation"
               : "paragraph",
@@ -3591,7 +3602,9 @@ async function projectDocument(
           ...(!readOnly && styleId && semanticStyleId !== styleId
             ? { nativeStyleId: styleId }
             : {}),
-          ...(list ? { list } : {}),
+          ...(list && !headingLevel ? { list } : {}),
+          // An outline-numbered heading shows Word's number; Word keeps owning it.
+          ...(headingLevel && listNumber ? { number: listNumber } : {}),
           ...(soleEquation
             ? {
                 display: soleEquation.display,
@@ -3858,7 +3871,7 @@ async function projectDocument(
             {
               id: block.id,
               title: block.text,
-              level: Number(block.attrs?.styleId?.toString().match(/[1-3]$/)?.[0] ?? 2),
+              level: Number(block.attrs?.styleId?.toString().match(/^Heading([1-6])$/i)?.[1] ?? 2),
             },
           ]
         : [],

@@ -116,3 +116,71 @@ export function docxStyleCatalogue(document: Document, usedStyleIds: Iterable<st
   }
   return { defaultStyleId: defaultId, paragraph };
 }
+
+/** Each paragraph style's role, by Word's built-in name first and then by its outline level through basedOn. */
+export function paragraphStyleRoles(document: Document) {
+  const roles = new Map<string, NonNullable<DocxStyleEntry["role"]>>();
+  const styles = document._internal().styles()?.doc.root;
+  if (!styles) return roles;
+  const byId = new Map(
+    styles.elements().flatMap((element) => {
+      const id = attr(element, "styleId");
+      return element.localName === "style" && attr(element, "type") === "paragraph" && id ? [[id, element] as const] : [];
+    }),
+  );
+  const outline = (id: string, seen = new Set<string>()): number | undefined => {
+    const element = byId.get(id);
+    if (!element || seen.has(id)) return undefined;
+    seen.add(id);
+    const own = attr(element.find(WML_NAMESPACE, "pPr")?.find(WML_NAMESPACE, "outlineLvl"), "val");
+    if (own !== undefined) return Number(own);
+    const basedOn = attr(element.find(WML_NAMESPACE, "basedOn"), "val");
+    return basedOn ? outline(basedOn, seen) : undefined;
+  };
+  for (const [id, element] of byId) {
+    const role = docxStyleRole(attr(element.find(WML_NAMESPACE, "name"), "val"), outline(id));
+    if (role) roles.set(id, role);
+  }
+  return roles;
+}
+
+const ROMAN: Array<[number, string]> = [[1000, "m"], [900, "cm"], [500, "d"], [400, "cd"], [100, "c"], [90, "xc"], [50, "l"], [40, "xl"], [10, "x"], [9, "ix"], [5, "v"], [4, "iv"], [1, "i"]];
+
+function formatListCounter(value: number, format: string) {
+  if (format === "lowerLetter" || format === "upperLetter") {
+    let text = "";
+    for (let rest = value; rest > 0; rest = Math.floor((rest - 1) / 26)) text = String.fromCharCode(97 + ((rest - 1) % 26)) + text;
+    return format === "upperLetter" ? text.toUpperCase() : text;
+  }
+  if (format === "lowerRoman" || format === "upperRoman") {
+    let text = "";
+    let rest = value;
+    for (const [size, letters] of ROMAN) while (rest >= size) { text += letters; rest -= size; }
+    return format === "upperRoman" ? text.toUpperCase() : text;
+  }
+  if (format === "decimalZero") return String(value).padStart(2, "0");
+  return String(value);
+}
+
+/**
+ * Word's list counters through the body, so an outline-numbered heading can
+ * show the number Word prints beside it ("2.1"). Counters run per list and
+ * reset the levels below the one that advanced.
+ */
+export function wordListCounter() {
+  const counters = new Map<string, number[]>();
+  const formats = new Map<string, string>();
+  return (list: { numId: string; level: number; format: string; text: string; start: number }) => {
+    const levels = counters.get(list.numId) ?? [];
+    levels[list.level] = levels[list.level] === undefined ? list.start : levels[list.level]! + 1;
+    levels.length = list.level + 1;
+    counters.set(list.numId, levels);
+    formats.set(`${list.numId}:${list.level}`, list.format);
+    if (list.format === "bullet" || list.format === "none" || !list.text) return undefined;
+    const number = list.text.replace(/%([1-9])/gu, (_, digit: string) => {
+      const index = Number(digit) - 1;
+      return formatListCounter(levels[index] ?? 1, formats.get(`${list.numId}:${index}`) ?? "decimal");
+    });
+    return number.trim() || undefined;
+  };
+}

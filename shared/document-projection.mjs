@@ -93,8 +93,32 @@ export function richInlineHasObject(content) {
   return content.some((item) => item.kind !== "text");
 }
 
+/**
+ * Where one paragraph of a table cell ends and the next begins, in a cell's
+ * rich content. A line break inside a paragraph stays "\n", so a cell's
+ * paragraphs (each with its own Word style and id) survive an edit. The cell's
+ * plain text (`rows`) keeps "\n" for both.
+ */
+export const CELL_PARAGRAPH_BREAK = "\u2029";
+
+/** A cell's rich content as one list of runs per paragraph. */
+export function cellParagraphs(content) {
+  const paragraphs = [[]];
+  for (const item of content) {
+    if (item.kind !== "text" || !item.text.includes(CELL_PARAGRAPH_BREAK)) {
+      paragraphs.at(-1).push(item);
+      continue;
+    }
+    item.text.split(CELL_PARAGRAPH_BREAK).forEach((text, index) => {
+      if (index) paragraphs.push([]);
+      if (text) paragraphs.at(-1).push({ ...item, text });
+    });
+  }
+  return paragraphs;
+}
+
 function normalizeLineBreaks(value) {
-  return value.replace(/\n+/gu, "\n");
+  return value.replace(/[\n\u2029]+/gu, "\n");
 }
 
 function authoredPlainInline(content, text) {
@@ -121,6 +145,7 @@ function richInlineHasSemantics(content) {
   return content.some(
     (item) =>
       item.kind !== "text" ||
+      item.text.includes(CELL_PARAGRAPH_BREAK) ||
       Boolean(item.href) ||
       (item.format && Object.keys(item.format).length > 0),
   );
@@ -358,6 +383,10 @@ export function docxRichInlineToJson(content, binding, nativeReadOnly = false) {
 }
 
 function cellJsonFromRichContent(content, binding, nativeReadOnly) {
+  return cellParagraphs(content).flatMap((paragraph) => cellParagraphJson(paragraph, binding, nativeReadOnly));
+}
+
+function cellParagraphJson(content, binding, nativeReadOnly) {
   const meaningful = content.filter(
     (item) => item.kind !== "text" || Boolean(item.text.trim()),
   );
@@ -923,7 +952,8 @@ function runFormatFromMarks(marks) {
   };
 }
 
-export function documentRichInlineFromJson(node) {
+export function documentRichInlineFromJson(node, paragraphBreak = "\n") {
+  const cell = paragraphBreak === CELL_PARAGRAPH_BREAK;
   const output = [];
   const visit = (current) => {
     if (typeof current?.text === "string") {
@@ -996,10 +1026,12 @@ export function documentRichInlineFromJson(node) {
     children.forEach((child, index) => {
       if (
         index > 0 &&
-        ["paragraph", "heading"].includes(child?.type ?? "") &&
-        output.length
+        // A cell counts every paragraph, the empty ones too.
+        (cell
+          ? ["paragraph", "heading", "equation"].includes(child?.type ?? "")
+          : ["paragraph", "heading"].includes(child?.type ?? "") && output.length)
       )
-        appendRichInline(output, { kind: "text", text: "\n" });
+        appendRichInline(output, { kind: "text", text: paragraphBreak });
       visit(child);
     });
   };
@@ -1086,7 +1118,7 @@ function tableRows(node) {
 }
 
 function tableRichRows(node) {
-  return (physicalTableSlots(node) ?? tableGrid(node)).map((row) => row.map((cell) => (cell ? documentRichInlineFromJson(cell) : [])));
+  return (physicalTableSlots(node) ?? tableGrid(node)).map((row) => row.map((cell) => (cell ? documentRichInlineFromJson(cell, CELL_PARAGRAPH_BREAK) : [])));
 }
 
 /** Column widths the writer dragged, in editor pixels; unset columns are null. */

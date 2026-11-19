@@ -13,6 +13,7 @@ import {
   restoreDocxEquationCarryMetadata,
   renumberWordLists as sharedRenumberWordLists,
   wordListShell as sharedWordListShell,
+  CELL_PARAGRAPH_BREAK,
 } from "../../../../shared/document-projection.mjs";
 import { equationNodeToLatex, latexToEquation } from "./equation-interchange";
 import {
@@ -351,6 +352,23 @@ function rowsFor(block: DocxProjection["blocks"][number]) {
 
 function richRowsFor(block: DocxProjection["blocks"][number]) {
   return block.richRows ?? block.rows?.map((row) => row.map((text) => [{ kind: "text" as const, text }])) ?? [];
+}
+
+/**
+ * A cell's content as an older projection spelled it, with every paragraph
+ * end as a line break. Used to compare a cell only when one side marks its
+ * paragraph ends and the other does not, so the upgrade alone is no edit.
+ */
+function cellWithLineBreaks(content: readonly DocxRichInline[] | undefined) {
+  return content?.map((item) =>
+    item.kind === "text" && item.text.includes(CELL_PARAGRAPH_BREAK)
+      ? { ...item, text: item.text.replaceAll(CELL_PARAGRAPH_BREAK, "\n") }
+      : item,
+  );
+}
+
+function marksCellParagraphs(content: readonly DocxRichInline[] | undefined) {
+  return Boolean(content?.some((item) => item.kind === "text" && item.text.includes(CELL_PARAGRAPH_BREAK)));
 }
 
 function richTextWithoutImages(content: readonly DocxRichInline[]) {
@@ -742,7 +760,10 @@ export function docxOperationsBetween(
       newRows.forEach((row, rowIndex) =>
         row.forEach((text, columnIndex) => {
           const inlineContent = newRichRows[rowIndex]?.[columnIndex];
-          const previousInline = oldRichRows[rowIndex]?.[columnIndex];
+          const previousCell = oldRichRows[rowIndex]?.[columnIndex];
+          const comparable = marksCellParagraphs(previousCell) === marksCellParagraphs(inlineContent);
+          const previousInline = comparable ? previousCell : cellWithLineBreaks(previousCell);
+          const nextInline = comparable ? inlineContent : cellWithLineBreaks(inlineContent);
           const imageOperations = imageOperationsBetween(
             block.id,
             previousInline,
@@ -751,20 +772,20 @@ export function docxOperationsBetween(
           );
           const deletedImages = imageOperations.filter((operation) => operation.kind === "delete-image");
           const otherImageOperations = imageOperations.filter((operation) => operation.kind !== "delete-image");
-          const visibleText = inlineContent
-            ? richTextWithoutImages(inlineContent)
+          const visibleText = nextInline
+            ? richTextWithoutImages(nextInline)
             : text;
           const previousVisibleText = previousInline
             ? richTextWithoutImages(previousInline)
             : oldRows[rowIndex]?.[columnIndex] ?? "";
           const nonImageRichChanged = authoredRichContentChanged(
             previousInline ?? [],
-            inlineContent ?? [],
+            nextInline ?? [],
           );
           operations.push(...deletedImages);
           if (visibleText !== previousVisibleText || nonImageRichChanged) {
             const textInlineContent = inlineContent
-              ? inlineContentForTextOperation(previousInline, inlineContent)
+              ? inlineContentForTextOperation(previousCell ?? [], inlineContent)
               : undefined;
             operations.push({
               kind: "edit-table-cell",

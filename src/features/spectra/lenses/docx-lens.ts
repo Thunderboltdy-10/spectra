@@ -2,7 +2,7 @@ import { Document, Paragraph, type Run, WML_NAMESPACE } from "@ariadng/office/do
 import { comparePackages } from "@ariadng/office/preservation";
 import { parseXml, serializeNode, XmlElement, XmlText } from "@ariadng/office/xml";
 import { OFFICE_ARCHIVE_LIMITS, prepareBoundedArchiveBytes } from "../../../../shared/parser-limits";
-import { authoredSemanticValue } from "../../../../shared/document-projection.mjs";
+import { authoredSemanticValue, CELL_PARAGRAPH_BREAK, cellParagraphs } from "../../../../shared/document-projection.mjs";
 import { firstNativeFontFamily } from "../office-fonts";
 import { appendNoteReference, nativeNote, noteReferences, removeNativeNote, storyText, upsertNativeNote, wordElements, wordAttr } from "./docx-academic";
 import { appendCommentBoundary, appendRevision, deleteNativeComment, hasUnsupportedRevision, nativeComment, supportedRevision, upsertNativeComment } from "./docx-academic-review";
@@ -965,6 +965,7 @@ function hasRichSemantics(content: readonly DocxRichInline[]) {
   return content.some(
     (item) =>
       item.kind !== "text" ||
+      item.text.includes(CELL_PARAGRAPH_BREAK) ||
       Boolean(item.href) ||
       Boolean(item.format && Object.keys(item.format).length),
   );
@@ -1041,7 +1042,7 @@ function projectedCellRichContent(
     paragraphs.flatMap((paragraph, index) => {
       const wrapped = Paragraph._wrap(document, paragraph);
       return [
-        ...(index ? [{ kind: "text" as const, text: "\n" }] : []),
+        ...(index ? [{ kind: "text" as const, text: CELL_PARAGRAPH_BREAK }] : []),
         ...projectedRichContent(document, paragraph, wrapped, noteBodies, comments),
       ];
     }),
@@ -1785,26 +1786,73 @@ async function boundCustomXmlPartNames(document: Document) {
   return names;
 }
 
+/**
+ * The cell's paragraphs for `count` pieces of new content, kept one for one:
+ * piece i rewrites paragraph i (its style, spacing and id stay), a piece past
+ * the end gets a new paragraph shaped like the last one, and a paragraph no
+ * piece reaches is removed.
+ */
+function cellParagraphTargets(document: Document, cell: NativeTableCell, count: number) {
+  const existing = cell.paragraphElements();
+  if (!existing.length)
+    throw new DocxLensError(
+      "DOCX_TABLE_WRITE_UNSUPPORTED",
+      "This Word table cell has no writable paragraph container.",
+    );
+  const targets = existing.slice(0, count);
+  const template = existing.at(-1)!;
+  while (targets.length < count) {
+    const previous = targets.at(-1)!;
+    const paragraph = new XmlElement("p", template.prefix);
+    const parent = previous.parent!;
+    parent.insertBefore(paragraph, parent.children[parent.children.indexOf(previous) + 1] ?? null);
+    const properties = template.find(WML_NAMESPACE, "pPr");
+    if (properties) {
+      const copy = properties.clone();
+      paragraph.appendChild(copy);
+      const section = copy.find(WML_NAMESPACE, "sectPr");
+      if (section) copy.removeChild(section);
+    }
+    targets.push(paragraph);
+  }
+  for (const extra of existing.slice(count)) extra.parent?.removeChild(extra);
+  if (existing.length !== count) document._markMainDirty();
+  return targets.map((element) => Paragraph._wrap(document, element));
+}
+
+/**
+ * New cell content split into its paragraphs. Content from an older client
+ * marks no paragraph ends; in a cell of several paragraphs and no line
+ * breaks, each "\n" can only have been one of them.
+ */
+function cellContentParagraphs(cell: NativeTableCell, content: readonly DocxRichInline[]) {
+  if (content.some((item) => item.kind === "text" && item.text.includes(CELL_PARAGRAPH_BREAK)))
+    return cellParagraphs(content) as DocxRichInline[][];
+  const paragraphs = cell.paragraphElements();
+  const breaks = paragraphs.some((paragraph) => hasWml(paragraph, "br", "cr"));
+  if (paragraphs.length < 2 || breaks) return [[...content]];
+  return cellParagraphs(content.map((item) =>
+    item.kind === "text" ? { ...item, text: item.text.replaceAll("\n", CELL_PARAGRAPH_BREAK) } : item,
+  )) as DocxRichInline[][];
+}
+
 async function replaceTableCellText(
   document: Document,
   cell: NativeTableCell,
   text: string,
 ) {
-  const paragraphs = cell.paragraphElements().map((element) => Paragraph._wrap(document, element));
-  if (!paragraphs.length)
-    throw new DocxLensError(
-      "DOCX_TABLE_WRITE_UNSUPPORTED",
-      "This Word table cell has no writable paragraph container.",
-    );
   const targets = await customXmlTargets(document, cell);
+  const plain = text.replaceAll(CELL_PARAGRAPH_BREAK, "\n");
   for (const target of targets) {
     for (const child of [...target.element.children]) target.element.removeChild(child);
-    target.element.appendChild(new XmlText(text));
+    target.element.appendChild(new XmlText(plain));
     document.office.markDirty(target.partName);
   }
-  replaceParagraphText(document, paragraphs[0]!, text);
-  for (const paragraph of paragraphs.slice(1)) paragraph.element.parent?.removeChild(paragraph.element);
-  if (paragraphs.length > 1) document._markMainDirty();
+  const pieces = cellContentParagraphs(cell, [{ kind: "text", text }]).map((runs) =>
+    runs.map((item) => item.kind === "text" ? item.text : "").join(""),
+  );
+  const paragraphs = cellParagraphTargets(document, cell, pieces.length);
+  pieces.forEach((piece, index) => replaceParagraphText(document, paragraphs[index]!, piece));
 }
 
 async function replaceTableCellRich(
@@ -1813,16 +1861,10 @@ async function replaceTableCellRich(
   inlineContent: readonly DocxRichInline[],
   options?: DocxWriteOptions,
 ) {
-  const paragraphElements = cell.paragraphElements();
-  if (!paragraphElements.length)
-    throw new DocxLensError(
-      "DOCX_TABLE_WRITE_UNSUPPORTED",
-      "This Word table cell has no writable paragraph container.",
-    );
-  const paragraph = Paragraph._wrap(document, paragraphElements[0]!);
-  await replaceParagraphRich(document, paragraph, inlineContent, options);
-  for (const extra of paragraphElements.slice(1)) extra.parent?.removeChild(extra);
-  if (paragraphElements.length > 1) document._markMainDirty();
+  const pieces = cellContentParagraphs(cell, inlineContent);
+  const paragraphs = cellParagraphTargets(document, cell, pieces.length);
+  for (const [index, piece] of pieces.entries())
+    await replaceParagraphRich(document, paragraphs[index]!, piece, options);
 }
 
 function tableRows(table: NativeTable) {
@@ -3476,7 +3518,7 @@ async function projectDocument(
         const rows = table.rows().map((row, rowIndex) =>
           row.cells().map((cell, columnIndex) => {
             const content = richRows[rowIndex]?.[columnIndex] ?? [];
-            return hasRichSemantics(content) ? semanticRichText(content) : cell.text();
+            return hasRichSemantics(content) ? semanticRichText(content).replaceAll(CELL_PARAGRAPH_BREAK, "\n") : cell.text();
           }),
         );
         blocks.push({

@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const field = vi.hoisted(() => ({
   unform: vi.fn((_figure: unknown) => Promise.resolve()),
-  morph: vi.fn((_from: unknown, _to: unknown) => ({ formed: Promise.resolve() })),
+  morph: vi.fn((_from: unknown, _to: unknown) => ({ formed: Promise.resolve(), release: () => undefined })),
   replacement: null as HTMLElement | null,
 }));
 

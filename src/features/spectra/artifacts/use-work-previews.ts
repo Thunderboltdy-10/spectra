@@ -1,5 +1,6 @@
 "use client";
 
+import { loadPdfjs } from "@/lib/pdfjs";
 import { useEffect, useState, type RefObject } from "react";
 import { getSpectraArtifact, getSpectraThreadMessages } from "../data/api";
 import type { PresentedWorkType } from "./presentation";
@@ -113,7 +114,7 @@ async function filePreview(workId: string, face: "pdf" | "document" | "sheet" | 
 
 /** A PDF's first page, drawn once at card size and kept as a picture. */
 async function pdfFace(bytes: ArrayBuffer): Promise<WorkPreview | null> {
-  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  const pdfjs = await loadPdfjs();
   const task = pdfjs.getDocument({ data: new Uint8Array(bytes), useWorkerFetch: false, disableFontFace: true });
   try {
     const pdf = await task.promise;

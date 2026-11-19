@@ -128,3 +128,4 @@ storage-state-*.json
 
 # Safe environment templates are public.
 !.env.local.example
+src/features/spectra/__tests__/fixtures/*.pdf

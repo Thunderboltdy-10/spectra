@@ -1,5 +1,6 @@
 "use client";
 
+import { loadPdfjs } from "@/lib/pdfjs";
 import { useLatest, useStudioContextItems } from "./studio-context-menu";
 import { StudioToolPane } from "./studio-pane";
 import { describeFailure } from "@/components/ui/truthful-state";
@@ -2794,7 +2795,7 @@ export function WhiteboardStudio({
     layerId: string,
     importJobId: string,
   ) {
-    const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+    const pdfjs = await loadPdfjs();
     const bytes = new Uint8Array(await file.arrayBuffer());
     enforcePdfInput(bytes);
     const pdfOptions = {

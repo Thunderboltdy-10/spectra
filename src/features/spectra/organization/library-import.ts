@@ -1,3 +1,4 @@
+import { loadPdfjs } from "@/lib/pdfjs";
 import type { JSONContent } from "@tiptap/core";
 import type { ArtifactTypeKey } from "../artifacts/types";
 import { bytesToArrayBuffer, enforcePdfInput, OFFICE_ARCHIVE_LIMITS, readBoundedArchive } from "../../../../shared/parser-limits";
@@ -283,7 +284,7 @@ export function documentContentFromImportedPlainText(text: string, options?: { l
 }
 
 async function documentContentFromPdf(file: File) {
-  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  const pdfjs = await loadPdfjs();
   const bytes = await file.arrayBuffer();
   enforcePdfInput(new Uint8Array(bytes));
   const pdfOptions = {

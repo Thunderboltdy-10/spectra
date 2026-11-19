@@ -10,6 +10,7 @@ export type AttachmentInput = {
   data?: string;
 };
 
+import { loadPdfjs } from "@/lib/pdfjs";
 import {
   decodeBase64DataUrl,
   OFFICE_ARCHIVE_LIMITS,
@@ -63,7 +64,7 @@ function decodePackageXmlText(value: string) {
 
 async function extractPdfText(buffer: Uint8Array, characterLimit: number) {
   enforcePdfInput(buffer);
-  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  const pdfjs = await loadPdfjs();
   const pdfOptions = { data: buffer, enableScripting: false };
   const document = await pdfjs.getDocument(pdfOptions).promise;
   const pages: string[] = [];

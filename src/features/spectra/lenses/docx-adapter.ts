@@ -3,7 +3,7 @@ import { parseXml, serializeNode, XmlElement, XmlText } from "@ariadng/office/xm
 import { latexToEquation } from "./equation-interchange";
 import { applyParagraphFormat, applyTableColumnWidths, docxLens, resolveParagraphStyleId, type DocxProjection } from "./docx-lens";
 import { TEXT_COLUMN_EMU, embedOmmlInJson, paragraphFormatForNode } from "../../../../shared/document-projection.mjs";
-import { documentContentToProseMirrorJson, type DocumentJsonNode } from "./document-projection";
+import { compactDocxProjectionForStorage, documentContentToProseMirrorJson, type DocumentJsonNode } from "./document-projection";
 import { docxRichInlineSchema, type DocxParagraphFormat } from "./projection-contracts";
 import { appendNoteReference, upsertNativeNote } from "./docx-academic";
 import { appendCommentBoundary, appendRevision, upsertNativeComment } from "./docx-academic-review";
@@ -138,6 +138,33 @@ function unsupportedNativeMedia(document: Document) {
     if (part.contentType === "image/png" || part.contentType === "image/jpeg") return [];
     return [part.name];
   });
+}
+
+function withNativeImageSources(node: DocumentJsonNode, media: ReadonlyMap<string, string>): DocumentJsonNode {
+  const attrs = record(node.attrs);
+  const src = node.type === "nativeDocxImage" && typeof attrs.partName === "string" ? media.get(attrs.partName) : undefined;
+  return {
+    ...node,
+    ...(src ? { attrs: { ...attrs, src } } : {}),
+    ...(node.content ? { content: node.content.map((child) => withNativeImageSources(child, media)) } : {}),
+  };
+}
+
+/**
+ * A Word file as a Word-bound document shows it: the strict-native projection
+ * as stored, with pictures inlined so it renders without the asset service.
+ * For the fidelity lab and previews; never stored.
+ */
+export async function docxPreviewContent(payload: Uint8Array) {
+  const opened = await docxLens.open(payload, "strict-native");
+  const content = compactDocxProjectionForStorage(opened.projection) as Record<string, unknown>;
+  const document = await Document.open(opened.preservedCarry.safePayload ?? payload);
+  const media = await mediaForDocument(document);
+  const tiptap = withNativeImageSources(
+    embedOmmlInJson(documentContentToProseMirrorJson(content), opened.projection) as DocumentJsonNode,
+    media,
+  );
+  return { ...content, tiptap };
 }
 
 /** The native DOCX importer used by component import and linked open readback. */

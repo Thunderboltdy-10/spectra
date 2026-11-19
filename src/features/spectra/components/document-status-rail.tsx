@@ -185,7 +185,7 @@ export function DocumentStatusRail({
     <footer className="document-rail" aria-label="Document status">
       <p className="document-rail-counts" aria-live="polite">
         {pages ? (
-          <span>
+          <span data-page-total={pages.total}>
             {pages.current ? `Page ${pages.current} of ${pages.total}` : `${pages.total} ${pages.total === 1 ? "page" : "pages"}`}
           </span>
         ) : null}

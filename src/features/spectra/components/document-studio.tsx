@@ -1,5 +1,6 @@
 ﻿"use client";
 
+import { loadPdfjs } from "@/lib/pdfjs";
 import { StudioToolPane } from "./studio-pane";
 import { describeFailure } from "@/components/ui/truthful-state";
 import { uniqueToken } from "@/lib/unique-token";
@@ -2074,7 +2075,7 @@ export function DocumentStudio({
           "floating objects",
         );
       } else if (name.endsWith(".pdf")) {
-        const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+        const pdfjs = await loadPdfjs();
         const bytes = new Uint8Array(await file.arrayBuffer());
         enforcePdfInput(bytes);
         const pdfOptions = {

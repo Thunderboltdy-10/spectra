@@ -32,6 +32,8 @@ import type { Editor as TiptapEditor, JSONContent } from "@tiptap/core";
 import {
   documentBlocksFromJson,
   docxRichBlockToJson,
+  renumberWordLists,
+  wordListShell,
 } from "../lenses/document-projection";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -1487,7 +1489,10 @@ export function documentJsonFromContent(
     if (!node.attrs || typeof node.attrs.blockId !== "string") return node;
     const nativeBlock = nativeBlocks.get(node.attrs.blockId);
     if (!nativeBlock) return node;
-    const richNode = docxRichBlockToJson(nativeBlock, nativeBinding);
+    // A list holding several Word paragraphs is more than its first block:
+    // rebuilding it from that block alone would drop the other items.
+    const items = (node.type === "bulletList" || node.type === "orderedList") ? node.content?.length ?? 0 : 0;
+    const richNode = items > 1 ? null : docxRichBlockToJson(nativeBlock, nativeBinding);
     if (richNode) return richNode as JSONContent;
     const attrs = record(nativeBlock.attrs);
     const styleId =
@@ -1542,7 +1547,7 @@ export function documentJsonFromContent(
     const normalized = normalizeDocumentInlineMarkup(tiptap as JSONContent);
     const semanticallyMapped = {
       ...normalized,
-      content: normalized.content?.map(nativeBlockSemantics),
+      content: renumberWordLists(normalized.content?.map(nativeBlockSemantics) ?? [], blocks),
     };
     if (!protectedIds.size) return semanticallyMapped;
     return {
@@ -1672,8 +1677,7 @@ export function documentJsonFromContent(
               )
               .filter(Boolean);
             return {
-              type: "bulletList",
-              attrs: nativeAttrs,
+              ...wordListShell(blockAttrs.list, nativeAttrs),
               content: (items.length > 0 ? items : [text]).map((item) => ({
                 type: "listItem",
                 content: [
@@ -1710,7 +1714,7 @@ export function documentJsonFromContent(
           },
           { type: "paragraph" },
         ];
-  return { type: "doc", content: contentNodes };
+  return { type: "doc", content: renumberWordLists(contentNodes, blocks) };
 }
 
 export const blocksFromJson = documentBlocksFromJson;
@@ -5465,6 +5469,7 @@ function ArtifactStudioEditor({
       }),
     [
       artifact.updatedAt,
+      bridge.status?.deviceId,
       dirty,
       historyIsMine,
       live.recovery.state,

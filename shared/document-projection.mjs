@@ -651,8 +651,7 @@ export function docxRichBlockToJson(value, binding) {
     }, attrs);
   if (block.type === "list")
     return withBlockFormatting({
-      type: "bulletList",
-      attrs: nativeAttrs,
+      ...wordListShell(attrs.list, nativeAttrs),
       content: [
         {
           type: "listItem",
@@ -726,8 +725,7 @@ function plainOrRichBlockToJson(blockValue, index, nativeBinding) {
     };
   if (block.type === "list")
     return {
-      type: "bulletList",
-      attrs: { blockId: id },
+      ...wordListShell(attrs.list, { blockId: id }),
       content: (value.split(/\r?\n/).filter(Boolean).length
         ? value.split(/\r?\n/).filter(Boolean)
         : [""]
@@ -1486,12 +1484,12 @@ export function documentContentToProseMirrorJson(contentValue) {
       });
       return {
         ...existing,
-        content: [...rebuiltContent, ...(before.get(null) ?? []).reverse()],
+        content: renumberWordLists([...rebuiltContent, ...(before.get(null) ?? []).reverse()], byId),
       };
     }
     return {
       ...existing,
-      content: existingContent.flatMap((node) => {
+      content: renumberWordLists(existingContent.flatMap((node) => {
         const blockId = node?.attrs?.blockId;
         const block =
           typeof blockId === "string" ? byId.get(blockId) : undefined;
@@ -1552,45 +1550,68 @@ export function documentContentToProseMirrorJson(contentValue) {
             },
           };
         return node;
-      }),
+      }), byId),
     };
   }
   const source = blocks.length ? blocks : [{ id: "intro", type: "paragraph", text: "" }];
   return {
     type: "doc",
-    content: numberWordLists(
-      source,
+    content: renumberWordLists(
       source.map((block, index) => blockToJson(block, index, content.nativeBinding)),
+      blockIndex(source),
     ),
   };
 }
 
 const WORD_LIST_TYPES = { lowerLetter: "a", upperLetter: "A", lowerRoman: "i", upperRoman: "I" };
 
+function blockIndex(blocks) {
+  return new Map(blocks.flatMap((block) => typeof block?.id === "string" && block.id ? [[block.id, block]] : []));
+}
+
+function wordListLevel(list) {
+  return Math.max(0, Math.min(8, Number(list.level) || 0));
+}
+
+/** The list node a Word list paragraph opens as: numbered or bulleted as Word
+ * draws it, at its Word level. The start is the list's own; renumberWordLists
+ * counts it on across the document. */
+export function wordListShell(listValue, attrs) {
+  const list = record(listValue);
+  const level = wordListLevel(list);
+  const levelAttrs = level ? { listLevel: level } : {};
+  if (typeof list.numId !== "string" || list.isBullet !== false)
+    return { type: "bulletList", attrs: { ...attrs, ...levelAttrs } };
+  const type = WORD_LIST_TYPES[list.format];
+  const start = Number.isFinite(Number(list.start)) ? Number(list.start) : 1;
+  return { type: "orderedList", attrs: { ...attrs, start, ...(type ? { type } : {}), ...levelAttrs } };
+}
+
+function topListItems(node) {
+  return Array.isArray(node?.content) ? node.content.filter((child) => child?.type === "listItem").length : 0;
+}
+
 /**
- * Each Word list paragraph is its own block, so it opens as a one-item list. A numbered one
- * must still read 1, 2, 3 (or a, b, c), counting on from the items before it in the same Word
- * list the way Word counts: per list and level, a shallower item restarting the deeper levels.
+ * Each Word list paragraph opens as a one-item list. A numbered one must still
+ * read 1, 2, 3 (or a, b, c), counting on from the items before it in the same
+ * Word list the way Word counts: per list and level, a shallower item
+ * restarting the deeper levels. Works on any top-level node sequence, keyed by
+ * the native block each node came from, so every path that builds editor JSON
+ * numbers the same way.
  */
-export function numberWordLists(blocks, nodes) {
+export function renumberWordLists(nodes, blockById) {
   const counters = new Map();
-  return nodes.map((node, index) => {
-    const list = record(record(blocks[index]?.attrs).list);
-    if (node?.type !== "bulletList" || typeof list.numId !== "string") return node;
-    const level = Math.max(0, Math.min(8, Number(list.level) || 0));
-    // The paragraph keeps its own block (and its Word paragraph); its depth shows as an indent.
-    if (list.isBullet !== false)
-      return level ? { ...node, attrs: { ...(node.attrs ?? {}), listLevel: level } } : node;
+  return nodes.map((node) => {
+    const blockId = node?.attrs?.blockId;
+    const list = record(record(typeof blockId === "string" ? blockById.get(blockId)?.attrs : undefined).list);
+    if (node?.type !== "orderedList" || typeof list.numId !== "string" || list.isBullet !== false) return node;
+    const level = wordListLevel(list);
     const levels = counters.get(list.numId) ?? [];
     const start = Number.isFinite(Number(list.start)) ? Number(list.start) : 1;
-    levels[level] = levels[level] === undefined ? start : levels[level] + 1;
+    const first = levels[level] === undefined ? start : levels[level] + 1;
+    levels[level] = first + Math.max(1, topListItems(node)) - 1;
     levels.length = level + 1;
     counters.set(list.numId, levels);
-    const type = WORD_LIST_TYPES[list.format];
-    return {
-      ...node,
-      type: "orderedList",
-      attrs: { ...(node.attrs ?? {}), start: levels[level], ...(type ? { type } : {}), ...(level ? { listLevel: level } : {}) },
-    };
+    return node.attrs?.start === first ? node : { ...node, attrs: { ...node.attrs, start: first } };
   });
 }

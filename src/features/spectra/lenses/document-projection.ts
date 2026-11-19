@@ -11,6 +11,8 @@ import {
   paragraphFormatFromAttrs as sharedParagraphFormatFromAttrs,
   authoredSemanticsEqual,
   restoreDocxEquationCarryMetadata,
+  renumberWordLists as sharedRenumberWordLists,
+  wordListShell as sharedWordListShell,
 } from "../../../../shared/document-projection.mjs";
 import { equationNodeToLatex, latexToEquation } from "./equation-interchange";
 import {
@@ -123,6 +125,20 @@ export function docxRichBlockToJson(
     parsed.data,
     binding,
   ) as DocumentJsonNode | null;
+}
+
+/** The list node a Word list paragraph opens as (numbered or bulleted, at its level). */
+export function wordListShell(list: unknown, attrs: Record<string, unknown>) {
+  return sharedWordListShell(list, attrs) as { type: "bulletList" | "orderedList"; attrs: Record<string, unknown> };
+}
+
+/** Number one-item Word lists on from the items before them, per Word list and level. */
+export function renumberWordLists<T extends { type?: string; attrs?: Record<string, unknown> }>(
+  nodes: readonly T[],
+  blocks: ReadonlyArray<Record<string, unknown>>,
+): T[] {
+  const byId = new Map(blocks.flatMap((block) => typeof block.id === "string" && block.id ? [[block.id, block] as const] : []));
+  return sharedRenumberWordLists(nodes, byId) as T[];
 }
 
 export function documentNodeText(node?: DocumentJsonNode): string {

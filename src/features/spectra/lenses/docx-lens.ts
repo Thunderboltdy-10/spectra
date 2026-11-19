@@ -1011,6 +1011,70 @@ function cellSpansOf(table: NativeTable) {
   return { cellSpans };
 }
 
+const BORDER_SIDES = ["top", "left", "bottom", "right", "start", "end", "insideH", "insideV"];
+const drawsSide = (side: XmlElement) =>
+  BORDER_SIDES.includes(side.localName) && !["none", "nil"].includes(side.getAttributeNs(WML_NAMESPACE, "val") ?? "none");
+
+/**
+ * Whether Word draws any line around or inside a table: its own borders, its
+ * table style's (through basedOn), or a cell's. A table with none is a layout
+ * table, and the page shows it without a grid. Word's default table style
+ * draws nothing, so a table that says nothing has no lines.
+ */
+function tableBordersOf(document: Document, table: { element: XmlElement }) {
+  const properties = table.element.find(WML_NAMESPACE, "tblPr");
+  const own = properties?.find(WML_NAMESPACE, "tblBorders");
+  if (own) return own.elements().some(drawsSide) || cellBorders(table) ? {} : { borders: "none" as const };
+  const styles = document._internal().styles()?.doc.root;
+  let styleId = properties?.find(WML_NAMESPACE, "tblStyle")?.getAttributeNs(WML_NAMESPACE, "val") ?? undefined;
+  const seen = new Set<string>();
+  while (styles && styleId && !seen.has(styleId)) {
+    seen.add(styleId);
+    const style = styles.elements().find((element) => element.localName === "style" && element.getAttributeNs(WML_NAMESPACE, "styleId") === styleId);
+    const borders = style?.find(WML_NAMESPACE, "tblPr")?.find(WML_NAMESPACE, "tblBorders");
+    if (borders) return borders.elements().some(drawsSide) || cellBorders(table) ? {} : { borders: "none" as const };
+    styleId = style?.find(WML_NAMESPACE, "basedOn")?.getAttributeNs(WML_NAMESPACE, "val") ?? undefined;
+  }
+  return cellBorders(table) ? {} : { borders: "none" as const };
+}
+
+function cellBorders(table: { element: XmlElement }) {
+  return descendants(table.element).some((element) =>
+    element.localName === "tcBorders" && element.namespaceUri() === WML_NAMESPACE && element.elements().some(drawsSide));
+}
+
+/**
+ * The space inside a table's cells, in points (top, right, bottom, left): the
+ * table's own default, else its first cell's, else Word's 0 / 5.4 pt.
+ */
+function cellPaddingOf(table: { element: XmlElement; rows(): readonly { cells(): readonly NativeTableCell[] }[] }) {
+  const margins = table.element.find(WML_NAMESPACE, "tblPr")?.find(WML_NAMESPACE, "tblCellMar") ??
+    table.rows()[0]?.cells()[0]?.element.find(WML_NAMESPACE, "tcPr")?.find(WML_NAMESPACE, "tcMar");
+  if (!margins) return {};
+  const side = (names: string[], fallback: number) => {
+    const element = margins.elements().find((child) => names.includes(child.localName));
+    const twips = Number(element?.getAttributeNs(WML_NAMESPACE, "w"));
+    const type = element?.getAttributeNs(WML_NAMESPACE, "type") ?? "dxa";
+    return element && Number.isFinite(twips) && type === "dxa" ? Math.round((twips / 20) * 10) / 10 : fallback;
+  };
+  const padding = [side(["top"], 0), side(["right", "end"], 5.4), side(["bottom"], 0), side(["left", "start"], 5.4)];
+  return padding.every((value) => value >= 0 && value <= 72) ? { cellPadding: padding } : {};
+}
+
+/** Each cell's fill, kept only when a cell has one. */
+function cellShadingOf(table: { rows(): readonly { cells(): readonly NativeTableCell[] }[] }) {
+  let shaded = false;
+  const cellShading = table.rows().map((row) =>
+    row.cells().map((cell) => {
+      const fill = cell.element.find(WML_NAMESPACE, "tcPr")?.find(WML_NAMESPACE, "shd")?.getAttributeNs(WML_NAMESPACE, "fill");
+      if (!fill || !/^[0-9a-f]{6}$/i.test(fill)) return null;
+      shaded = true;
+      return fill.toUpperCase();
+    }),
+  );
+  return shaded ? { cellShading } : {};
+}
+
 /**
  * Each cell's paragraph style, kept only when a cell names one. A cell's words
  * are compared against it, so text typed in an Arial cell style reads as plain.
@@ -2971,11 +3035,12 @@ function projectedParagraphFormat(paragraph: Paragraph): DocxParagraphFormat | u
   const borders = properties?.find(WML_NAMESPACE, "pBdr");
   const shading = properties?.find(WML_NAMESPACE, "shd");
   const fill = shading?.getAttributeNs(WML_NAMESPACE, "fill");
-  const border = borders
-    ? borders.elements().length >= 4
-      ? "all"
-      : (borders.elements()[0]?.localName ?? "all")
-    : null;
+  // Only a side Word draws counts: Word writes `w:val="none"` sides to switch
+  // a border off, and a paragraph with only those has no border at all.
+  const drawn = (borders?.elements() ?? []).filter((side) =>
+    ["top", "left", "bottom", "right"].includes(side.localName) &&
+    !["none", "nil"].includes(side.getAttributeNs(WML_NAMESPACE, "val") ?? "none"));
+  const border = drawn.length >= 4 ? "all" : drawn[0]?.localName ?? null;
   const format: DocxParagraphFormat = {
     alignment:
       resolved.alignment === "center" ||
@@ -3713,6 +3778,9 @@ async function projectDocument(
             ...(readOnly ? { nativeReadOnly: true } : {}),
             ...cellAlignmentsOf(document, table),
             ...cellStylesOf(table),
+            ...cellShadingOf(table),
+            ...cellPaddingOf(table),
+            ...tableBordersOf(document, table),
             ...cellSpansOf(table),
           },
         });

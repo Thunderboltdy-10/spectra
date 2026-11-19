@@ -102,6 +102,10 @@ export function wordStyleSheet(catalogue: DocxStyleCatalogue | undefined, scope:
     ].join("; ")}; }`,
   );
   rules.push(`${root} :where(p, li > p) { ${declarations(base).join("; ")}; }`);
+  // Word's table lines are the text's colour, not a soft rule, and a header
+  // row carries no fill Word didn't give it.
+  rules.push(`${root} :where(td, th) { border-color: color-mix(in oklab, var(--text-primary) 72%, transparent); padding: var(--cell-padding, 0 5.4pt); }`);
+  rules.push(`${root} :where(th) { background: transparent; }`);
   rules.push(...colorRules(`${root} :where(p)`, base.color));
   const seen = new Set<string>();
   for (const [id, style] of Object.entries(catalogue.paragraph)) {

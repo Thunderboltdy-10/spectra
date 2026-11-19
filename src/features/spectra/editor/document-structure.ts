@@ -217,7 +217,10 @@ export const ParagraphFrame = Extension.create<Record<string, never>, { nextStyl
               attributes.frameShading
                 ? {
                     "data-shading": attributes.frameShading,
-                    style: `background-color:${attributes.frameShading}`,
+                    // White shading is Word's page colour: on Spectra's paper it draws nothing.
+                    ...(/^#?f{3}(?:f{3})?$/iu.test(String(attributes.frameShading).trim())
+                      ? {}
+                      : { style: `background-color:${attributes.frameShading}` }),
                   }
                 : {},
           },

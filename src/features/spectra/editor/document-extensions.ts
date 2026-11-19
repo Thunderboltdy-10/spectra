@@ -3,7 +3,8 @@ import type { AnyExtension } from "@tiptap/core";
 import { getSchema } from "@tiptap/core";
 import Highlight from "@tiptap/extension-highlight";
 import TiptapLink from "@tiptap/extension-link";
-import { Table } from "@tiptap/extension-table";
+import { Table, TableView } from "@tiptap/extension-table";
+import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { TableCell } from "@tiptap/extension-table-cell";
 import { TableHeader } from "@tiptap/extension-table-header";
 import { TableRow } from "@tiptap/extension-table-row";
@@ -35,7 +36,51 @@ import {
 } from "./reference-citation-nodes";
 import { StableBlockId } from "./stable-block-id";
 
-/** Heading levels a document holds; Word has nine, the editor shows six. */
+/** A cell's fill from Word, drawn as its background. */
+function cellFill(this: { parent?: () => Record<string, unknown> }) {
+  return {
+    ...this.parent?.(),
+    background: {
+      default: null,
+      parseHTML: (element: HTMLElement) => {
+        const value = element.getAttribute("data-background");
+        return value && /^#[0-9a-f]{6}$/i.test(value) ? value : null;
+      },
+      renderHTML: (attributes: Record<string, unknown>) =>
+        typeof attributes.background === "string" && /^#[0-9a-f]{6}$/i.test(attributes.background)
+          ? { "data-background": attributes.background, style: `--cell-fill: ${attributes.background}` }
+          : {},
+    },
+  };
+}
+
+/**
+ * The editor's table view, drawing the Word look a table carries: no lines
+ * for a layout table, and Word's own space inside its cells. TipTap's view
+ * draws only column widths, so these attributes are applied here too.
+ */
+class WordTableView extends TableView {
+  constructor(node: ProseMirrorNode, cellMinWidth: number, view?: unknown, HTMLAttributes?: Record<string, unknown>) {
+    super(node, cellMinWidth, view as never, HTMLAttributes as never);
+    this.applyLook(node);
+  }
+
+  update(node: ProseMirrorNode) {
+    if (!super.update(node)) return false;
+    this.applyLook(node);
+    return true;
+  }
+
+  private applyLook(node: ProseMirrorNode) {
+    this.table.toggleAttribute("data-borderless", Boolean(node.attrs.borderless));
+    const padding = typeof node.attrs.cellPadding === "string" && /^(?:[\d.]+pt ?){4}$/.test(node.attrs.cellPadding)
+      ? node.attrs.cellPadding
+      : "";
+    if (padding) this.table.style.setProperty("--cell-padding", padding);
+    else this.table.style.removeProperty("--cell-padding");
+  }
+}
+
 /**
  * A run's font as Word names it, drawn with its open twin behind it so text in
  * Calibri measures as Calibri where Calibri isn't installed. The mark keeps the
@@ -64,6 +109,7 @@ const WordFontFamily = FontFamily.extend({
   },
 });
 
+/** Heading levels a document holds; Word has nine, the editor shows six. */
 export const DOCUMENT_HEADING_LEVELS = [1, 2, 3, 4, 5, 6] as const;
 
 export type DocumentSchemaOptions = {
@@ -100,12 +146,28 @@ export function documentSchemaExtensions(options: DocumentSchemaOptions = {}): A
             renderHTML: (attributes: Record<string, unknown>) =>
               attributes.spectraAuthored ? { "data-spectra-authored": "true" } : {},
           },
+          // The space Word leaves inside this table's cells ("5pt 5pt 5pt 5pt").
+          cellPadding: {
+            default: null,
+            parseHTML: (element: HTMLElement) => element.style.getPropertyValue("--cell-padding").trim() || null,
+            renderHTML: (attributes: Record<string, unknown>) =>
+              typeof attributes.cellPadding === "string" && /^(?:[\d.]+pt ?){4}$/.test(attributes.cellPadding)
+                ? { style: `--cell-padding: ${attributes.cellPadding}` }
+                : {},
+          },
+          // A Word table drawn without lines (a layout table).
+          borderless: {
+            default: false,
+            parseHTML: (element: HTMLElement) => element.hasAttribute("data-borderless"),
+            renderHTML: (attributes: Record<string, unknown>) =>
+              attributes.borderless ? { "data-borderless": "" } : {},
+          },
         };
       },
-    }).configure({ resizable: true, lastColumnResizable: true }),
+    }).configure({ resizable: true, lastColumnResizable: true, View: WordTableView as unknown as typeof TableView }),
     TableRow,
-    TableCell,
-    TableHeader,
+    TableCell.extend({ addAttributes: cellFill }),
+    TableHeader.extend({ addAttributes: cellFill }),
     TaskList,
     TaskItem.configure({ nested: true }),
     // DOCX pictures are inline image nodes inside their source paragraph; a

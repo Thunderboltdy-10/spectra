@@ -189,7 +189,7 @@ export function authoredSemanticValue(value, parentKey) {
         return [];
       if (key === "ommlXml" || key === "ommlSourceLatex" || key === "ommlRef") return [];
       if (source.kind === "citation" && key === "instruction") return [];
-      if (key === "nativePath" || key === "nativeReadOnly" || key === "nativeStyleId" || key === "readOnlyReason" || key === "number" || key === "cellStyles")
+      if (key === "nativePath" || key === "nativeReadOnly" || key === "nativeStyleId" || key === "readOnlyReason" || key === "number" || key === "cellStyles" || key === "cellShading" || key === "borders" || key === "cellPadding")
         return [];
       // Inline runs are the authored formatting source. attrs.format is a
       // resolved native convenience value and would otherwise disagree with a
@@ -578,6 +578,29 @@ function withCellSpans(rows, cellSpans) {
   return merged.every((row) => row.content.length) ? merged : rows;
 }
 
+/** Word's cell fills (`attrs.cellShading`, one entry per physical cell) as cell backgrounds. */
+function withCellShading(rows, shading) {
+  if (!Array.isArray(shading)) return rows;
+  return rows.map((row, rowIndex) => ({
+    ...row,
+    content: row.content.map((cell, columnIndex) => {
+      const fill = shading[rowIndex]?.[columnIndex];
+      return typeof fill === "string" && /^[0-9A-F]{6}$/i.test(fill)
+        ? { ...cell, attrs: { ...(cell.attrs ?? {}), background: `#${fill.toUpperCase()}` } }
+        : cell;
+    }),
+  }));
+}
+
+/** A table Word draws without lines keeps that look. */
+function tableLook(attrs) {
+  const padding = Array.isArray(attrs.cellPadding) && attrs.cellPadding.length === 4 &&
+    attrs.cellPadding.every((value) => typeof value === "number" && value >= 0 && value <= 72)
+    ? { cellPadding: attrs.cellPadding.map((value) => `${value}pt`).join(" ") }
+    : {};
+  return { ...(attrs.borders === "none" ? { borderless: true } : {}), ...padding };
+}
+
 function withCellAlignment(rowIndex, columnIndex, content, alignments) {
   const row = Array.isArray(alignments) ? alignments[rowIndex] : undefined;
   const textAlign = Array.isArray(row) ? row[columnIndex] : undefined;
@@ -630,8 +653,8 @@ export function docxRichBlockToJson(value, binding) {
   )
     return {
       type: "table",
-      attrs: nativeAttrs,
-      content: withCellSpans(block.richRows.map((row, rowIndex) => ({
+      attrs: { ...nativeAttrs, ...tableLook(attrs) },
+      content: withCellSpans(withCellShading(block.richRows.map((row, rowIndex) => ({
         type: "tableRow",
         content: row.map((cell, columnIndex) => {
           const expected = Array.isArray(block.rows?.[rowIndex])
@@ -654,7 +677,7 @@ export function docxRichBlockToJson(value, binding) {
           ),
           };
         }),
-      })), attrs.cellSpans),
+      })), attrs.cellShading), attrs.cellSpans),
     };
 
   const inlineContent = Array.isArray(block.inlineContent)
@@ -846,8 +869,9 @@ function plainOrRichBlockToJson(blockValue, index, nativeBinding) {
       attrs: {
         blockId: id,
         ...(attrs.nativeReadOnly === true ? { nativeReadOnly: true } : {}),
+        ...tableLook(attrs),
       },
-      content: withCellSpans((rows.length ? rows : [[""]]).map((row, rowIndex) => ({
+      content: withCellSpans(withCellShading((rows.length ? rows : [[""]]).map((row, rowIndex) => ({
         type: "tableRow",
         content: row.map((cell, columnIndex) => ({
           type: rowIndex === 0 && attrs.headerRow !== false ? "tableHeader" : "tableCell",
@@ -858,7 +882,7 @@ function plainOrRichBlockToJson(blockValue, index, nativeBinding) {
             attrs.cellAlignments,
           ),
         })),
-      })), attrs.cellSpans),
+      })), attrs.cellShading), attrs.cellSpans),
     };
   }
   return withBlockFormatting({

@@ -169,6 +169,12 @@
    --------------------------------------------------------------------------- */
 
 /* A Word list item's level: Word indents each level by half an inch. */
+/* Word's cell fills. A dark page keeps the hue but lets the words read. */
+.spectra-document-studio .ProseMirror :is(td, th)[data-background] { background-color: var(--cell-fill); }
+.dark .spectra-document-studio .ProseMirror :is(td, th)[data-background] { background-color: color-mix(in oklab, var(--cell-fill) 30%, var(--card-paper, transparent)); }
+/* A table Word draws without lines keeps faint guides while it is edited, as Word's gridlines do. */
+.spectra-document-studio .ProseMirror table[data-borderless] :is(td, th) { border-color: transparent; outline: 1px dashed color-mix(in oklab, var(--text-primary) 12%, transparent); outline-offset: -1px; }
+
 /* Word numbers outline headings itself; the page shows that number beside the text. */
 .spectra-document-studio .ProseMirror :is(h1, h2, h3, h4, h5, h6)[data-number]::before {
   content: attr(data-number);
@@ -239,7 +245,8 @@
   border-radius: 0;
 }
 
-.spectra-document-studio .ProseMirror [data-shading] {
+/* White shading draws nothing on the paper, so it takes no room either. */
+.spectra-document-studio .ProseMirror [data-shading][style*="background"] {
   padding: 8px 10px;
   border-radius: 3px;
 }

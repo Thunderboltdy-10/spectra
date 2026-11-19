@@ -145,6 +145,21 @@ import { entryOf, withStacked } from "../editor/reference-stack";
 import { wordFontVariables } from "../editor/word-fonts";
 import { wordStyleSheet } from "../editor/word-style-sheet";
 import { docxStyleCatalogueSchema } from "../lenses/projection-contracts";
+import { pageGeometry, twipsCss, withPreset, type PageGeometry } from "../lenses/page-geometry";
+import { DocumentPageChrome, type PageChromeTemplates } from "./document-page-chrome";
+
+/** The paper and its margins as the page's CSS reads them, in Word's own points. */
+function pageStyle(geometry: PageGeometry) {
+  return {
+    "--spectra-page-width": twipsCss(geometry.width),
+    "--spectra-page-height": twipsCss(geometry.height),
+    "--spectra-page-margin": twipsCss(geometry.left),
+    "--spectra-page-margin-top": twipsCss(geometry.top),
+    "--spectra-page-margin-right": twipsCss(geometry.right),
+    "--spectra-page-margin-bottom": twipsCss(geometry.bottom),
+    "--spectra-page-margin-left": twipsCss(geometry.left),
+  } as CSSProperties;
+}
 
 const NO_SPECULATION: readonly SpeculativeBlockText[] = [];
 
@@ -993,8 +1008,22 @@ export function DocumentStudio({
         Number.isFinite(columns) && columns > 0 ? Math.min(3, columns) : 1,
       header: typeof stored.header === "string" ? stored.header : "",
       footer: typeof stored.footer === "string" ? stored.footer : "",
+      // Word's exact paper and margins, and its header and footer as each page draws them.
+      ...(stored.page && typeof stored.page === "object" ? { page: stored.page as Partial<PageGeometry> } : {}),
+      ...(stored.chrome && typeof stored.chrome === "object" ? { chrome: stored.chrome as PageChromeTemplates } : {}),
     };
   }, [content]);
+  const geometry = useMemo(() => pageGeometry(pageSetup), [pageSetup]);
+  /** What each sheet's margins carry: Word's header and footer, else Spectra's running head and foot. */
+  const chromeTemplates = useMemo<PageChromeTemplates>(() => {
+    const own = pageSetup.chrome ?? {};
+    return {
+      header: own.header ?? (pageSetup.header || undefined),
+      footer: own.footer ?? (pageSetup.footer ? pageSetup.footer.split("\n").map((line) => `\t${line}`).join("\n") : undefined),
+      ...(own.firstHeader !== undefined ? { firstHeader: own.firstHeader } : {}),
+      ...(own.firstFooter !== undefined ? { firstFooter: own.firstFooter } : {}),
+    };
+  }, [pageSetup]);
   /** Named styles this document defines, over and above the built-in six. */
   const namedStyles = useMemo(() => {
     const stored = record(content).namedStyles;
@@ -3050,18 +3079,17 @@ export function DocumentStudio({
     },
     page: {
       size: pageSetup.size,
-      setSize: (size) => patchContent({ pageSetup: { ...pageSetup, size } }),
+      setSize: (size) => patchContent({ pageSetup: withPreset(pageSetup, { size }) }),
       orientation: pageSetup.orientation,
       setOrientation: (orientation) =>
         patchContent({
-          pageSetup: {
-            ...pageSetup,
+          pageSetup: withPreset(pageSetup, {
             orientation: orientation === "landscape" ? "landscape" : "portrait",
-          },
+          }),
         }),
       margins: pageSetup.margins,
       setMargins: (margins) =>
-        patchContent({ pageSetup: { ...pageSetup, margins } }),
+        patchContent({ pageSetup: withPreset(pageSetup, { margins }) }),
       columns: pageSetup.columns,
       setColumns: (columns) =>
         patchContent({
@@ -3418,6 +3446,7 @@ export function DocumentStudio({
       data-orientation={pageSetup.orientation}
       data-margins={pageSetup.margins}
       data-columns={pageSetup.columns > 1 ? pageSetup.columns : undefined}
+      style={pageStyle(geometry)}
       data-show-kept={(showKept && syncedFile) || undefined}
     >
       {keptMenu ? createPortal(
@@ -3761,6 +3790,10 @@ export function DocumentStudio({
                 pageSetup: {
                   ...pageSetup,
                   [chromeDraft.slot]: chromeDraft.text,
+                  // The written words replace what Word's part drew for this slot.
+                  ...(pageSetup.chrome
+                    ? { chrome: (({ [chromeDraft.slot]: _slot, ...rest }) => rest)(pageSetup.chrome) }
+                    : {}),
                 },
               });
               setChromeDraft(null);
@@ -4045,20 +4078,18 @@ export function DocumentStudio({
                   footer={pageSetup.footer}
                 />
               ) : null}
-              {pageLayout === "page" && pageSetup.header ? (
-                <p className="spectra-document-page-chrome" data-slot="header">
-                  {pageSetup.header}
-                </p>
+              {pageLayout === "page" ? (
+                <DocumentPageChrome
+                  total={pageCount?.total ?? 1}
+                  geometry={geometry}
+                  templates={chromeTemplates}
+                  sheetGap={14}
+                />
               ) : null}
               <EditorContent
                 editor={editor}
                 className="tiptap-root spectra-document-canvas [&_.ProseMirror-focused]:outline-none [&_.ProseMirror]:outline-none"
               />
-              {pageLayout === "page" && pageSetup.footer ? (
-                <p className="spectra-document-page-chrome" data-slot="footer">
-                  {pageSetup.footer}
-                </p>
-              ) : null}
             </div>
           </main>
         </div>

@@ -14,6 +14,7 @@ import { latexToEquation } from "./equation-interchange";
 import { docxOperationsBetween } from "./document-projection";
 import { docxStyleCatalogue, paragraphStyleRoles, wordListCounter } from "./docx-styles";
 import { blockStyle, directFormatBlocks, styleParagraphValue } from "./direct-run-format";
+import { CHROME_DISTANCE_TWIPS, MARGIN_TWIPS, MAX_PAGE_TWIPS, PAGE_SIZES_TWIPS, nearestMargins, nearestPaper, type PageGeometry } from "./page-geometry";
 import type {
   LensCapabilitySet,
   LensCompatibilityProfile,
@@ -3172,13 +3173,87 @@ function numberAttribute(element: XmlElement | undefined, namespace: string, nam
   return Number.isFinite(value) && value > 0 ? value : undefined;
 }
 
-const PAGE_SIZES_TWIPS: Record<string, [number, number]> = {
-  a4: [11_906, 16_838],
-  letter: [12_240, 15_840],
-  legal: [12_240, 20_160],
-  a5: [8_391, 11_906],
-};
-const MARGIN_TWIPS: Record<string, number> = { narrow: 680, normal: 1_440, wide: 2_268 };
+/** A twips attribute, 0 included (a zero margin is a margin). */
+function twipsAttribute(element: XmlElement | undefined, name: string) {
+  const value = Math.abs(Number(element?.getAttributeNs(WML_NAMESPACE, name)));
+  return element?.getAttributeNs(WML_NAMESPACE, name) && Number.isFinite(value) && value <= MAX_PAGE_TWIPS ? Math.round(value) : undefined;
+}
+
+const FIELD_TOKENS: Record<string, string> = { PAGE: "{PAGE}", NUMPAGES: "{NUMPAGES}", SECTIONPAGES: "{SECTIONPAGES}" };
+const fieldToken = (instruction: string) => FIELD_TOKENS[instruction.trim().split(/\s+/u)[0]?.toUpperCase() ?? ""];
+
+/**
+ * A header or footer as the page shows it: its words, with page-number fields
+ * as {PAGE}, {NUMPAGES} or {SECTIONPAGES} so each page can draw its own.
+ */
+function chromeTemplate(root: XmlElement) {
+  const lines: string[] = [];
+  for (const paragraph of root.findAll(WML_NAMESPACE, "p")) {
+    let line = "";
+    // Complex fields: begin, instruction, separate, cached result, end.
+    let depth = 0;
+    let instruction = "";
+    let inResult = false;
+    let token: string | undefined;
+    const hidden = () => depth > 0 && (!inResult || token !== undefined);
+    const walk = (element: XmlElement) => {
+      for (const child of element.elements()) {
+        if (child.namespaceUri() !== WML_NAMESPACE) continue;
+        switch (child.localName) {
+          case "fldSimple": {
+            const simple = fieldToken(child.getAttributeNs(WML_NAMESPACE, "instr") ?? "");
+            if (simple) line += simple;
+            else walk(child);
+            break;
+          }
+          case "fldChar": {
+            const type = child.getAttributeNs(WML_NAMESPACE, "fldCharType");
+            if (type === "begin") {
+              depth += 1;
+              if (depth === 1) { instruction = ""; inResult = false; token = undefined; }
+            } else if (type === "separate" && depth === 1) {
+              token = fieldToken(instruction);
+              inResult = true;
+              if (token) line += token;
+            } else if (type === "end") {
+              if (depth === 1 && !inResult) {
+                const ended = fieldToken(instruction);
+                if (ended) line += ended;
+              }
+              depth = Math.max(0, depth - 1);
+              if (!depth) { inResult = false; token = undefined; }
+            }
+            break;
+          }
+          case "instrText":
+            if (depth === 1 && !inResult) instruction += child.text();
+            break;
+          case "t":
+            if (!hidden()) line += child.text();
+            break;
+          case "tab":
+            if (!hidden()) line += "\t";
+            break;
+          case "delText":
+          case "pPr":
+          case "rPr":
+            break;
+          default:
+            walk(child);
+        }
+      }
+    };
+    walk(paragraph);
+    // A centred or right-aligned line is drawn on Word's centre or right tab stop.
+    const alignment = paragraph.find(WML_NAMESPACE, "pPr")?.find(WML_NAMESPACE, "jc")?.getAttributeNs(WML_NAMESPACE, "val");
+    if (line && !line.includes("\t")) {
+      if (alignment === "center") line = `\t${line}`;
+      else if (alignment === "right" || alignment === "end") line = `\t\t${line}`;
+    }
+    lines.push(line);
+  }
+  return lines.join("\n").replace(/\n+$/u, "");
+}
 
 function pageSetupFromDocument(document: Document) {
   const sections = sectionProperties(document);
@@ -3189,14 +3264,20 @@ function pageSetupFromDocument(document: Document) {
   const landscape = pgSz?.getAttributeNs(WML_NAMESPACE, "orient") === "landscape" || width > height;
   const portraitWidth = landscape ? height : width;
   const portraitHeight = landscape ? width : height;
-  const size = Object.entries(PAGE_SIZES_TWIPS).find(([, dimensions]) =>
-    dimensions[0] === portraitWidth && dimensions[1] === portraitHeight,
-  )?.[0] ?? "a4";
+  const size = nearestPaper({ width: portraitWidth, height: portraitHeight }) ?? "a4";
   const pgMar = section?.find(WML_NAMESPACE, "pgMar");
-  const margin = numberAttribute(pgMar, WML_NAMESPACE, "left") ?? MARGIN_TWIPS.normal;
-  const margins = Object.entries(MARGIN_TWIPS).sort(([, left], [, right]) =>
-    Math.abs(left - margin) - Math.abs(right - margin),
-  )[0]?.[0] ?? "normal";
+  const margin = numberAttribute(pgMar, WML_NAMESPACE, "left") ?? MARGIN_TWIPS.normal!;
+  const margins = nearestMargins(margin);
+  const page: PageGeometry = {
+    width,
+    height,
+    top: twipsAttribute(pgMar, "top") ?? MARGIN_TWIPS.normal!,
+    right: twipsAttribute(pgMar, "right") ?? MARGIN_TWIPS.normal!,
+    bottom: twipsAttribute(pgMar, "bottom") ?? MARGIN_TWIPS.normal!,
+    left: twipsAttribute(pgMar, "left") ?? MARGIN_TWIPS.normal!,
+    header: twipsAttribute(pgMar, "header") ?? CHROME_DISTANCE_TWIPS,
+    footer: twipsAttribute(pgMar, "footer") ?? CHROME_DISTANCE_TWIPS,
+  };
   const cols = numberAttribute(section?.find(WML_NAMESPACE, "cols"), WML_NAMESPACE, "num") ?? 1;
   const readChrome = (slot: "header" | "footer") => {
     const localName = `${slot}Reference`;
@@ -3210,13 +3291,36 @@ function pageSetupFromDocument(document: Document) {
       : document.footers().find((candidate) => candidate.partName === part?.name);
     return info?.text() ?? "";
   };
+  // What each page draws: the default header and footer, and the first page's
+  // own when Word gives the section a different first page.
+  const templates: Record<string, string> = {};
+  const loaded = document._internal().headerFooterParts();
+  const templateOf = (slot: "header" | "footer", type: "default" | "first") => {
+    const ref = section?.findAll(WML_NAMESPACE, `${slot}Reference`).find((candidate) =>
+      (candidate.getAttributeNs(WML_NAMESPACE, "type") ?? "default") === type,
+    );
+    const part = ref ? referencePart(document, ref) : undefined;
+    const root = part ? loaded.find((candidate) => candidate.pd.part.name === part.name)?.pd.doc.root : undefined;
+    return root ? chromeTemplate(root) : undefined;
+  };
+  for (const slot of ["header", "footer"] as const) {
+    const template = templateOf(slot, "default");
+    if (template !== undefined) templates[slot] = template;
+  }
+  const titlePage = section?.find(WML_NAMESPACE, "titlePg");
+  if (titlePage && !["0", "false", "off"].includes(titlePage.getAttributeNs(WML_NAMESPACE, "val") ?? "")) {
+    templates.firstHeader = templateOf("header", "first") ?? "";
+    templates.firstFooter = templateOf("footer", "first") ?? "";
+  }
   return {
+    page,
     size,
     orientation: landscape ? "landscape" as const : "portrait" as const,
     margins,
     columns: Math.min(3, Math.max(1, Math.round(cols))),
     header: readChrome("header"),
     footer: readChrome("footer"),
+    ...(Object.keys(templates).length ? { chrome: templates } : {}),
     ...(sections.length > 1 ? { sectionIndex: sections.length - 1 } : {}),
   };
 }
@@ -3227,6 +3331,7 @@ function setSectionPageSetup(document: Document, setup: {
   orientation?: "portrait" | "landscape";
   margins?: string;
   columns?: number;
+  page?: Partial<PageGeometry>;
 }) {
   const section = sectionAt(document, setup.sectionIndex);
   if (setup.size !== undefined || setup.orientation !== undefined) {
@@ -3248,6 +3353,27 @@ function setSectionPageSetup(document: Document, setup: {
     const value = String(MARGIN_TWIPS[setup.margins.toLowerCase()] ?? MARGIN_TWIPS.normal);
     for (const side of ["top", "right", "bottom", "left"])
       margin.setAttributeNs(WML_NAMESPACE, side, value);
+  }
+  // Exact numbers win over the presets they were set beside.
+  if (setup.page) {
+    const page = setup.page;
+    if (page.width !== undefined || page.height !== undefined) {
+      const pageSize = orderedSectionChild(section, "pgSz");
+      if (page.width !== undefined) pageSize.setAttributeNs(WML_NAMESPACE, "w", String(page.width));
+      if (page.height !== undefined) pageSize.setAttributeNs(WML_NAMESPACE, "h", String(page.height));
+      const w = Number(pageSize.getAttributeNs(WML_NAMESPACE, "w"));
+      const h = Number(pageSize.getAttributeNs(WML_NAMESPACE, "h"));
+      if (w > h) pageSize.setAttributeNs(WML_NAMESPACE, "orient", "landscape");
+      else pageSize.removeAttributeNs(WML_NAMESPACE, "orient");
+    }
+    const sides = (["top", "right", "bottom", "left", "header", "footer"] as const).filter((side) => page[side] !== undefined);
+    if (sides.length) {
+      const margin = orderedSectionChild(section, "pgMar");
+      for (const side of sides) margin.setAttributeNs(WML_NAMESPACE, side, String(page[side]));
+      for (const side of ["top", "right", "bottom", "left", "header", "footer", "gutter"])
+        if (!margin.getAttributeNs(WML_NAMESPACE, side))
+          margin.setAttributeNs(WML_NAMESPACE, side, side === "gutter" ? "0" : String(side === "header" || side === "footer" ? CHROME_DISTANCE_TWIPS : MARGIN_TWIPS.normal));
+    }
   }
   if (setup.columns !== undefined) {
     const columns = Math.min(3, Math.max(1, Math.round(setup.columns)));
@@ -4031,7 +4157,8 @@ export async function docxProjectionSemanticDigest(projection: Pick<DocxProjecti
     new TextEncoder().encode(
       JSON.stringify({
         blocks: authoredSemanticValue(semanticBlocks.map((block) => docxProjectionBlockSchema.parse({ id: "semantic-block", ...block }))),
-        pageSetup: authoredSemanticValue(projection.pageSetup ?? null),
+        // The page's drawn header and footer follow from their text and Word's fields.
+        pageSetup: authoredSemanticValue(projection.pageSetup ? (({ chrome: _chrome, ...setup }) => setup)(projection.pageSetup) : null),
       }),
     ),
   );
@@ -4120,7 +4247,11 @@ export async function docxProjectionReadbackDigest(
   // Both sides compare by how the text looks: what a run's paragraph style
   // already gives it is not part of what was written.
   const catalogue = readbackProjection.styles ?? requestedProjection.styles;
-  const readback = { ...readbackProjection, blocks: directFormatBlocks(readbackProjection.blocks, catalogue) };
+  // A request made before pages carried exact numbers asks only for its presets.
+  const readbackPage = readbackProjection.pageSetup && !requestedProjection.pageSetup?.page
+    ? (({ page: _page, ...setup }) => setup)(readbackProjection.pageSetup)
+    : readbackProjection.pageSetup;
+  const readback = { ...readbackProjection, ...(readbackPage ? { pageSetup: readbackPage } : {}), blocks: directFormatBlocks(readbackProjection.blocks, catalogue) };
   const requested = { ...requestedProjection, blocks: directFormatBlocks(requestedProjection.blocks, catalogue) };
   const blocks = readback.blocks.map((block, index) => {
     const intent = requested.blocks[index];

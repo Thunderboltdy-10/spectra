@@ -77,7 +77,8 @@
    paper, so what the writer measures on screen is what comes out of the
    printer. */
 .spectra-document-studio[data-layout="page"] .ProseMirror {
-  padding: var(--spectra-page-margin);
+  padding: var(--spectra-page-margin-top, var(--spectra-page-margin)) var(--spectra-page-margin-right, var(--spectra-page-margin))
+    var(--spectra-page-margin-bottom, var(--spectra-page-margin)) var(--spectra-page-margin-left, var(--spectra-page-margin));
 }
 
 /* Columns are a section property in Word and a real multi-column flow here.
@@ -574,21 +575,46 @@
    paragraph they can write in.
    --------------------------------------------------------------------------- */
 
-.spectra-document-page-chrome {
-  padding: 10mm var(--spectra-page-margin, 25mm) 0;
-  color: var(--text-tertiary);
-  font-size: var(--text-micro);
+.document-page-chrome {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
 }
 
-.spectra-document-page-chrome[data-slot="header"] {
-  margin-bottom: calc(-1 * var(--spectra-page-margin, 25mm) + 8mm);
+/* One sheet's margins. The header hangs its distance below the paper's top;
+   the footer stands its distance above the paper's foot. */
+.document-page-chrome-sheet {
+  position: absolute;
+  inset-inline: 0;
+  top: calc(var(--sheet) * var(--spectra-page-height));
+  height: calc(var(--spectra-page-height) - var(--chrome-gap));
+  color: color-mix(in oklab, var(--text-primary) 62%, transparent);
+  font-size: 10pt;
+  line-height: 1.2;
 }
 
-.spectra-document-page-chrome[data-slot="footer"] {
-  margin-top: calc(-1 * var(--spectra-page-margin, 25mm) + 8mm);
-  padding: 0 var(--spectra-page-margin, 25mm) 10mm;
-  text-align: center;
+.document-page-chrome-sheet > [data-slot] {
+  position: absolute;
+  left: var(--chrome-left);
+  right: var(--chrome-right);
 }
+
+.document-page-chrome-sheet > [data-slot="header"] { top: var(--chrome-header); }
+.document-page-chrome-sheet > [data-slot="footer"] { bottom: var(--chrome-footer); }
+
+.document-page-chrome-sheet p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+/* Word's header style sets a centre and a right tab stop. */
+.document-page-chrome-sheet p[data-tabbed] {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 1em;
+}
+.document-page-chrome-sheet p[data-tabbed] > :nth-child(2) { text-align: center; }
+.document-page-chrome-sheet p[data-tabbed] > :nth-child(3) { text-align: right; }
 
 /* ---------------------------------------------------------------------------
    Print.

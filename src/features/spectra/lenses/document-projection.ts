@@ -679,13 +679,20 @@ export function docxOperationsBetween(
   const operations: DocxOperation[] = [];
   const beforePage = before.pageSetup ?? {};
   const afterPage = after.pageSetup ?? {};
-  const pagePatch = Object.fromEntries(
+  const pagePatch: Record<string, unknown> = Object.fromEntries(
     (["size", "orientation", "margins", "columns"] as const).flatMap((field) =>
       JSON.stringify(beforePage[field]) === JSON.stringify(afterPage[field])
         ? []
         : [[field, afterPage[field]]],
     ),
   );
+  // Exact numbers travel as the fields that moved; a page that never had them asks for none.
+  if (afterPage.page) {
+    const exact = Object.fromEntries(
+      Object.entries(afterPage.page).filter(([key, value]) => (beforePage.page as Record<string, unknown> | undefined)?.[key] !== value),
+    );
+    if (Object.keys(exact).length) pagePatch.page = exact;
+  }
   if (Object.keys(pagePatch).length)
     operations.push({
       kind: "update-section",

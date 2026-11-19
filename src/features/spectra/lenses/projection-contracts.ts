@@ -249,6 +249,22 @@ export const docxProjectionSchema = z
         columns: z.number().int().min(1).max(3).optional(),
         header: z.string().max(4_000).optional(),
         footer: z.string().max(4_000).optional(),
+        page: z.object({
+          width: z.number().int().min(1).max(31_680),
+          height: z.number().int().min(1).max(31_680),
+          top: z.number().int().min(0).max(31_680),
+          right: z.number().int().min(0).max(31_680),
+          bottom: z.number().int().min(0).max(31_680),
+          left: z.number().int().min(0).max(31_680),
+          header: z.number().int().min(0).max(31_680),
+          footer: z.number().int().min(0).max(31_680),
+        }).strict().optional(),
+        chrome: z.object({
+          header: z.string().max(4_000).optional(),
+          footer: z.string().max(4_000).optional(),
+          firstHeader: z.string().max(4_000).optional(),
+          firstFooter: z.string().max(4_000).optional(),
+        }).strict().optional(),
         sectionIndex: z.number().int().nonnegative().optional(),
       })
       .strict()
@@ -408,6 +424,17 @@ export const docxOperationSchema = z.discriminatedUnion("kind", [
     orientation: z.enum(["portrait", "landscape"]).optional(),
     margins: z.string().min(1).max(40).optional(),
     columns: z.number().int().min(1).max(3).optional(),
+    // Exact paper and margins in twips; each field set is written as given.
+    page: z.object({
+      width: z.number().int().min(1).max(31_680).optional(),
+      height: z.number().int().min(1).max(31_680).optional(),
+      top: z.number().int().min(0).max(31_680).optional(),
+      right: z.number().int().min(0).max(31_680).optional(),
+      bottom: z.number().int().min(0).max(31_680).optional(),
+      left: z.number().int().min(0).max(31_680).optional(),
+      header: z.number().int().min(0).max(31_680).optional(),
+      footer: z.number().int().min(0).max(31_680).optional(),
+    }).strict().optional(),
   }).strict(),
   z.object({
     kind: z.literal("update-header-footer"),

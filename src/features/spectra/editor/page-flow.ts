@@ -12,13 +12,13 @@ import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
  * until it is made smaller.
  */
 
-const PX_PER = { mm: 96 / 25.4, cm: 96 / 2.54, in: 96, px: 1 } as const;
+const PX_PER = { mm: 96 / 25.4, cm: 96 / 2.54, in: 96, pt: 96 / 72, px: 1 } as const;
 /** Gaps closer than this to the ones in place are the same layout. */
 const SETTLED_PX = 1;
 
 /** A CSS length such as `297mm`, in CSS pixels; 0 when it is not one. */
 export function lengthPx(value: string) {
-  const match = /^\s*([\d.]+)\s*(mm|cm|in|px)\s*$/.exec(value);
+  const match = /^\s*([\d.]+)\s*(mm|cm|in|pt|px)\s*$/.exec(value);
   return match ? Number(match[1]) * PX_PER[match[2] as keyof typeof PX_PER] : 0;
 }
 
@@ -51,8 +51,10 @@ function measureGaps(view: EditorView, current: Gap[]): Gap[] {
   const style = getComputedStyle(surface);
   const sheet = lengthPx(style.getPropertyValue("--spectra-page-height"));
   if (!sheet) return [];
-  const margin = parseFloat(style.paddingTop) || 0;
-  const usable = sheet - 2 * margin;
+  // Word's top and bottom margins need not match.
+  const marginTop = parseFloat(style.paddingTop) || 0;
+  const marginBottom = parseFloat(style.paddingBottom) || 0;
+  const usable = sheet - marginTop - marginBottom;
   const page = surface.closest<HTMLElement>(".document-page");
   const scale = (page && Number(getComputedStyle(page).zoom)) || 1;
   const origin = surface.getBoundingClientRect().top;
@@ -68,10 +70,10 @@ function measureGaps(view: EditorView, current: Gap[]): Gap[] {
     const box = element.getBoundingClientRect();
     const top = (box.top - origin) / scale - removed + added;
     const bottom = (box.bottom - origin) / scale - removed + added;
-    const end = (Math.floor(top / sheet) + 1) * sheet - margin;
+    const end = (Math.floor(top / sheet) + 1) * sheet - marginBottom;
     const runsOver = bottom > end + 0.5 && bottom - top <= usable;
     if (top < end - 0.5 && !runsOver) return;
-    const height = end + 2 * margin - top;
+    const height = end + marginBottom + marginTop - top;
     if (height <= 0.5) return;
     gaps.push({ pos, height });
     added += height;

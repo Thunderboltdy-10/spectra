@@ -22,6 +22,8 @@ import type {
 } from "./contracts";
 import { WORK_YJS_SCHEMA_VERSION } from "./contracts";
 import { workYjsOrigins } from "./origins";
+import { syncFragmentToJson } from "./document-fragment-sync";
+import { semanticallyEqual } from "../../../../../../shared/canonical-json";
 import {
   assertWorkModelMetadata,
   createHeadlessBinding,
@@ -51,76 +53,6 @@ export function documentContentToProseMirrorJson(
   content: DocumentWorkContent,
 ): ProseMirrorJson {
   return projectDocumentContentToProseMirrorJson(content);
-}
-
-function textMarks(node: ProseMirrorJson) {
-  return Object.fromEntries(
-    (node.marks ?? []).map((mark) => [mark.type, mark.attrs ?? {}]),
-  );
-}
-
-function nodeBlockId(node: ProseMirrorJson | undefined) {
-  const blockId = node?.attrs?.blockId;
-  return typeof blockId === "string" && blockId ? blockId : null;
-}
-
-function isDefaultPlaceholderDocument(document: ProseMirrorJson) {
-  const blocks = documentBlocksFromJson(document);
-  if (blocks.length !== 1 || blocks[0]?.id !== "intro") return false;
-  const text = typeof blocks[0]?.text === "string" ? blocks[0].text.trim() : "";
-  return text === "" || text === "Start writing here.";
-}
-
-function appendJsonNode(
-  parent: Y.XmlFragment | Y.XmlElement,
-  node: ProseMirrorJson,
-) {
-  if (node.type === "text") {
-    const text = new Y.XmlText();
-    parent.push([text]);
-    text.insert(0, node.text ?? "", textMarks(node));
-    return;
-  }
-  if (!node.type || node.type === "doc") {
-    for (const child of node.content ?? []) appendJsonNode(parent, child);
-    return;
-  }
-  const element = new Y.XmlElement(node.type);
-  parent.push([element]);
-  for (const [key, value] of Object.entries(node.attrs ?? {}))
-    if (value !== undefined) element.setAttribute(key, value as string);
-  for (const child of node.content ?? []) appendJsonNode(element, child);
-}
-
-function insertJsonNode(
-  fragment: Y.XmlFragment,
-  index: number,
-  node: ProseMirrorJson,
-) {
-  if (!node.type || node.type === "doc") {
-    let cursor = index;
-    for (const child of node.content ?? []) {
-      insertJsonNode(fragment, cursor, child);
-      cursor += 1;
-    }
-    return;
-  }
-  if (node.type === "text") {
-    const text = new Y.XmlText();
-    fragment.insert(index, [text]);
-    text.insert(0, node.text ?? "", textMarks(node));
-    return;
-  }
-  const element = new Y.XmlElement(node.type);
-  fragment.insert(index, [element]);
-  for (const [key, value] of Object.entries(node.attrs ?? {}))
-    if (value !== undefined) element.setAttribute(key, value as string);
-  for (const child of node.content ?? []) appendJsonNode(element, child);
-}
-
-function populateFragment(fragment: Y.XmlFragment, json: ProseMirrorJson) {
-  if (fragment.length) fragment.delete(0, fragment.length);
-  appendJsonNode(fragment, json);
 }
 
 export type DocumentParagraphTextSplice = {
@@ -183,133 +115,13 @@ export function applyDocumentParagraphTextSplice(
   return { blockId: splice.blockId, beforeText, afterText, changed: true };
 }
 
-function unformattedText(node: ProseMirrorJson): string | null {
-  const parts = node.content ?? [];
-  return parts.every((part) => part.type === "text" && !part.marks?.length)
-    ? parts.map((part) => part.text ?? "").join("") : null;
-}
-
-function definedAttributes(node: ProseMirrorJson) {
-  return JSON.stringify(Object.entries(node.attrs ?? {}).filter(([, value]) => value !== undefined)
-    .sort(([left], [right]) => left.localeCompare(right)));
-}
-
-/** The minimal splice turning one unformatted paragraph into another with
- * the same block and attributes, or null when only the node path is lossless.
- * Editing the existing Y.XmlText keeps collaborators' relative selections and
- * makes the admitted delta carry only the changed characters. */
-function plainParagraphSplice(
-  element: unknown,
-  current: ProseMirrorJson,
-  next: ProseMirrorJson,
-): DocumentParagraphTextSplice | null {
-  const blockId = nodeBlockId(current);
-  if (!blockId || current.type !== "paragraph" || next.type !== "paragraph" ||
-    definedAttributes(current) !== definedAttributes(next) || !(element instanceof Y.XmlElement)) return null;
-  const children = element.toArray();
-  if (children.length > 1 || (children.length === 1 && !(children[0] instanceof Y.XmlText))) return null;
-  const before = unformattedText(current);
-  const after = unformattedText(next);
-  if (before === null || after === null) return null;
-  const shorter = Math.min(before.length, after.length);
-  let start = 0;
-  while (start < shorter && before[start] === after[start]) start++;
-  let end = 0;
-  while (end < shorter - start && before[before.length - 1 - end] === after[after.length - 1 - end]) end++;
-  if (splitsSurrogate(before, start) || splitsSurrogate(after, start)) start--;
-  if (splitsSurrogate(before, before.length - end) || splitsSurrogate(after, after.length - end)) end--;
-  return { blockId, expectedText: before, index: start, deleteCount: before.length - start - end,
-    insertText: after.slice(start, after.length - end) };
-}
-
 function adoptProjectionFragment(
   fragment: Y.XmlFragment,
   currentDocument: ProseMirrorJson,
   nextDocument: ProseMirrorJson,
-  origin: WorkTransactionOrigin,
 ) {
-  if (JSON.stringify(currentDocument) === JSON.stringify(nextDocument)) return;
-  const currentNodes = currentDocument.content ?? [];
-  const nextNodes = nextDocument.content ?? [];
-  const currentIds = currentNodes.map(nodeBlockId);
-  const nextIds = nextNodes.map(nodeBlockId);
-  // A single semantic command can edit existing paragraphs and insert a
-  // bibliography. Preserve unchanged Yjs nodes while applying both effects;
-  // insert-only shortcuts must never silently drop the paragraph edits.
-  if (currentNodes.length === fragment.length && currentIds.every(Boolean) && nextIds.every(Boolean) && new Set(currentIds).size === currentIds.length && new Set(nextIds).size === nextIds.length) {
-    const desiredIds = new Set(nextIds);
-    for (let index = currentIds.length - 1; index >= 0; index--) {
-      if (!desiredIds.has(currentIds[index]!)) { fragment.delete(index, 1); currentIds.splice(index, 1); currentNodes.splice(index, 1); }
-    }
-    for (let index = 0; index < nextNodes.length; index++) {
-      if (currentIds[index] === nextIds[index]) {
-        if (JSON.stringify(currentNodes[index]) !== JSON.stringify(nextNodes[index])) {
-          const splice = plainParagraphSplice(fragment.get(index), currentNodes[index]!, nextNodes[index]!);
-          if (splice) applyDocumentParagraphTextSplice(fragment.doc!, splice, origin);
-          else { fragment.delete(index, 1); insertJsonNode(fragment, index, nextNodes[index]!); }
-          currentNodes[index] = nextNodes[index]!;
-        }
-        continue;
-      }
-      const previous = currentIds.indexOf(nextIds[index]!);
-      if (previous >= 0) { fragment.delete(previous, 1); currentIds.splice(previous, 1); currentNodes.splice(previous, 1); }
-      insertJsonNode(fragment, index, nextNodes[index]!);
-      currentIds.splice(index, 0, nextIds[index]!); currentNodes.splice(index, 0, nextNodes[index]!);
-    }
-    return;
-  }
-  // A newly-created document is seeded with one editable placeholder so the
-  // editor is never visually empty. Once AI has authored real blocks, that
-  // shell must be replaced rather than treated as a user-authored paragraph.
-  if (isDefaultPlaceholderDocument(currentDocument)) {
-    populateFragment(fragment, nextDocument);
-    return;
-  }
-  const currentIdSet = new Set(
-    currentIds.filter((id): id is string => Boolean(id)),
-  );
-  const extraCount = nextNodes.length - currentNodes.length;
-  const currentText = JSON.stringify(currentDocument);
-  if (extraCount > 0 && currentNodes.length === fragment.length) {
-    const extras = nextNodes.slice(-extraCount);
-    const extrasAreNew = extras.every((node) => {
-      const id = nodeBlockId(node);
-      if (id && !currentIdSet.has(id)) return true;
-      const nested = JSON.stringify(node.content ?? node.text ?? "");
-      return nested.length > 2 && !currentText.includes(nested);
-    });
-    if (extrasAreNew) {
-      for (const node of extras) appendJsonNode(fragment, node);
-      return;
-    }
-  }
-  const trailingInsert =
-    extraCount > 0 &&
-    currentNodes.length === fragment.length &&
-    currentIds.every((id, index) => id === nextIds[index]);
-  if (trailingInsert) {
-    for (const node of nextNodes.slice(currentNodes.length))
-      appendJsonNode(fragment, node);
-    return;
-  }
-  const missingIndexes = nextIds.flatMap((id, index) =>
-    id && !currentIdSet.has(id) ? [index] : [],
-  );
-  const presentCurrentIds = currentIds.filter((id): id is string => Boolean(id));
-  const insertOnly =
-    missingIndexes.length > 0 &&
-    missingIndexes.length === extraCount &&
-    presentCurrentIds.every((id) => nextIds.includes(id));
-  if (insertOnly) {
-    for (const index of missingIndexes)
-      insertJsonNode(
-        fragment,
-        Math.min(index, fragment.length),
-        nextNodes[index]!,
-      );
-    return;
-  }
-  populateFragment(fragment, nextDocument);
+  if (semanticallyEqual(currentDocument, nextDocument)) return;
+  syncFragmentToJson(fragment, nextDocument);
 }
 
 function documentProjection(doc: Y.Doc): DocumentWorkContent {
@@ -377,15 +189,16 @@ export class DocumentYjsAdapter implements WorkYjsAdapter<DocumentWorkContent> {
         nativeIntent: _nativeIntent,
         ...extras
       } = model;
-      root.set("extras", plainToY(extras));
+      // Rewriting an unchanged map would ship it to every peer on each apply.
+      if (!semanticallyEqual(yToPlain(root.get("extras")), extras))
+        root.set("extras", plainToY(extras));
       const nextDocument = documentContentToProseMirrorJson(model);
       const currentDocument = yXmlFragmentToProsemirrorJSON(
         fragment,
       ) as ProseMirrorJson;
       // Metadata first: in-place paragraph splices assert the model version.
       setWorkModelMetadata(doc, this.workType, this.modelVersion);
-      if (JSON.stringify(currentDocument) !== JSON.stringify(nextDocument))
-        adoptProjectionFragment(fragment, currentDocument, nextDocument, origin);
+      adoptProjectionFragment(fragment, currentDocument, nextDocument);
     }, origin);
   }
 

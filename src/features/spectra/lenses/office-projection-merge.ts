@@ -6,7 +6,7 @@ import type {
 } from "./projection-contracts";
 import { sheetFormatsEquivalent } from "./office-content";
 import { mergeThreeWay, type MergeConflict } from "./three-way-merge";
-import { canonicalJsonValue } from "../../../../shared/canonical-json";
+import { semanticallyEqual } from "../../../../shared/canonical-json";
 
 export type NativeConflictPreview = {
   regionId: string;
@@ -22,8 +22,7 @@ type ProjectionMerge<T> = {
   previews: NativeConflictPreview[];
 };
 
-const equal = (left: unknown, right: unknown) =>
-  JSON.stringify(canonicalJsonValue(left)) === JSON.stringify(canonicalJsonValue(right));
+const equal = semanticallyEqual;
 
 function assertUnique<T>(values: readonly T[], id: (value: T) => string, label: string) {
   const seen = new Set<string>();

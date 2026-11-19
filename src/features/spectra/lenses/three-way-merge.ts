@@ -1,4 +1,4 @@
-import { canonicalJsonValue } from "../../../../shared/canonical-json";
+import { semanticallyEqual } from "../../../../shared/canonical-json";
 
 export type MergeConflict<T> = {
   id: string;
@@ -27,9 +27,10 @@ type MergeOptions<T> = {
 
 // Key order is not content: a Yjs room and a native file serialize the same
 // object in different orders, and an order-sensitive check called every
-// untouched slide object an edit on both sides.
+// untouched slide object an edit on both sides. Absent-valued fields
+// (undefined or null) are not content either.
 const defaultEqual = <T>(left: T | undefined, right: T | undefined) =>
-  JSON.stringify(canonicalJsonValue(left)) === JSON.stringify(canonicalJsonValue(right));
+  semanticallyEqual(left, right);
 
 /**
  * Merge keyed regions against a persisted ancestor. Undefined represents a

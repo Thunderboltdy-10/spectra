@@ -1,7 +1,7 @@
 import { v } from "convex/values";
 import { mutation, query } from "./functions";
 import { getAuthenticatedActor } from "./identityShared";
-import { requireActorArtifactCapability } from "./authorityShared";
+import { requireArtifactCapabilityByAuthority } from "./authorityShared";
 import type { Doc, Id } from "./_generated/dataModel";
 import { assertPayloadWriteAllowed } from "./syncPolicy";
 import { canReadPinnedContent, nativeReferencesForPinnedVersion } from "./retainedContentAccess";
@@ -18,7 +18,7 @@ async function payloadForWork(
   workId: Id<"spectraArtifacts">,
   hash: string,
 ) {
-  try { await requireActorArtifactCapability(ctx, actor, workId, "read"); }
+  try { await requireArtifactCapabilityByAuthority(ctx, actor, workId, "read"); }
   catch (error) {
     let authorizedPin = false;
     let retainedPayload: Doc<"payloadObjects"> | null = null;
@@ -86,7 +86,7 @@ export const put = mutation({
   handler: async (ctx, args) => {
     const actor = await getAuthenticatedActor(ctx);
     if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
-    await requireActorArtifactCapability(ctx, actor, args.workId, "modify");
+    await requireArtifactCapabilityByAuthority(ctx, actor, args.workId, "modify");
     await assertWorkPayloadWriteAllowed(ctx, actor.accountId, args.workId);
     assertHash(args.hash);
     if (!Number.isSafeInteger(args.bytes) || args.bytes < 0) throw new Error("PAYLOAD_BYTES_INVALID");
@@ -156,7 +156,7 @@ export const issueUpload = mutation({
   handler: async (ctx, { workId }) => {
     const actor = await getAuthenticatedActor(ctx);
     if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
-    await requireActorArtifactCapability(ctx, actor, workId, "modify");
+    await requireArtifactCapabilityByAuthority(ctx, actor, workId, "modify");
     await assertWorkPayloadWriteAllowed(ctx, actor.accountId, workId);
     return ctx.storage.generateUploadUrl();
   },

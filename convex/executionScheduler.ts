@@ -34,14 +34,14 @@ async function hmac(key: string, message: string) {
   return base64url(await crypto.subtle.sign("HMAC", cryptoKey, encoder.encode(message)));
 }
 
-function derivedKey(baseName: string, purpose: string) {
+export function derivedKey(baseName: string, purpose: string) {
   const base = process.env[baseName]?.trim();
   if (!base || base.length < 32)
     throw new Error(`${baseName} is required for scheduled work.`);
   return hmac(base, purpose);
 }
 
-async function postSigned(
+export async function postSigned(
   path: string,
   body: Record<string, unknown>,
   key: Promise<string>,

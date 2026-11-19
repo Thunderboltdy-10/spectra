@@ -5,12 +5,20 @@ import aggregateTest from "@convex-dev/aggregate/test";
 import schema from "./schema";
 import { api, internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
+import type { MutationCtx } from "./_generated/server";
 import { BRIDGE_CLAIM_REDRIVE_MS } from "../shared/replica-truth";
 import { syncRetryAt } from "../shared/sync-retry-policy";
 import { nativeOperationId, type NativeSaveReceipt } from "../shared/native-office-contract";
 import { enqueueStructureRequest } from "./bridgeStructure";
 import { findPrimaryNode } from "./orgTreeShared";
 import { readProjectionBase } from "./replicaProjectionBase";
+
+/** A physical artifact delete as production makes it: the trigger drops the authority row too. */
+async function deleteArtifactRow(ctx: MutationCtx, artifactId: Id<"spectraArtifacts">) {
+  const summary = await ctx.db.query("spectraArtifactSummaries").withIndex("by_artifact", (q) => q.eq("artifactId", artifactId)).unique();
+  if (summary) await ctx.db.delete(summary._id);
+  await ctx.db.delete(artifactId);
+}
 
 /** A replica as stored, with its projection base from the sidecar. */
 async function replicaWithBase(ctx: { db: import("./_generated/server").DatabaseReader }, id: import("./_generated/dataModel").Id<"workReplicas">) {
@@ -726,6 +734,9 @@ describe("Bridge write acknowledgement after native observation", () => {
         name: "Reassigned", status: "active", createdAt: Date.now(), updatedAt: Date.now(),
       });
       await ctx.db.patch(f.workId, { ownerAccountId: accountId });
+      // The production trigger keeps the authority row in step; raw test writes do it by hand.
+      const summary = await ctx.db.query("spectraArtifactSummaries").withIndex("by_artifact", (q) => q.eq("artifactId", f.workId)).unique();
+      if (summary) await ctx.db.patch(summary._id, { ownerAccountId: accountId });
     });
     expect(await f.t.mutation(api.bridgeSync.refreshWriteClaim, f.firstClaim)).toEqual({ valid: false });
     expect(await f.t.mutation(api.bridgeSync.completeWrite, {
@@ -916,7 +927,7 @@ async function seedDeletedWrite(t: ReturnType<typeof convexTest>, state: "pendin
       createdAt: now,
       updatedAt: now,
     });
-    await ctx.db.delete(replica.workId);
+    await deleteArtifactRow(ctx, replica.workId);
     return { operationId, requestId, replicaId: replica._id };
   });
   return { fixture, ...seeded };
@@ -1068,7 +1079,7 @@ describe("Bridge incremental cloud seam", () => {
         createdAt: now,
         updatedAt: now,
       });
-      await ctx.db.delete(replica.workId);
+      await deleteArtifactRow(ctx, replica.workId);
       return { requestId, replicaId: replica._id };
     });
 

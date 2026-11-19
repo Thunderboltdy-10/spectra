@@ -41,10 +41,23 @@ crons.interval(
   internal.replicas.sweepReplicaTruth,
   {},
 );
+// Word, Excel and PowerPoint sends whose wake-up was lost run again.
+crons.interval(
+  "sweep-native-outbox",
+  { minutes: 15 },
+  internal.nativeOutbox.sweep,
+  {},
+);
 crons.interval(
   "move-replica-projection-bases",
   { hours: 6 },
   internal.replicas.moveProjectionBasesMigration,
+  {},
+);
+crons.interval(
+  "compact-replica-fidelity-maps",
+  { hours: 6 },
+  internal.replicas.compactReplicaFidelityMigration,
   {},
 );
 crons.interval(

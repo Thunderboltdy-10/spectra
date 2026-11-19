@@ -12,7 +12,7 @@ import { z } from "zod";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import { BRIDGE_CLAIM_REDRIVE_MS } from "../shared/replica-truth";
-import { evaluateAccessForActor } from "./authorityShared";
+import { artifactLifecycle, evaluateArtifactWriteAuthority } from "./authorityShared";
 import { syncRetryAt } from "../shared/sync-retry-policy";
 import { patchReplica } from "./replicaProjectionBase";
 
@@ -159,7 +159,7 @@ export const request = mutation({
   handler: async (ctx, args) => {
     const actor = await getAuthenticatedActor(ctx);
     if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
-    const work = await ctx.db.get(args.workId);
+    const work = await artifactLifecycle(ctx, args.workId);
     if (!work || work.ownerAccountId !== actor.accountId) throw new Error("WORK_NOT_FOUND");
     const replica = args.replicaId
       ? await ctx.db.get(args.replicaId)
@@ -248,12 +248,12 @@ export const claim = mutation({
       .take(20);
     const request = [...pending, ...abandoned].sort((a, b) => a.createdAt - b.createdAt)[0];
     if (!request) return { request: null };
-    const work = await ctx.db.get(request.workId);
+    const work = await artifactLifecycle(ctx, request.workId);
     if (!work || work.status === "deleted") {
       await failDeletedStructureRequest(ctx, request, now);
       return { request: null };
     }
-    const access = await evaluateAccessForActor(ctx, actor, "artifact", request.workId);
+    const access = await evaluateArtifactWriteAuthority(ctx, actor, request.workId);
     if (!access.allowed || !access.capabilities.includes("modify")) {
       await ctx.db.patch(request._id, { state: "failed", errorCode: "permission-revoked", claimedAt: undefined, updatedAt: now });
       return { request: null };
@@ -288,12 +288,12 @@ export const refreshClaim = mutation({
     const request = await ctx.db.get(args.requestId);
     if (!request || request.accountId !== actor.accountId || request.deviceId !== device._id ||
         !request.baseRevision || !matchesStructureClaim(request, args)) return { valid: false };
-    const [work, replica, mount] = await Promise.all([ctx.db.get(request.workId), ctx.db.get(request.replicaId), ctx.db.get(request.mountId)]);
+    const [work, replica, mount] = await Promise.all([artifactLifecycle(ctx, request.workId), ctx.db.get(request.replicaId), ctx.db.get(request.mountId)]);
     if (!work || work.status === "deleted" || !replica || replica.kind !== "local" || replica.state === "unavailable" || replica.workId !== request.workId ||
         replica.deviceId !== device._id || replica.mountId !== request.mountId || replica.accountId !== actor.accountId ||
         replica.localResourceId !== request.localResourceId || replica.revision !== request.baseRevision ||
         !mount || mount.state !== "active" || mount.deviceId !== device._id || mount.accountId !== actor.accountId) return { valid: false };
-    const access = await evaluateAccessForActor(ctx, actor, "artifact", request.workId);
+    const access = await evaluateArtifactWriteAuthority(ctx, actor, request.workId);
     if (!access.allowed || !access.capabilities.includes("modify")) return { valid: false };
     await ctx.db.patch(request._id, { claimedAt: Date.now(), updatedAt: Date.now() });
     return { valid: true };
@@ -310,12 +310,12 @@ export const complete = mutation({
     if (["verified", "failed", "conflicted", "ignored"].includes(request.state)) return { state: request.state };
     if (!matchesStructureClaim(request, args)) return { state: request.state, ignored: true, reason: "stale-claim" };
     const now = Date.now();
-    const work = await ctx.db.get(request.workId);
+    const work = await artifactLifecycle(ctx, request.workId);
     if (!work || work.status === "deleted") {
       await failDeletedStructureRequest(ctx, request, now);
       return { state: "failed" as const };
     }
-    const access = await evaluateAccessForActor(ctx, actor, "artifact", request.workId);
+    const access = await evaluateArtifactWriteAuthority(ctx, actor, request.workId);
     if (!access.allowed || !access.capabilities.includes("modify")) {
       await ctx.db.patch(request._id, { state: "failed", errorCode: "permission-revoked", claimedAt: undefined, updatedAt: now });
       return { state: "failed" as const };

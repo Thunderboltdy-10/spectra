@@ -26,6 +26,9 @@ const isPublicRoute = createRouteMatcher([
   // The morning brief's scheduled call is HMAC-signed and acts as its owner;
   // Home's own call still needs the student's session in the route.
   "/api/spectra/brief",
+  // The native outbox is HMAC-signed by Convex and only ever acts as the
+  // work's owner; it has no unsigned entry.
+  "/api/spectra/native/outbox",
   "/api/contact(.*)",
   "/api/health(.*)",
   "/api/webhooks(.*)",

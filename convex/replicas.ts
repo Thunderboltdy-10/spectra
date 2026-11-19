@@ -13,7 +13,7 @@ import {
   activeReplicaWriteTarget,
   chooseLiveBridgeDeviceId,
 } from "./bridgeIdentity";
-import { bumpPolicyVersion, evaluateAccessForActor, evaluateArtifactAccessForActor, requireActorArtifactCapability } from "./authorityShared";
+import { bumpPolicyVersion, evaluateArtifactAccessForActor, evaluateArtifactWriteAuthority, requireArtifactCapabilityByAuthority } from "./authorityShared";
 import { computeEffectivePolicy } from "./syncPolicy";
 import { POLICY_PRESETS, type SyncPolicyPreset } from "../shared/sync-policy";
 import { planStorageStrategyTransition } from "../shared/storage-strategy";
@@ -44,6 +44,7 @@ import {
 } from "./replicaMaterialization";
 import { platformStopped } from "./platformControls";
 import { deleteReplica, insertReplica, moveInlineBase, patchReplica, readProjectionBase } from "./replicaProjectionBase";
+import { storedFidelityMap } from "../shared/fidelity-map-storage";
 
 const strategyPreset = v.union(v.literal("spectra"), v.literal("device"), v.literal("both"), v.literal("linked"));
 
@@ -503,7 +504,7 @@ export const materializationStatus = query({
     if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
     const request = await ctx.db.get(requestId);
     if (!request) throw new Error("WRITE_REQUEST_NOT_FOUND");
-    const access = await evaluateAccessForActor(ctx, actor, "artifact", request.workId);
+    const access = await evaluateArtifactWriteAuthority(ctx, actor, request.workId);
     if (!access.allowed || !access.capabilities.includes("read"))
       throw new Error("WRITE_REQUEST_NOT_FOUND");
     return {
@@ -525,7 +526,7 @@ export const cancelMaterialization = mutation({
     if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
     const request = await ctx.db.get(requestId);
     if (!request) throw new Error("WRITE_REQUEST_NOT_FOUND");
-    const access = await evaluateAccessForActor(ctx, actor, "artifact", request.workId);
+    const access = await evaluateArtifactWriteAuthority(ctx, actor, request.workId);
     if (!access.allowed || !access.capabilities.includes("modify"))
       throw new Error("WRITE_REQUEST_NOT_FOUND");
     const now = Date.now();
@@ -755,7 +756,7 @@ export const payloadForWork = query({
   handler: async (ctx, { workId, prefer }) => {
     const actor = await getAuthenticatedActor(ctx);
     if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
-    await requireActorArtifactCapability(ctx, actor, workId, "read");
+    await requireArtifactCapabilityByAuthority(ctx, actor, workId, "read");
     const work = await ctx.db.get(workId);
     if (!work) throw new Error("WORK_NOT_FOUND");
     const visibleReplicas = await visibleReplicasForWork(ctx, workId, actor.accountId);
@@ -825,7 +826,7 @@ export const activateLens = mutation({
       blueprintKey: z.enum(["document", "sheets", "presentation"]).optional(),
       textIndex: z.string().max(200_000).optional(),
     }).parse(args);
-    await requireActorArtifactCapability(ctx, actor, args.workId, "modify");
+    await requireArtifactCapabilityByAuthority(ctx, actor, args.workId, "modify");
     await validateContentAdoption(ctx, args.workId, actor.accountId, args.content);
     const work = await ctx.db.get(args.workId);
     if (!work) throw new Error("WORK_NOT_FOUND");
@@ -907,13 +908,13 @@ export const activateLens = mutation({
       updatedAt: now,
     });
     await patchReplica(ctx.db, cloud._id, {
-      fidelityMap: args.fidelityMap,
+      fidelityMap: storedFidelityMap(args.fidelityMap),
       projectionBasePayloadRef: cloud.payloadRef,
       projectionBaseRevision: cloud.revision,
       projectionBaseContent: args.content,
       projectionBaseContentHash: input.semanticDigest,
       projectionBaseTextIndex: input.textIndex,
-      projectionBaseFidelityMap: args.fidelityMap,
+      projectionBaseFidelityMap: storedFidelityMap(args.fidelityMap),
       preservedCarryVersion: 1,
       compatibilityProfile: "strict-native",
       updatedAt: now,
@@ -937,7 +938,7 @@ export const activateLens = mutation({
         projectionBaseContent: args.content,
         projectionBaseContentHash: input.semanticDigest,
         projectionBaseTextIndex: input.textIndex,
-        projectionBaseFidelityMap: args.fidelityMap,
+        projectionBaseFidelityMap: storedFidelityMap(args.fidelityMap),
         updatedAt: now,
       })));
     return { activated: true, workId: args.workId };
@@ -1176,13 +1177,13 @@ export const createLocalReplica = mutation({
       accountId: actor.accountId, workId: args.workId, kind: "local", deviceId: mount.deviceId, mountId: mount._id,
       localResourceId, relativePath: input.relativePath,
       nativeFormat: input.nativeFormat, revision: `new:${input.contentHash}`, state: "pending",
-      fidelityMap: args.fidelityMap, preservedCarryVersion: 1, compatibilityProfile: work.compatibilityProfile ?? "strict-native",
+      fidelityMap: storedFidelityMap(args.fidelityMap), preservedCarryVersion: 1, compatibilityProfile: work.compatibilityProfile ?? "strict-native",
       updatedAt: now,
     });
     if (existing) await ctx.db.patch(existing._id, {
       deviceId: mount.deviceId, mountId: mount._id, localResourceId, relativePath: input.relativePath,
       nativeFormat: input.nativeFormat, state: "pending", unavailableReason: undefined, errorCode: undefined, errorMessage: undefined, errorAt: undefined,
-      fidelityMap: args.fidelityMap, preservedCarryVersion: 1, compatibilityProfile: work.compatibilityProfile ?? "strict-native", updatedAt: now,
+      fidelityMap: storedFidelityMap(args.fidelityMap), preservedCarryVersion: 1, compatibilityProfile: work.compatibilityProfile ?? "strict-native", updatedAt: now,
     });
     const baseRevision = existing?.revision ?? `new:${args.workId}`;
     const idempotencyKey = await deriveSyncIdempotencyKey({
@@ -1198,7 +1199,7 @@ export const createLocalReplica = mutation({
       baseRevision, targetRevision: input.contentHash, contentHash: input.contentHash, idempotencyKey,
       regionIds: [], partNames: [], projectionBaseContent: work.content,
       projectionBaseContentHash: work.contentHash, projectionBaseTextIndex: work.textIndex,
-      projectionBaseFidelityMap: args.fidelityMap, state: "pending", retryAt: now, attemptCount: 0,
+      projectionBaseFidelityMap: storedFidelityMap(args.fidelityMap), state: "pending", retryAt: now, attemptCount: 0,
       expiresAt: now + BRIDGE_WRITE_EXPIRES_MS, createdAt: now, updatedAt: now,
     });
     await ctx.db.insert("syncOperations", { accountId: actor.accountId, workId: args.workId, replicaId, idempotencyKey, direction: "cloud-to-local", revisionBefore: baseRevision, revisionAfter: input.contentHash, state: "pending", actorKind: "restore", createdAt: now, updatedAt: now });
@@ -2091,6 +2092,43 @@ export const reconcileReplicaTruthMigration = internalMutation({
   },
 });
 
+/**
+ * One-time, automatic compaction of fidelity maps stored before only the rows
+ * that restrict editing were kept. Every Bridge pass reads replica rows, so a
+ * long essay's 115 KB map was read again for each file on each pass.
+ */
+export const compactReplicaFidelityMigration = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    if (await platformStopped(ctx, "background")) return { state: "running" as const, scanned: 0, compacted: 0 };
+    const key = "replica-fidelity-compact-v1";
+    let migration = await ctx.db.query("replicaTruthMigrations").withIndex("by_key", (q) => q.eq("key", key)).unique();
+    if (migration?.state === "complete") return { state: "complete" as const, scanned: 0, compacted: 0 };
+    const now = Date.now();
+    if (!migration) {
+      const id = await ctx.db.insert("replicaTruthMigrations", { key, state: "running", scanned: 0, repaired: 0, conflicts: 0, createdAt: now, updatedAt: now });
+      migration = await ctx.db.get(id);
+    }
+    if (!migration) throw new Error("FIDELITY_COMPACT_MIGRATION_MISSING");
+    const page = await ctx.db.query("workReplicas").paginate({ cursor: migration.cursor ?? null, numItems: 25 });
+    let compacted = 0;
+    for (const replica of page.page) {
+      const map = replica.fidelityMap as { implicitNative?: unknown; entries?: unknown } | undefined;
+      if (!map || map.implicitNative === true || !Array.isArray(map.entries)) continue;
+      await ctx.db.patch(replica._id, { fidelityMap: storedFidelityMap(map) });
+      compacted += 1;
+    }
+    await ctx.db.patch(migration._id, {
+      state: page.isDone ? "complete" : "running",
+      cursor: page.isDone ? undefined : page.continueCursor,
+      scanned: migration.scanned + page.page.length,
+      repaired: migration.repaired + compacted,
+      updatedAt: Date.now(),
+    });
+    if (!page.isDone) await ctx.scheduler.runAfter(2_000, internal.replicas.compactReplicaFidelityMigration, {});
+    return { state: page.isDone ? "complete" as const : "running" as const, scanned: page.page.length, compacted };
+  },
+});
 
 /** One-time, automatic move of inline projection bases into `replicaProjectionBases`. */
 export const moveProjectionBasesMigration = internalMutation({

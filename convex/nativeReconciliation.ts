@@ -4,10 +4,11 @@ import { internalMutation } from "./orgNodeMutation";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { getActorForAccountId, getAuthenticatedActor } from "./identityShared";
-import { requireActorArtifactCapability } from "./authorityShared";
+import { requireArtifactCapabilityByAuthority } from "./authorityShared";
 import { appendRoomUpdate, appendRoomUpdateArgs, parseGatewayProjection } from "./collaborationGatewayStore";
 import { commitHumanCheckpoint, commitNativeReconciliationVersion } from "./changeGroups";
 import { patchReplica } from "./replicaProjectionBase";
+import { storedFidelityMap } from "../shared/fidelity-map-storage";
 
 const nativeSchemas = { document: 2, sheets: 4, presentation: 1 } as const;
 function nativeType(format: string | undefined) {
@@ -38,7 +39,7 @@ async function authorizedArtifact(ctx: ReadCtx, workId: Id<"spectraArtifacts">, 
   const artifact = await ctx.db.get(workId);
   if (!actor || !artifact || artifact.ownerAccountId !== accountId || artifact.schoolId !== actor.schoolId ||
       !["active", "draft"].includes(artifact.status)) throw new Error("WORK_NOT_FOUND");
-  await requireActorArtifactCapability(ctx, actor, workId, "modify");
+  await requireArtifactCapabilityByAuthority(ctx, actor, workId, "modify");
   return { actor, artifact };
 }
 
@@ -267,10 +268,10 @@ export const commit = internalMutation({
     const projectionBase = { projectionBasePayloadRef: local.payloadRef,
       projectionBaseRevision: local.revision, projectionBaseContent: updated.content,
       projectionBaseContentHash: updated.contentHash, projectionBaseTextIndex: updated.textIndex,
-      projectionBaseFidelityMap: input.fidelityMap, baseRevision: local.revision,
+      projectionBaseFidelityMap: storedFidelityMap(input.fidelityMap), baseRevision: local.revision,
       state: "current" as const, lastVerifiedAt: now, updatedAt: now };
     await patchReplica(ctx.db, cloud._id, { ...projectionBase, payloadRef: local.payloadRef,
-      revision: local.revision, contentHash: local.contentHash, fidelityMap: input.fidelityMap });
+      revision: local.revision, contentHash: local.contentHash, fidelityMap: storedFidelityMap(input.fidelityMap) });
     await patchReplica(ctx.db, local._id, projectionBase);
     const committedReceipt = { versionId, roomId: room._id, sequence: appended.sequence,
       updateDigest: append.payloadDigest ?? Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", append.update)), b => b.toString(16).padStart(2, "0")).join(""),

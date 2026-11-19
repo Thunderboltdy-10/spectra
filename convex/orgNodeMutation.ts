@@ -24,6 +24,7 @@ import {
   upsertResultCardSummary,
 } from "./spectraRunProjection";
 import { deleteArtifactSummary, upsertArtifactSummary } from "./orgTreeShared";
+import { enqueueNativeOutbox } from "./nativeOutbox";
 import { syncAnalyticsRun } from "./analyticsReadModels";
 import {
   plannerReminderSourceChanged,
@@ -222,6 +223,22 @@ triggers.register("spectraArtifacts", async (ctx, change) => {
   } else {
     await deleteArtifactSummary({ db: ctx.innerDb }, change.id);
   }
+  // Spectra's copy of a Word, Excel or PowerPoint file changed: the file on
+  // the student's computer follows even when no studio tab is open.
+  if (
+    change.newDoc &&
+    change.oldDoc &&
+    change.newDoc.status !== "deleted" &&
+    change.newDoc.contentHash !== change.oldDoc.contentHash &&
+    (change.newDoc.nativeFormat === "docx" ||
+      change.newDoc.nativeFormat === "xlsx" ||
+      change.newDoc.nativeFormat === "pptx")
+  )
+    await enqueueNativeOutbox(
+      { db: ctx.innerDb, scheduler: ctx.scheduler },
+      change.id,
+      "materialize",
+    );
   if (plannerReminderSourceChanged(change.oldDoc, change.newDoc)) {
     await ctx.scheduler.runAfter(
       0,

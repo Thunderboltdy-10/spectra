@@ -682,6 +682,38 @@ export async function evaluateAccess(ctx: AuthorityCtx, resourceType: ResourceTy
   return evaluateAccessForActor(ctx, actor, resourceType, resourceId);
 }
 
+/**
+ * The same decision `evaluateAccessForActor(…, "artifact", …)` makes, read from
+ * the compact authority row instead of the artifact itself. The artifact row
+ * carries the whole document body; a Bridge scan, payload upload or replica
+ * check that only needs "may this account write it" must not read that body
+ * once per file.
+ */
+export async function evaluateArtifactWriteAuthority(
+  ctx: AuthorityCtx,
+  actor: NonNullable<Awaited<ReturnType<typeof getAuthenticatedActor>>>,
+  artifactId: Id<"spectraArtifacts">,
+) {
+  return evaluateLoadedArtifactAuthorityUnrestricted(
+    ctx,
+    actor,
+    "artifact",
+    artifactId,
+    await loadArtifactAuthority(ctx, artifactId),
+  );
+}
+
+/** `requireActorArtifactCapability` for callers that need only the yes or no. */
+export async function requireArtifactCapabilityByAuthority(
+  ctx: AuthorityCtx,
+  actor: NonNullable<Awaited<ReturnType<typeof getAuthenticatedActor>>>,
+  workId: Id<"spectraArtifacts">,
+  capability: Capability,
+) {
+  const access = await evaluateArtifactWriteAuthority(ctx, actor, workId);
+  if (!access.allowed || !access.capabilities.includes(capability)) throw new Error("WORK_NOT_FOUND");
+}
+
 /** Replica/payload writes use WORK_NOT_FOUND so existence is not leaked. */
 export async function requireActorArtifactCapability(
   ctx: AuthorityCtx,
@@ -759,4 +791,13 @@ export async function bumpPolicyVersion(ctx: MutationCtx, resourceType: Resource
 async function pushPolicyChange(ctx: MutationCtx, artifactIds: string[]) {
   if (!artifactIds.length || !collaborationGatewayOrigin()) return;
   await ctx.scheduler.runAfter(0, internal.collaborationPolicyPush.notify, { artifactIds: artifactIds.slice(0, 500) });
+}
+
+/**
+ * An artifact's owner and lifecycle without its body: what Bridge claims and
+ * replica checks ask before they act on a file.
+ */
+export async function artifactLifecycle(ctx: AuthorityCtx, artifactId: Id<"spectraArtifacts">) {
+  const loaded = await loadArtifactAuthority(ctx, artifactId);
+  return loaded ? { status: loaded.lifecycle, ownerAccountId: loaded.ownerAccountId } : null;
 }

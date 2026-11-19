@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import type { AuthenticatedActor } from "./identityShared";
-import { requireActorArtifactCapability } from "./authorityShared";
+import { requireArtifactCapabilityByAuthority } from "./authorityShared";
 import { validateContentAdoption } from "./collaborationDurablePayload";
 import { computeEffectivePolicy } from "./syncPolicy";
 import { activeReplicaWriteTarget, chooseLiveBridgeDeviceId, chooseLiveLocalReplica, latestActiveWriteForReplica } from "./bridgeIdentity";
@@ -12,6 +12,7 @@ import { nativeSaveReceiptValidator } from "./nativeOfficeValidators";
 import { validateNativeSaveReceipt, type NativeSaveReceipt } from "../shared/native-office-contract";
 import { BRIDGE_WRITE_EXPIRES_MS, deriveSyncIdempotencyKey, localMaterializationTarget } from "../shared/replica-truth";
 import { patchReplica } from "./replicaProjectionBase";
+import { storedFidelityMap } from "../shared/fidelity-map-storage";
 
 const RETRYABLE_MATERIALIZATION_FAILURES = new Set([
   "write-expired",
@@ -78,7 +79,7 @@ export async function queueMaterializationInTransaction(
     projectionTextIndex: z.string().max(200_000).optional(),
     promotionMode: z.enum(["verified-first", "immediate-projection"]).optional(),
   }).parse(args);
-  await requireActorArtifactCapability(ctx, actor, args.workId, "modify");
+  await requireArtifactCapabilityByAuthority(ctx, actor, args.workId, "modify");
   await validateContentAdoption(ctx, args.workId, actor.accountId, args.baseContent);
   await validateContentAdoption(ctx, args.workId, actor.accountId, args.projectionContent);
   const work = await ctx.db.get(args.workId);
@@ -317,7 +318,7 @@ export async function queueMaterializationInTransaction(
     projectionBaseContent: args.projectionContent ?? work.content,
     projectionBaseContentHash: input.projectionContentHash ?? work.contentHash,
     projectionBaseTextIndex: input.projectionTextIndex ?? work.textIndex,
-    projectionBaseFidelityMap: args.fidelityMap,
+    projectionBaseFidelityMap: storedFidelityMap(args.fidelityMap),
     nativeReceipt,
     state: "pending",
     retryAt: now,
@@ -363,7 +364,7 @@ export async function commitCloudMaterializationInTransaction(
   args: CloudMaterializationArgs,
   effects: NativeMaterializationEffects,
 ) {
-  await requireActorArtifactCapability(ctx, actor, args.workId, "modify");
+  await requireArtifactCapabilityByAuthority(ctx, actor, args.workId, "modify");
   await validateContentAdoption(ctx, args.workId, actor.accountId, args.projectionContent);
   const cloud = await ctx.db.query("workReplicas").withIndex("by_work_kind", q =>
     q.eq("workId", args.workId).eq("kind", "cloud")).unique();
@@ -392,8 +393,8 @@ export async function commitCloudMaterializationInTransaction(
     payloadRef: args.payloadRef, contentHash: args.contentHash, revision: args.contentHash,
     baseRevision: args.baseRevision, projectionBasePayloadRef: args.payloadRef,
     projectionBaseRevision: args.contentHash, projectionBaseContent: args.projectionContent,
-    projectionBaseContentHash: args.projectionContentHash, fidelityMap: args.fidelityMap,
-    projectionBaseFidelityMap: args.fidelityMap, state: "current", lastVerifiedAt: now, updatedAt: now,
+    projectionBaseContentHash: args.projectionContentHash, fidelityMap: storedFidelityMap(args.fidelityMap),
+    projectionBaseFidelityMap: storedFidelityMap(args.fidelityMap), state: "current", lastVerifiedAt: now, updatedAt: now,
   });
   // The disk did not change. Remember that explicitly so reopening or a scan
   // cannot mistake the older copy for a new external edit.

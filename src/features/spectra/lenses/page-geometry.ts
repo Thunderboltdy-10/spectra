@@ -102,5 +102,23 @@ export function withPreset<T extends PresetSetup>(
   return { ...next, page };
 }
 
+/**
+ * A page setup an editor or the AI sent, made whole: a preset it changed
+ * without touching the exact numbers (an AI asking for "narrow" margins)
+ * brings the numbers that preset implies, so the page, the Word file and
+ * the readback all agree. Numbers it did change are kept as sent.
+ */
+export function settlePageSetup<T extends PresetSetup>(before: PresetSetup | undefined, after: T): T {
+  if (!before?.page || !after.page) return after;
+  const change: { size?: string; orientation?: "portrait" | "landscape"; margins?: string } = {};
+  if (after.size !== before.size && after.size !== undefined) change.size = after.size;
+  if (after.orientation !== before.orientation && after.orientation !== undefined) change.orientation = after.orientation;
+  if (after.margins !== before.margins && after.margins !== undefined) change.margins = after.margins;
+  if (!Object.keys(change).length) return after;
+  const sameNumbers = PAGE_GEOMETRY_KEYS.every((key) => before.page?.[key] === after.page?.[key]);
+  if (!sameNumbers) return after;
+  return { ...after, page: withPreset({ ...before, page: before.page }, change).page };
+}
+
 /** Twips as CSS points, which the page draws in. */
 export const twipsCss = (twips: number) => `${Math.round((twips / 20) * 100) / 100}pt`;

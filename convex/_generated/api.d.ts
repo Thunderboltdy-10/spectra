@@ -92,6 +92,7 @@ import type * as nativeAiCommit from "../nativeAiCommit.js";
 import type * as nativeAiCommitContract from "../nativeAiCommitContract.js";
 import type * as nativeMaterialization from "../nativeMaterialization.js";
 import type * as nativeOfficeValidators from "../nativeOfficeValidators.js";
+import type * as nativeOutbox from "../nativeOutbox.js";
 import type * as nativeReconciliation from "../nativeReconciliation.js";
 import type * as notificationCenter from "../notificationCenter.js";
 import type * as operationalCounters from "../operationalCounters.js";
@@ -253,6 +254,7 @@ declare const fullApi: ApiFromModules<{
   nativeAiCommitContract: typeof nativeAiCommitContract;
   nativeMaterialization: typeof nativeMaterialization;
   nativeOfficeValidators: typeof nativeOfficeValidators;
+  nativeOutbox: typeof nativeOutbox;
   nativeReconciliation: typeof nativeReconciliation;
   notificationCenter: typeof notificationCenter;
   operationalCounters: typeof operationalCounters;

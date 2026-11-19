@@ -2938,6 +2938,29 @@ export default defineSchema({
 
   // A replica's projection base, kept off the replica row so replica reads stay small
   // (see replicaProjectionBase.ts).
+  // One row per Word, Excel or PowerPoint work whose file on disk is behind
+  // Spectra (or ahead of it). Overwritten, never appended: the server brings
+  // the two sides together when nobody's editor is open to do it.
+  nativeOutbox: defineTable({
+    workId: v.id("spectraArtifacts"),
+    accountId: v.id("accounts"),
+    // Word has a save Spectra has not taken in / Spectra has changes Word lacks.
+    reconcile: v.boolean(),
+    materialize: v.boolean(),
+    state: v.union(v.literal("waiting"), v.literal("sending")),
+    // Bumped by every change; a send clears only what it saw.
+    generation: v.number(),
+    sentGeneration: v.optional(v.number()),
+    sentAction: v.optional(v.union(v.literal("materialize"), v.literal("reconcile"))),
+    sentAt: v.optional(v.number()),
+    changedAt: v.number(),
+    dueAt: v.number(),
+    attempts: v.number(),
+    lastError: v.optional(v.string()),
+    updatedAt: v.number(),
+  })
+    .index("by_work", ["workId"])
+    .index("by_state_due", ["state", "dueAt"]),
   replicaProjectionBases: defineTable({
     replicaId: v.id("workReplicas"),
     accountId: v.id("accounts"),

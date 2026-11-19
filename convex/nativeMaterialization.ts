@@ -2,7 +2,7 @@ import { v } from "convex/values";
 import { query } from "./functions";
 import { internalMutation } from "./orgNodeMutation";
 import { getAuthenticatedActor, getActorForAccountId } from "./identityShared";
-import { requireActorArtifactCapability } from "./authorityShared";
+import { requireArtifactCapabilityByAuthority } from "./authorityShared";
 import { queueMaterializationArgs, commitCloudMaterializationArgs,
   queueMaterializationInTransaction, commitCloudMaterializationInTransaction } from "./replicaMaterialization";
 
@@ -11,7 +11,7 @@ export const head = query({
   handler: async (ctx, args) => {
     const actor = await getAuthenticatedActor(ctx);
     if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
-    await requireActorArtifactCapability(ctx, actor, args.workId, "modify");
+    await requireArtifactCapabilityByAuthority(ctx, actor, args.workId, "modify");
     return { accountId: actor.accountId };
   },
 });

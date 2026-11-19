@@ -3,7 +3,7 @@ import * as docx from "docx";
 import JSZip from "jszip";
 import { docxLens } from "../lenses/docx-lens";
 import { fillChrome } from "../components/document-page-chrome";
-import { pageGeometry, withPreset } from "../lenses/page-geometry";
+import { pageGeometry, settlePageSetup, withPreset } from "../lenses/page-geometry";
 
 async function essay() {
   const document = new docx.Document({
@@ -69,5 +69,13 @@ describe("Word pages keep their exact paper, margins and running heads", () => {
     expect(landscape.page.header).toBe(400);
     const narrow = withPreset(landscape, { margins: "narrow" });
     expect(narrow.page).toMatchObject({ top: 680, left: 680, width: 16_838 });
+  });
+
+  it("a preset sent without new numbers brings its own; sent numbers win", () => {
+    const before = { margins: "normal", page: pageGeometry({ size: "a4" }) };
+    expect(settlePageSetup(before, { ...before, margins: "narrow" }).page).toMatchObject({ top: 680, left: 680 });
+    const exact = { ...before, margins: "narrow", page: { ...before.page, left: 1_000 } };
+    expect(settlePageSetup(before, exact).page.left).toBe(1_000);
+    expect(settlePageSetup(undefined, { margins: "wide" })).toEqual({ margins: "wide" });
   });
 });

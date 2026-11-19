@@ -1,3 +1,4 @@
+import { storedFidelityMap } from "../../../../../../shared/fidelity-map-storage";
 import { ensureImportedNativePayload } from "@/features/spectra/lenses/native-payload-server";
 import { queueHumanNativeMaterialization, commitHumanCloudMaterialization, writableNativeReplica } from "@/lib/native-materialization-server";
 import { hydrateContentForWrite } from "@/lib/convex-server";
@@ -177,7 +178,7 @@ async function materializeDocxArtifactAttempt(
         localPayloadRef: local.truth.payloadRef,
         localRevision: local.truth.revision,
         content: compactDocxProjectionForStorage(ours),
-        fidelityMap: externalOpened.fidelityMap,
+        fidelityMap: storedFidelityMap(externalOpened.fidelityMap),
         regionIds: rebased.externalChanged,
         partNames: [],
         conflictRegionIds,
@@ -294,11 +295,11 @@ async function materializeDocxArtifactAttempt(
   const cloudArgs: CloudMaterializationArgs = {
     workId, payloadRef: stored.payloadRef, contentHash: hash, baseRevision: truth.revision,
     projectionContent, projectionContentHash: nextProjection.nativeBinding.semanticDigest,
-    fidelityMap: next.fidelityMap, nativeReceipt,
+    fidelityMap: storedFidelityMap(next.fidelityMap), nativeReceipt,
   };
   const queueArgs = (): QueueMaterializationArgs => ({
     workId, payloadRef: stored.payloadRef, contentHash: hash, baseRevision: truth.revision,
-    fidelityMap: next.fidelityMap, regionIds, partNames: changedPartNames,
+    fidelityMap: storedFidelityMap(next.fidelityMap), regionIds, partNames: changedPartNames,
     localReplicaId: local?._id as Id<"workReplicas"> | undefined,
     baseContent: compactDocxProjectionForStorage(opened.projection),
     baseContentHash: opened.projection.nativeBinding.semanticDigest,
@@ -432,7 +433,7 @@ async function commitDocxNative(
 ) {
   return reconcileNativeRevision({ workId, localReplicaId: local.truth.replicaId as Id<"workReplicas">,
     localPayloadRef: local.truth.payloadRef, localRevision: local.truth.revision }, {
-    typeKey: "document", fidelityMap: external.fidelityMap, partNames,
+    typeKey: "document", fidelityMap: storedFidelityMap(external.fidelityMap), partNames,
     nativeBaseRevision: local.truth.projectionBaseRevision ?? local.truth.baseRevision ?? null,
     nativeBasePayloadHash: await sha256Payload(base.preservedCarry.payload),
     initialContent, cloudSource: cloud.truth,
@@ -566,7 +567,7 @@ export async function POST(request: Request) {
             state: recorded.state === "applied" ? "opened" : "conflicted",
             durableNative: true, receipt: recorded.receipt,
             ...(recorded.state === "applied" ? { projection: recorded.content,
-              fidelityMap: externalOpened.fidelityMap, capabilities: externalOpened.capabilities } : {
+              fidelityMap: storedFidelityMap(externalOpened.fidelityMap), capabilities: externalOpened.capabilities } : {
               conflict: { regionIds: recorded.conflictRegionIds, previews: recorded.previews,
                 message: "The Word file and Spectra changed the same regions. Choose which version to keep." },
             }),
@@ -596,7 +597,7 @@ export async function POST(request: Request) {
         workId,
         payloadHash: truth.hash,
         content: compactDocxProjectionForStorage(activatedProjection),
-        fidelityMap: opened.fidelityMap,
+        fidelityMap: storedFidelityMap(opened.fidelityMap),
         semanticDigest: activatedProjection.nativeBinding.semanticDigest,
         nativeFormat: activatedProjection.nativeBinding.format,
       });
@@ -604,7 +605,7 @@ export async function POST(request: Request) {
       return NextResponse.json({
         state: "opened",
         projection: activatedProjection,
-        fidelityMap: opened.fidelityMap,
+        fidelityMap: storedFidelityMap(opened.fidelityMap),
         capabilities: opened.capabilities,
       });
     }
@@ -666,7 +667,7 @@ export async function POST(request: Request) {
         payloadRef: stored.payloadRef,
         contentHash: hash,
         baseRevision: local.truth.revision,
-        fidelityMap: next.fidelityMap,
+        fidelityMap: storedFidelityMap(next.fidelityMap),
         regionIds: [...new Set([...spectraChanged, ...conflictRegionIds])],
         partNames: comparison.parts
           .filter((part) => part.verdict !== "identical")

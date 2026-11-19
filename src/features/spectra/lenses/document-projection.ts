@@ -17,6 +17,7 @@ import {
 } from "../../../../shared/document-projection.mjs";
 import { equationNodeToLatex, latexToEquation } from "./equation-interchange";
 import { directFormatBlocks } from "./direct-run-format";
+import { settlePageSetup } from "./page-geometry";
 import {
   docxProjectionBlockSchema,
   docxProjectionSchema,
@@ -1216,7 +1217,9 @@ export function docxProjectionFromContent(
   const projection = docxProjectionSchema.parse({
     blocks,
     outline: parsed.outline ?? base.outline,
-    ...(parsed.pageSetup ? { pageSetup: parsed.pageSetup } : base.pageSetup ? { pageSetup: base.pageSetup } : {}),
+    ...(parsed.pageSetup
+      ? { pageSetup: settlePageSetup(base.pageSetup, parsed.pageSetup) }
+      : base.pageSetup ? { pageSetup: base.pageSetup } : {}),
     nativeBinding: base.nativeBinding,
   });
   const inferredOperations = docxOperationsBetween(base, projection, insertLike);

@@ -11,7 +11,8 @@ import {
   activeReplicaWriteTarget,
   chooseReplicaContinuity,
 } from "./bridgeIdentity";
-import { evaluateAccessForActor } from "./authorityShared";
+import { artifactLifecycle, evaluateArtifactWriteAuthority } from "./authorityShared";
+import { enqueueNativeOutbox } from "./nativeOutbox";
 import { assertPayloadWriteAllowed, computeEffectivePolicy } from "./syncPolicy";
 import { decideMissingResourceAction, policyIncludesPath } from "../shared/sync-policy";
 import type { SyncPolicyValues } from "../shared/sync-policy";
@@ -163,7 +164,7 @@ async function hasArtifactModify(
   actor: BridgeActor,
   workId: Id<"spectraArtifacts">,
 ) {
-  const access = await evaluateAccessForActor(ctx, actor, "artifact", workId);
+  const access = await evaluateArtifactWriteAuthority(ctx, actor, workId);
   return access.allowed && access.capabilities.includes("modify");
 }
 
@@ -1603,6 +1604,7 @@ export const commitPayloadUpload = mutation({
       }
       await ctx.db.patch(cloud._id, { state: "diverged", updatedAt: now });
       await ctx.db.patch(device._id, { lastSeenAt: now });
+      await enqueueNativeOutbox(ctx, replica.workId, "reconcile");
       return { payloadRef: uploadedPayloadRef, externalChange: true, conflicted: true };
     }
     const replicasAgree = cloudNeedsFirstPayload || cloudMatchesUpload;
@@ -1615,6 +1617,9 @@ export const commitPayloadUpload = mutation({
       lastVerifiedAt: now,
       updatedAt: now,
     });
+    // A Word save Spectra has not taken in: the server merges it even when
+    // no studio tab is open.
+    if (!replicasAgree) await enqueueNativeOutbox(ctx, replica.workId, "reconcile");
     if (!cloud) {
       await ctx.db.insert("workReplicas", {
         accountId: device.accountId,
@@ -1883,7 +1888,7 @@ export const claimWrite = mutation({
       .withIndex("by_device_state_claimed", (q) => q.eq("deviceId", device._id).eq("state", "claimed").lt("claimedAt", now - BRIDGE_CLAIM_REDRIVE_MS))
       .take(20);
     for (const request of [...pending, ...abandonedClaims]) {
-      const work = await ctx.db.get(request.workId);
+      const work = await artifactLifecycle(ctx, request.workId);
       if (!work || work.status === "deleted") {
         await failWriteForMissingWork(ctx, request, now);
         continue;
@@ -1992,7 +1997,7 @@ export const refreshWriteClaim = mutation({
     const now = Date.now();
     if ((request.expiresAt ?? request.createdAt + BRIDGE_WRITE_EXPIRES_MS) <= now) return { valid: false };
     const [work, replica, mount] = await Promise.all([
-      ctx.db.get(request.workId), ctx.db.get(request.replicaId), ctx.db.get(request.mountId),
+      artifactLifecycle(ctx, request.workId), ctx.db.get(request.replicaId), ctx.db.get(request.mountId),
     ]);
     if (!work || work.status === "deleted" || !(await hasArtifactModify(ctx, actor, request.workId)) ||
         !activeReplicaWriteTarget(replica, mount, device) || !replica ||

@@ -1,3 +1,4 @@
+import { storedFidelityMap } from "../../../../shared/fidelity-map-storage";
 import { presentationObjectText, type PresentationContent, type PresentationObject, type PresentationParagraph } from "../presentation/model";
 import {
   parseRange,
@@ -792,12 +793,7 @@ function stripPresentationObjectsForActivation(content: unknown) {
  * response so a 200k-cell book or 120-slide deck cannot blow the document cap.
  */
 export function convexSafeFidelityMap(map: unknown) {
-  if (jsonBytes(map) <= 80_000) return map;
-  return {
-    truncated: true,
-    message:
-      "Native features Spectra cannot edit remain in the original package.",
-  };
+  return storedFidelityMap(map);
 }
 
 export function convexSafeOfficeActivationContent(

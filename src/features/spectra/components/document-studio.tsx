@@ -142,6 +142,8 @@ import { requestSpectra } from "../data/request";
 import { cleanOfficeHtml } from "../rich-content/clipboard";
 import { documentReferenceIds } from "./document-reference-ids";
 import { entryOf, withStacked } from "../editor/reference-stack";
+import { wordStyleSheet } from "../editor/word-style-sheet";
+import { docxStyleCatalogueSchema } from "../lenses/projection-contracts";
 
 const NO_SPECULATION: readonly SpeculativeBlockText[] = [];
 
@@ -839,6 +841,17 @@ export function DocumentStudio({
     [artifactId, createReference],
   );
   const nativeBinding = useMemo(() => record(record(content).nativeBinding), [content]);
+  // A Word document draws its own type: its default style, headings and named
+  // paragraph styles, scoped to this page.
+  const wordStyleScope = artifactId.replace(/[^A-Za-z0-9_-]/g, "");
+  const wordCatalogue = useMemo(() => {
+    const parsed = docxStyleCatalogueSchema.safeParse(record(content).styles);
+    return parsed.success ? parsed.data : undefined;
+  }, [content]);
+  const wordStyles = useMemo(
+    () => wordStyleSheet(wordCatalogue, `.document-page[data-word-styles="${wordStyleScope}"] .ProseMirror`),
+    [wordCatalogue, wordStyleScope],
+  );
   const nativePlaceholders = useMemo(() => {
     return Array.isArray(nativeBinding.nativePlaceholders)
       ? nativeBinding.nativePlaceholders.flatMap((value) => {
@@ -1266,6 +1279,18 @@ export function DocumentStudio({
   // alignment or the Table tab lagged a click behind. One render per frame keeps
   // them current without re-rendering per keystroke burst.
   const [, setSelectionTick] = useState(0);
+  // Enter after a styled Word paragraph follows the style's own "next".
+  useEffect(() => {
+    const storage = (editor?.storage as unknown as Record<string, { nextStyle?: Map<string, string | null> }> | undefined)?.spectraParagraphFrame;
+    if (!storage || !wordCatalogue) return;
+    storage.nextStyle = new Map(
+      Object.entries(wordCatalogue.paragraph).map(([id, style]) => {
+        const next = style.next ?? id;
+        return [id, next === wordCatalogue.defaultStyleId ? null : next] as const;
+      }),
+    );
+  }, [editor, wordCatalogue]);
+
   useEffect(() => {
     if (!editor) return;
     let frame = 0;
@@ -4000,8 +4025,10 @@ export function DocumentStudio({
               the running head and foot are printed on the paper, and the one
               number a writer checks constantly sits under it. */}
           <main ref={deskRef} className="document-desk">
+            {wordStyles ? <style>{wordStyles}</style> : null}
             <div
               className="document-page"
+              data-word-styles={wordStyles ? wordStyleScope : undefined}
               style={
                 pageLayout === "spread"
                   ? spreadStyle(spread)

@@ -1385,13 +1385,14 @@ export function documentBlocksFromJson(json) {
       };
     const nativeReadOnly = node?.attrs?.nativeReadOnly === true;
     const format = carriedParagraphFormat(node);
+    const styleId = node?.type === "paragraph" && typeof node.attrs?.styleId === "string" && node.attrs.styleId ? node.attrs.styleId : undefined;
     return {
       id,
       type: "paragraph",
       text,
       ...(hasRichContent ? { inlineContent } : {}),
-      ...(nativeReadOnly || format.paragraphFormat
-        ? { attrs: { ...(nativeReadOnly ? { nativeReadOnly: true } : {}), ...format } }
+      ...(nativeReadOnly || format.paragraphFormat || styleId
+        ? { attrs: { ...(nativeReadOnly ? { nativeReadOnly: true } : {}), ...(styleId ? { styleId } : {}), ...format } }
         : {}),
     };
   });
@@ -1740,7 +1741,22 @@ function groupWordLists(nodes, blockById) {
   return output;
 }
 
-/** Word list paragraphs as the editor shows them: numbered as Word counts, grouped as Word draws them. */
+/**
+ * A Word paragraph's style, on the node the editor draws, so its text takes the
+ * style's font and spacing. The default style ("Normal") is the page's own look
+ * and is left off.
+ */
+function stampWordStyles(nodes, blockById) {
+  return nodes.map((node) => {
+    if (node?.type !== "paragraph") return node;
+    const block = blockById.get(node.attrs?.blockId);
+    const styleId = record(record(block).attrs).styleId;
+    if (record(block).type !== "paragraph" || typeof styleId !== "string" || !styleId || styleId === "Normal") return node;
+    return node.attrs?.styleId === styleId ? node : { ...node, attrs: { ...node.attrs, styleId } };
+  });
+}
+
+/** Word paragraphs as the editor shows them: styled as Word draws them, lists numbered as Word counts and grouped as Word draws them. */
 export function shapeWordLists(nodes, blockById) {
-  return groupWordLists(renumberWordLists(nodes, blockById), blockById);
+  return groupWordLists(renumberWordLists(stampWordStyles(nodes, blockById), blockById), blockById);
 }

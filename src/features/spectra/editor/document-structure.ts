@@ -138,8 +138,18 @@ export const SectionBreak = Node.create({
 
 const FRAMED_TYPES = ["paragraph", "heading", "blockquote"] as const;
 
-export const ParagraphFrame = Extension.create({
+/** The paragraph format a Word style decides; a paragraph that changes style starts without it. */
+const STYLE_DECIDED_ATTRIBUTES = [
+  "textAlign", "lineSpacing", "spacingAfter", "spacingBefore", "firstLineIndent", "indentLevel", "frameBorder", "frameShading",
+] as const;
+
+export const ParagraphFrame = Extension.create<Record<string, never>, { nextStyle: Map<string, string | null> }>({
   name: "spectraParagraphFrame",
+  addStorage() {
+    // Filled by the page from the document's Word styles: the style Enter
+    // gives the next paragraph (`w:next`), null for the default style.
+    return { nextStyle: new Map<string, string | null>() };
+  },
   addGlobalAttributes() {
     return [
       {
@@ -155,6 +165,21 @@ export const ParagraphFrame = Extension.create({
             },
             renderHTML: (attributes) =>
               attributes.listLevel ? { "data-list-level": String(attributes.listLevel) } : {},
+          },
+        },
+      },
+      {
+        // A Word paragraph style ("Body Text", "Caption"): the page draws its
+        // font and spacing, and Enter carries it to the next paragraph.
+        types: ["paragraph"],
+        attributes: {
+          styleId: {
+            default: null,
+            parseHTML: (element) => element.getAttribute("data-style") || null,
+            renderHTML: (attributes) =>
+              typeof attributes.styleId === "string" && attributes.styleId
+                ? { "data-style": attributes.styleId }
+                : {},
           },
         },
       },
@@ -369,6 +394,30 @@ export const ParagraphFrame = Extension.create({
       return true;
     };
     return {
+      // Enter at the end of a styled Word paragraph (a title, a caption) starts
+      // the paragraph Word would: the style's "next" style, with none of the
+      // spacing or alignment the old style decided.
+      Enter: () => {
+        const { selection } = this.editor.state;
+        const { $from } = selection;
+        const parent = $from.parent;
+        const style = parent.attrs.styleId;
+        if (!selection.empty || parent.type.name !== "paragraph" || $from.depth !== 1) return false;
+        if (typeof style !== "string" || !style || $from.parentOffset !== parent.content.size) return false;
+        const next = this.storage.nextStyle.get(style);
+        if (next === undefined || next === style) return false;
+        return this.editor
+          .chain()
+          .splitBlock()
+          .command(({ tr }) => {
+            const position = tr.selection.$from.before();
+            tr.setNodeAttribute(position, "styleId", next);
+            for (const name of STYLE_DECIDED_ATTRIBUTES)
+              if (tr.doc.nodeAt(position)?.attrs[name] != null) tr.setNodeAttribute(position, name, null);
+            return true;
+          })
+          .run();
+      },
       "Alt-Shift-ArrowUp": () => this.editor.commands.moveBlock(-1),
       "Alt-Shift-ArrowDown": () => this.editor.commands.moveBlock(1),
       "Mod-Home": () => boundary(false),

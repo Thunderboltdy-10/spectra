@@ -12,6 +12,7 @@ import type { WordSource, WordCitationInline } from "./docx-citation-schema";
 import { applyDocumentAcademicOperations } from "../commands/office/document-academic-operations";
 import { latexToEquation } from "./equation-interchange";
 import { docxOperationsBetween } from "./document-projection";
+import { docxStyleCatalogue } from "./docx-styles";
 import type {
   LensCapabilitySet,
   LensCompatibilityProfile,
@@ -3842,6 +3843,13 @@ async function projectDocument(
     blocks,
     pageSetup: pageSetupFromDocument(document),
   });
+  const styles = docxStyleCatalogue(
+    document,
+    blocks.flatMap((block) => {
+      const id = block.attrs?.nativeStyleId ?? block.attrs?.styleId;
+      return typeof id === "string" ? [id] : [];
+    }),
+  );
   const projection = docxProjectionSchema.parse({
     blocks,
     outline: blocks.flatMap((block) =>
@@ -3856,6 +3864,7 @@ async function projectDocument(
         : [],
     ),
     pageSetup: pageSetupFromDocument(document),
+    ...(styles ? { styles } : {}),
     nativeBinding: {
       version: 1,
       format: document.office.format.extension as DocxProjection["nativeBinding"]["format"],

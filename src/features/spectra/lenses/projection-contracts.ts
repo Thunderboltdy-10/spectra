@@ -186,6 +186,47 @@ export const docxProjectionBlockSchema = z
   })
   .strict();
 
+const docxStyleRoleSchema = z.enum([
+  "normal", "title", "subtitle", "quote", "caption", "listParagraph",
+  "heading1", "heading2", "heading3", "heading4", "heading5", "heading6",
+]);
+
+/** One Word paragraph style, resolved through basedOn, docDefaults and the theme. */
+export const docxStyleEntrySchema = z
+  .object({
+    name: z.string().max(200),
+    role: docxStyleRoleSchema.optional(),
+    /** The style Enter gives the next paragraph (`w:next`). */
+    next: z.string().max(200).optional(),
+    fontFamily: z.string().max(120).optional(),
+    fontSizePoints: z.number().positive().max(1_638).optional(),
+    color: z.string().max(16).optional(),
+    bold: z.boolean().optional(),
+    italic: z.boolean().optional(),
+    allCaps: z.boolean().optional(),
+    smallCaps: z.boolean().optional(),
+    alignment: z.enum(["left", "center", "right", "justify", "distribute"]).optional(),
+    /** Multiple of single spacing (Word's "auto" rule). */
+    lineSpacing: z.number().positive().max(20).optional(),
+    /** An exact or at-least line height. */
+    lineHeightPoints: z.number().positive().max(1_600).optional(),
+    spacingBeforePoints: z.number().min(0).max(1_600).optional(),
+    spacingAfterPoints: z.number().min(0).max(1_600).optional(),
+    indentLeftPoints: z.number().min(-1_600).max(1_600).optional(),
+    firstLineIndentPoints: z.number().min(-1_600).max(1_600).optional(),
+  })
+  .strict();
+export type DocxStyleEntry = z.infer<typeof docxStyleEntrySchema>;
+
+/** The document's look: its default paragraph style and the styles it uses. */
+export const docxStyleCatalogueSchema = z
+  .object({
+    defaultStyleId: z.string().max(200),
+    paragraph: z.record(z.string().max(200), docxStyleEntrySchema),
+  })
+  .strict();
+export type DocxStyleCatalogue = z.infer<typeof docxStyleCatalogueSchema>;
+
 export const docxProjectionSchema = z
   .object({
     blocks: z.array(docxProjectionBlockSchema).max(100_000),
@@ -212,6 +253,7 @@ export const docxProjectionSchema = z
       })
       .strict()
       .optional(),
+    styles: docxStyleCatalogueSchema.optional(),
     nativeBinding: z
       .object({
         ...nativeBindingBase,

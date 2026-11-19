@@ -49,6 +49,18 @@ crons.interval(
   {},
 );
 crons.interval(
+  "free-finished-bridge-write-bases",
+  { hours: 1 },
+  internal.bridgeWriteBase.sweepFinishedBases,
+  {},
+);
+crons.interval(
+  "move-bridge-write-bases",
+  { hours: 6 },
+  internal.bridgeWriteBase.moveInlineBasesMigration,
+  {},
+);
+crons.interval(
   "move-replica-projection-bases",
   { hours: 6 },
   internal.replicas.moveProjectionBasesMigration,

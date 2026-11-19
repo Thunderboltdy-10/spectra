@@ -2868,6 +2868,17 @@ export default defineSchema({
     .index("by_account_key_replica", ["accountId", "idempotencyKey", "replicaId"])
     .index("by_payload_state", ["payloadRef", "state"])
     .index("by_state_updated", ["state", "updatedAt"]),
+  // The document a Bridge write was asked against (convex/bridgeWriteBase.ts):
+  // kept apart so batches of write requests stay small.
+  bridgeWriteBases: defineTable({
+    requestId: v.id("bridgeWriteRequests"),
+    content: v.optional(v.any()),
+    textIndex: v.optional(v.string()),
+    fidelityMap: v.optional(v.any()),
+    createdAt: v.number(),
+  })
+    .index("by_request", ["requestId"])
+    .index("by_created", ["createdAt"]),
 
   bridgeFsRequests: defineTable({
     accountId: v.id("accounts"),

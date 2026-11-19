@@ -1,4 +1,5 @@
 import { externalReconciliationArgs, recordExternalConflict } from "./nativeReconciliation";
+import { insertWriteRequest } from "./bridgeWriteBase";
 import { deleteUnboundDurableStorage } from "./durableStorageBindings";
 import { v } from "convex/values";
 import { query } from "./functions";
@@ -275,7 +276,7 @@ export const transitionStorageStrategy = mutation({
         const localId = await ctx.db.insert("workReplicas", { accountId: actor.accountId, workId: args.workId, kind: "local", deviceId: mount.deviceId, mountId: mount._id, localResourceId, relativePath, nativeFormat: cloud.nativeFormat, payloadRef: undefined, revision: initialRevision, baseRevision: cloud.revision, contentHash: undefined, state: "pending", fidelityMap: cloud.fidelityMap, preservedCarryVersion: 1, compatibilityProfile: cloud.compatibilityProfile ?? "strict-native", updatedAt: now });
         activeLocal = (await ctx.db.get(localId)) ?? undefined;
         const writeKey = await deriveSyncIdempotencyKey({ workId: String(args.workId), target: localMaterializationTarget(String(mount._id), relativePath), baseRevision: initialRevision, targetRevision: cloud.contentHash, direction: "cloud-to-local" });
-        materializationRequestId = await ctx.db.insert("bridgeWriteRequests", { accountId: actor.accountId, workId: args.workId, replicaId: localId, deviceId: mount.deviceId, mountId: mount._id, localResourceId, relativePath, payloadRef: cloud.payloadRef, baseRevision: initialRevision, targetRevision: cloud.contentHash, contentHash: cloud.contentHash, idempotencyKey: writeKey, regionIds: [], partNames: [], projectionBaseContent: work.content, projectionBaseContentHash: work.contentHash, projectionBaseTextIndex: work.textIndex, projectionBaseFidelityMap: cloud.fidelityMap, state: "pending", retryAt: now, attemptCount: 0, expiresAt: now + BRIDGE_WRITE_EXPIRES_MS, createdAt: now, updatedAt: now });
+        materializationRequestId = await insertWriteRequest(ctx.db, { accountId: actor.accountId, workId: args.workId, replicaId: localId, deviceId: mount.deviceId, mountId: mount._id, localResourceId, relativePath, payloadRef: cloud.payloadRef, baseRevision: initialRevision, targetRevision: cloud.contentHash, contentHash: cloud.contentHash, idempotencyKey: writeKey, regionIds: [], partNames: [], projectionBaseContent: work.content, projectionBaseContentHash: work.contentHash, projectionBaseTextIndex: work.textIndex, projectionBaseFidelityMap: cloud.fidelityMap, state: "pending", retryAt: now, attemptCount: 0, expiresAt: now + BRIDGE_WRITE_EXPIRES_MS, createdAt: now, updatedAt: now });
         materializationOperationId = await ctx.db.insert("syncOperations", { accountId: actor.accountId, workId: args.workId, replicaId: localId, idempotencyKey: writeKey, direction: "cloud-to-local", revisionBefore: initialRevision, revisionAfter: cloud.contentHash, state: "pending", actorKind: "user", createdAt: now, updatedAt: now });
         createdLocal = true;
         locals = [...locals, activeLocal!];
@@ -1046,7 +1047,7 @@ export const applyProtectedPending = mutation({
     const [mount, device] = await Promise.all([ctx.db.get(local.mountId), ctx.db.get(local.deviceId)]);
     if (!activeReplicaWriteTarget(local, mount, device)) throw new Error("LOCAL_REPLICA_UNAVAILABLE");
     const now = Date.now();
-    const requestId = await ctx.db.insert("bridgeWriteRequests", {
+    const requestId = await insertWriteRequest(ctx.db, {
       accountId: actor.accountId, workId: args.workId, replicaId: local._id, deviceId: local.deviceId, mountId: local.mountId,
       localResourceId: local.localResourceId, relativePath: local.relativePath, payloadRef: local.pendingPayloadRef,
       baseRevision: local.pendingBaseRevision, targetRevision: local.pendingContentHash, contentHash: local.pendingContentHash,
@@ -1193,7 +1194,7 @@ export const createLocalReplica = mutation({
       targetRevision: input.contentHash,
       direction: "cloud-to-local",
     });
-    const requestId = await ctx.db.insert("bridgeWriteRequests", {
+    const requestId = await insertWriteRequest(ctx.db, {
       accountId: actor.accountId, workId: args.workId, replicaId, deviceId: mount.deviceId, mountId: mount._id,
       localResourceId, relativePath: input.relativePath, payloadRef: input.payloadRef,
       baseRevision, targetRevision: input.contentHash, contentHash: input.contentHash, idempotencyKey,

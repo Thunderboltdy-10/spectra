@@ -1,4 +1,5 @@
 import { v } from "convex/values";
+import { dropWriteRequestBase, insertWriteRequest, writeRequestBase } from "./bridgeWriteBase";
 import { query } from "./functions";
 import { internal } from "./_generated/api";
 import { internalMutation, mutation } from "./orgNodeMutation";
@@ -662,7 +663,7 @@ async function queueRestoreToDisk(
       });
       if (!existing) {
         const now = Date.now();
-        await ctx.db.insert("bridgeWriteRequests", {
+        await insertWriteRequest(ctx.db, {
           accountId: actor.accountId,
           workId: replica.workId,
           replicaId: replica._id,
@@ -2209,6 +2210,7 @@ export const completeWrite = mutation({
         if (operation?.actorKind === "ai" && operation.runId) await settleRunNativeOutcome(ctx, operation.runId);
         return completion("failed", { ignored: true, reason: errorCode });
       }
+      const base = await writeRequestBase(ctx.db, request);
       await patchReplica(ctx.db, request.replicaId, {
         payloadRef: request.payloadRef,
         baseRevision: request.targetRevision,
@@ -2216,10 +2218,10 @@ export const completeWrite = mutation({
         contentHash: request.contentHash,
         projectionBasePayloadRef: request.payloadRef,
         projectionBaseRevision: request.targetRevision,
-        projectionBaseContent: request.projectionBaseContent,
+        projectionBaseContent: base.projectionBaseContent,
         projectionBaseContentHash: request.projectionBaseContentHash,
-        projectionBaseTextIndex: request.projectionBaseTextIndex,
-        projectionBaseFidelityMap: request.projectionBaseFidelityMap,
+        projectionBaseTextIndex: base.projectionBaseTextIndex,
+        projectionBaseFidelityMap: base.projectionBaseFidelityMap,
         state: hasNewerWrite ? "pending" : "current",
         lastVerifiedAt: now,
         errorCode: undefined,
@@ -2258,10 +2260,10 @@ export const completeWrite = mutation({
           ...(hasNewerWrite ? {} : { revision: request.targetRevision, contentHash: request.contentHash }),
           projectionBasePayloadRef: request.payloadRef,
           projectionBaseRevision: request.targetRevision,
-          projectionBaseContent: request.projectionBaseContent,
+          projectionBaseContent: base.projectionBaseContent,
           projectionBaseContentHash: request.projectionBaseContentHash,
-          projectionBaseTextIndex: request.projectionBaseTextIndex,
-          projectionBaseFidelityMap: request.projectionBaseFidelityMap,
+          projectionBaseTextIndex: base.projectionBaseTextIndex,
+          projectionBaseFidelityMap: base.projectionBaseFidelityMap,
           state: hasNewerWrite ? "ahead" : "current",
           lastVerifiedAt: hasNewerWrite ? cloud.lastVerifiedAt : now,
           updatedAt: now,
@@ -2315,6 +2317,8 @@ export const completeWrite = mutation({
       await Promise.all(resolvingConflicts
         .filter((conflict) => conflict.workId === request.workId && conflict.resolutionRequestId === request._id)
         .map((conflict) => ctx.db.patch(conflict._id, { state: "resolved-spectra", resolvedAt: now, updatedAt: now })));
+      // The base is now the replica's; the finished request no longer needs its copy.
+      await dropWriteRequestBase(ctx.db, request);
       return completion("verified");
     }
     const conflicted = args.outcome === "conflicted";

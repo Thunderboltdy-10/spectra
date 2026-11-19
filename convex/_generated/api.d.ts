@@ -39,6 +39,7 @@ import type * as bridgeIdentity from "../bridgeIdentity.js";
 import type * as bridgePlacement from "../bridgePlacement.js";
 import type * as bridgeStructure from "../bridgeStructure.js";
 import type * as bridgeSync from "../bridgeSync.js";
+import type * as bridgeWriteBase from "../bridgeWriteBase.js";
 import type * as bridgeWriteOperations from "../bridgeWriteOperations.js";
 import type * as calendar from "../calendar.js";
 import type * as calendarReadModels from "../calendarReadModels.js";
@@ -201,6 +202,7 @@ declare const fullApi: ApiFromModules<{
   bridgePlacement: typeof bridgePlacement;
   bridgeStructure: typeof bridgeStructure;
   bridgeSync: typeof bridgeSync;
+  bridgeWriteBase: typeof bridgeWriteBase;
   bridgeWriteOperations: typeof bridgeWriteOperations;
   calendar: typeof calendar;
   calendarReadModels: typeof calendarReadModels;

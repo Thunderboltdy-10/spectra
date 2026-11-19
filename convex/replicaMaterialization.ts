@@ -1,4 +1,5 @@
 import { v, type Infer } from "convex/values";
+import { insertWriteRequest } from "./bridgeWriteBase";
 import { z } from "zod";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
@@ -300,7 +301,7 @@ export async function queueMaterializationInTransaction(
     });
     return { requestId: "protected-original" as const, state: "protected-pending" as const };
   }
-  const requestId = await ctx.db.insert("bridgeWriteRequests", {
+  const requestId = await insertWriteRequest(ctx.db, {
     accountId: actor.accountId,
     workId: args.workId,
     replicaId: local._id,

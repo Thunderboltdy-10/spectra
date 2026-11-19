@@ -11,6 +11,7 @@ import {
   type QueueMaterializationArgs,
 } from "./replicaMaterialization";
 import { POLICY_PRESETS } from "../shared/sync-policy";
+import { writeRequestBase } from "./bridgeWriteBase";
 
 const modules = import.meta.glob("./**/*.ts");
 const identity = { subject: "clerk_replica_transaction", email: "native-tx@example.test", emailVerified: true };
@@ -209,7 +210,8 @@ const snapshot = (t: ReturnType<typeof convexTest>, f: Fixture) => t.run(async c
   work: await ctx.db.get(f.workId),
   local: await ctx.db.get(f.localId),
   cloud: await ctx.db.get(f.cloudId),
-  requests: await ctx.db.query("bridgeWriteRequests").collect(),
+  requests: await Promise.all((await ctx.db.query("bridgeWriteRequests").collect())
+    .map(async request => ({ ...request, ...(await writeRequestBase(ctx.db, request)) }))),
   operations: await ctx.db.query("syncOperations").collect(),
 }));
 async function invokeQueue(t: ReturnType<typeof convexTest>, f: Fixture, args = queueArgs(f)) {

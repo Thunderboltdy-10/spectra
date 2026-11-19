@@ -20,11 +20,18 @@ import { shouldActivateExternalNativeRevision } from "../src/features/spectra/le
 import type { QueueMaterializationArgs, CloudMaterializationArgs, queueMaterializationInTransaction,
   commitCloudMaterializationInTransaction } from "./replicaMaterialization";
 import { deleteReplica, patchReplica, readProjectionBase } from "./replicaProjectionBase";
+import { writeRequestBase } from "./bridgeWriteBase";
 
 /** A replica as stored, with its projection base from the sidecar. */
 async function replicaWithBase(ctx: { db: import("./_generated/server").DatabaseReader }, id: import("./_generated/dataModel").Id<"workReplicas">) {
   const replica = await ctx.db.get(id);
   return replica ? { ...replica, ...(await readProjectionBase(ctx.db, replica)) } : null;
+}
+
+/** A Bridge write request as stored, with the base it was asked against. */
+async function requestWithBase(ctx: { db: import("./_generated/server").DatabaseReader }, id: import("./_generated/dataModel").Id<"bridgeWriteRequests">) {
+  const request = await ctx.db.get(id);
+  return request ? { ...request, ...(await writeRequestBase(ctx.db, request)) } : null;
 }
 
 const nativeBridgeKey = "native-materialization-test-key-0000000001";
@@ -847,7 +854,7 @@ describe("replica truth machine", () => {
         projectionContentHash: "d".repeat(64),
       });
     const requestId = requireWriteRequestId(queued.requestId);
-    const request = await t.run(async (ctx) => ctx.db.get(requestId));
+    const request = await t.run(async (ctx) => requestWithBase(ctx, requestId));
     const projectedSheet = (
       request?.projectionBaseContent as {
         sheets?: Array<{ cells?: unknown }>;
@@ -3147,7 +3154,7 @@ describe("replica truth machine", () => {
     });
     const truth = await t.run(async (ctx) => ({
       work: await ctx.db.get(fixture.workId),
-      request: await ctx.db.get(requireWriteRequestId(queued.requestId)),
+      request: await requestWithBase(ctx, requireWriteRequestId(queued.requestId)),
       local: await replicaWithBase(ctx, fixture.localId),
     }));
     expect(queued.state).toBe("pending");
@@ -3179,7 +3186,7 @@ describe("replica truth machine", () => {
       });
     const truth = await t.run(async (ctx) => ({
       work: await ctx.db.get(fixture.workId),
-      request: await ctx.db.get(requireWriteRequestId(queued.requestId)),
+      request: await requestWithBase(ctx, requireWriteRequestId(queued.requestId)),
       local: await replicaWithBase(ctx, fixture.localId),
       cloud: await replicaWithBase(ctx, fixture.cloudId),
     }));
@@ -3256,7 +3263,7 @@ describe("replica truth machine", () => {
       firstOperation: (await ctx.db.query("syncOperations").collect()).find(
         (operation) => operation.revisionAfter === nextHash,
       ),
-      second: await ctx.db.get(requireWriteRequestId(second.requestId)),
+      second: await requestWithBase(ctx, requireWriteRequestId(second.requestId)),
       local: await replicaWithBase(ctx, fixture.localId),
     }));
 
@@ -3322,7 +3329,7 @@ describe("replica truth machine", () => {
       work: await ctx.db.get(fixture.workId),
       cloud: await replicaWithBase(ctx, fixture.cloudId),
       local: await replicaWithBase(ctx, fixture.localId),
-      request: await ctx.db.get(requireWriteRequestId(queued.requestId)),
+      request: await requestWithBase(ctx, requireWriteRequestId(queued.requestId)),
       externalOperation: await ctx.db.get(externalOperationId),
     }));
     expect(truth.work?.content).toEqual({ blocks: [] });

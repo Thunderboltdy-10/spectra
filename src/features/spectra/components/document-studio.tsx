@@ -142,6 +142,7 @@ import { requestSpectra } from "../data/request";
 import { cleanOfficeHtml } from "../rich-content/clipboard";
 import { documentReferenceIds } from "./document-reference-ids";
 import { entryOf, withStacked } from "../editor/reference-stack";
+import { wordFontVariables } from "../editor/word-fonts";
 import { wordStyleSheet } from "../editor/word-style-sheet";
 import { docxStyleCatalogueSchema } from "../lenses/projection-contracts";
 
@@ -4027,7 +4028,7 @@ export function DocumentStudio({
           <main ref={deskRef} className="document-desk">
             {wordStyles ? <style>{wordStyles}</style> : null}
             <div
-              className="document-page"
+              className={wordStyles ? `document-page ${wordFontVariables}` : "document-page"}
               data-word-styles={wordStyles ? wordStyleScope : undefined}
               style={
                 pageLayout === "spread"

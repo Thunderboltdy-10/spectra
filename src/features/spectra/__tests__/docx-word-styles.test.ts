@@ -90,7 +90,7 @@ describe("a Word document's own styles", () => {
   it("draws the page from the catalogue", async () => {
     const opened = await docxLens.open(await styledEssay());
     const sheet = wordStyleSheet(opened.projection.styles, ".page .ProseMirror");
-    expect(sheet).toContain('--prose-font: "Cambria", "Caladea", serif');
+    expect(sheet).toContain('--prose-font: "Cambria", var(--word-font-caladea), serif');
     expect(sheet).toContain("--prose-size: 12pt");
     expect(sheet).toMatch(/p\[data-style="BodyText"\]\) \{[^}]*font-family: "Georgia", serif[^}]*margin-bottom: 12pt[^}]*text-indent: 18pt/u);
     expect(sheet).toMatch(/p\[data-style="EssayTitle"\]\) \{ color: #1F3864; \}/u);

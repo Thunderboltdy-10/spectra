@@ -14,16 +14,21 @@ import type { DocxStyleCatalogue, DocxStyleEntry } from "../lenses/projection-co
 const SERIF = /cambria|times|georgia|garamond|book antiqua|palatino|baskerville|caslon|minion|stix|caladea|tinos|serif|constantia|century|bodoni|didot|charter|crimson|libre baskerville|merriweather|noto serif|sylfaen/i;
 const MONO = /courier|consolas|mono|menlo|lucida console|cousine|source code/i;
 
-/** Open fonts with the same metrics as Word's, tried after the font itself. */
+/**
+ * Open fonts with the same metrics as Word's, tried after the font itself.
+ * Each is served by Spectra under a variable the document page defines
+ * (`word-fonts.ts`); Figtree is the interface's own face.
+ */
 const METRIC_TWINS: Record<string, string> = {
-  calibri: "Carlito",
-  cambria: "Caladea",
-  "times new roman": "Tinos",
-  arial: "Arimo",
-  "courier new": "Cousine",
-  "cambria math": "STIX Two Math",
-  aptos: "Figtree",
-  "aptos display": "Figtree",
+  calibri: "var(--word-font-carlito)",
+  cambria: "var(--word-font-caladea)",
+  "times new roman": "var(--word-font-tinos)",
+  arial: "var(--word-font-arimo)",
+  helvetica: "var(--word-font-arimo)",
+  "courier new": "var(--word-font-cousine)",
+  courier: "var(--word-font-cousine)",
+  aptos: "var(--font-figtree)",
+  "aptos display": "var(--font-figtree)",
 };
 
 const SAFE_FAMILY = /^[\p{L}\p{M}\p{N} ._&'+-]{1,80}$/u;
@@ -33,7 +38,7 @@ export function wordFontStack(family: string | undefined) {
   if (!family || !SAFE_FAMILY.test(family)) return undefined;
   const generic = MONO.test(family) ? "monospace" : SERIF.test(family) ? "serif" : "sans-serif";
   const twin = METRIC_TWINS[family.toLocaleLowerCase()];
-  return [`"${family.replace(/"/g, "")}"`, ...(twin ? [`"${twin}"`] : []), generic].join(", ");
+  return [`"${family.replace(/"/g, "")}"`, ...(twin ? [twin] : []), generic].join(", ");
 }
 
 const SAFE_COLOR = /^[0-9a-f]{6}$/i;

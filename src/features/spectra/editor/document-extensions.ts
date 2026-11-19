@@ -1,3 +1,4 @@
+import { wordFontStack } from "./word-style-sheet";
 import type { AnyExtension } from "@tiptap/core";
 import { getSchema } from "@tiptap/core";
 import Highlight from "@tiptap/extension-highlight";
@@ -35,6 +36,34 @@ import {
 import { StableBlockId } from "./stable-block-id";
 
 /** Heading levels a document holds; Word has nine, the editor shows six. */
+/**
+ * A run's font as Word names it, drawn with its open twin behind it so text in
+ * Calibri measures as Calibri where Calibri isn't installed. The mark keeps the
+ * one name Word wrote.
+ */
+const WordFontFamily = FontFamily.extend({
+  addGlobalAttributes() {
+    return [
+      {
+        types: this.options.types,
+        attributes: {
+          fontFamily: {
+            default: null,
+            parseHTML: (element) => {
+              const family = element.style.fontFamily.split(",")[0]?.trim().replace(/^["']|["']$/g, "");
+              return family || null;
+            },
+            renderHTML: (attributes) =>
+              typeof attributes.fontFamily === "string" && attributes.fontFamily
+                ? { style: `font-family: ${wordFontStack(attributes.fontFamily) ?? attributes.fontFamily}` }
+                : {},
+          },
+        },
+      },
+    ];
+  },
+});
+
 export const DOCUMENT_HEADING_LEVELS = [1, 2, 3, 4, 5, 6] as const;
 
 export type DocumentSchemaOptions = {
@@ -86,7 +115,7 @@ export function documentSchemaExtensions(options: DocumentSchemaOptions = {}): A
     TextAlign.configure({ types: ["heading", "paragraph"] }),
     Highlight.configure({ multicolor: true }),
     TextStyle,
-    FontFamily,
+    WordFontFamily,
     FontSize,
     Color,
     PageBreak,

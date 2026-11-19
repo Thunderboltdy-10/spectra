@@ -22,6 +22,8 @@ export default defineConfig({
       "@": path.resolve(__dirname, "src"),
       // Vitest runs in Node without Next's react-server condition mapping.
       "server-only": path.resolve(__dirname, "src/test/server-only-shim.ts"),
+      // Font loaders are compiled by Next, not Vitest.
+      "next/font/google": path.resolve(__dirname, "src/test/next-font-google-shim.ts"),
     },
   },
 });

@@ -89,8 +89,8 @@ Its public WebSocket URL is `wss://spectra-collaboration-gateway.fly.dev`.
 Spectra for desktop is the Tauri app in `bridge/bridge-app`: a window on the web app plus the Bridge that syncs local
 files. Its updater, `/desktop/download/<platform>` and `/desktop/latest` read the latest release of the public repository
 `Thunderboltdy-10/spectra-desktop` (renamed from `spectra-bridge`; GitHub forwards the old name, and the updater and the
-download route try the old name second). Release tags are `desktop-v<version>`; versions continue from the last
-Bridge release (0.1.3), and the first Spectra for desktop release is 0.2.0. `/desktop/latest` reads old `bridge-v*`
+download route try the old name second). Release tags are `desktop-v<version>`, and the tag alone sets the version:
+the workflow stamps it into the app (`bridge/scripts/set-version.py`), so nothing is bumped in the repository. `/desktop/latest` reads old `bridge-v*`
 tags too.
 
 1. Rename the repository `Thunderboltdy-10/spectra-bridge` to `spectra-desktop` on GitHub (Settings → General → Repository
@@ -105,13 +105,12 @@ tags too.
    - Optional, for a notarized Mac build: `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`,
      `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID`.
    - Vercel: `SPECTRA_DESKTOP_RELEASES_REPO` = `Thunderboltdy-10/spectra-desktop` (optional; that is the default).
-4. Release: the tag must equal `desktop-v` + the `version` in `tauri.conf.json`:
+4. Release: tag the commit and push the tag, such as
    `git tag desktop-v0.2.0 && git push origin desktop-v0.2.0`. The workflow **Spectra for desktop release** builds the signed
    installers and `latest.json` and publishes them.
 5. Check `https://github.com/Thunderboltdy-10/spectra-desktop/releases/latest/download/latest.json` opens, then
    `https://<domain>/desktop/download/windows` downloads the installer.
-6. Every later release: bump `version` in `tauri.conf.json` (and `version` under `[workspace.package]` in `bridge/Cargo.toml`),
-   commit, tag, push the tag. Installed copies (the old tray-only Bridge included, which keeps the same identifier) check a
+6. Every later release: push the next `desktop-v<version>` tag, higher than the last. Installed copies (the old tray-only Bridge included, which keeps the same identifier) check a
    minute after starting and then every 30 minutes, also when the window gains focus or the computer wakes, and install
    when idle. The window's content is the web app, so web changes reach it without a release.
 

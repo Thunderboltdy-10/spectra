@@ -27,7 +27,7 @@ Because `bridge/bridge-app` is a member of the `bridge` workspace, the
 unsigned test outputs are under `bridge/target/release/bundle/`:
 
 - `macos/Spectra.app`
-- `dmg/Spectra_0.2.0_aarch64.dmg` (the exact architecture/version name may vary)
+- `dmg/Spectra_<version>_aarch64.dmg` (the exact architecture/version name may vary)
 
 Open the `.app` from Finder or with `open`, then check the local service before
 pairing from the hosted browser:

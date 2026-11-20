@@ -1,9 +1,11 @@
 name: Spectra for desktop release
 
-# Pushing a tag `desktop-v<version>` (matching bridge-app/tauri.conf.json)
-# builds installers and publishes them, with updater signatures and a manifest, as a
-# release of the public releases repository. Spectra's /desktop/download route
-# and the app's updater both read the latest release there.
+# Pushing a tag `desktop-v<version>` builds installers and publishes them, with
+# updater signatures and a manifest, as a release of the public releases
+# repository. The tag alone sets the version: each build stamps it into the app
+# (bridge/scripts/set-version.py), so nothing in the repository is bumped for a
+# release. Spectra's /desktop/download route and the app's updater both read the
+# latest release there.
 #
 # Repository configuration:
 #   vars.SPECTRA_CONVEX_URL       hosted Convex URL baked into the Bridge
@@ -32,11 +34,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Tag matches the app version
+      - name: Tag names a version
         run: |
-          version=$(jq -r .version bridge/bridge-app/tauri.conf.json)
-          test "${GITHUB_REF_NAME}" = "desktop-v${version}" || {
-            echo "Tag ${GITHUB_REF_NAME} does not match the app version ${version}" >&2
+          [[ "${GITHUB_REF_NAME}" =~ ^desktop-v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            echo "Tag ${GITHUB_REF_NAME} is not desktop-v<major>.<minor>.<patch>" >&2
             exit 1
           }
 
@@ -81,6 +82,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+
+      - name: Take the version from the tag
+        shell: bash
+        run: python bridge/scripts/set-version.py "${GITHUB_REF_NAME#desktop-v}"
 
       - name: Verify the release configuration
         shell: bash

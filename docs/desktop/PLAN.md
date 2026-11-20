@@ -104,7 +104,7 @@ works with it; the copy names the app "Spectra for desktop" and the background p
   baked in. Never create a new repo under the old name (that kills the redirect). The new app lists both
   endpoints (new first, old second). `BRIDGE_RELEASES_REPO` and `RELEASES_REPO` defaults move to the new name.
   Tags become `desktop-v*`: installing and updating is the desktop app, never "Bridge".
-- **Version 0.2.0.** Versions continue from the last Bridge release (0.1.3). The web detects features by
+- **Version 0.2.0**, set by the tag `desktop-v0.2.0` (the tag alone sets a release's version). The web detects features by
   capability, not version.
 - **Install folder never shares the data folder.** `%LOCALAPPDATA%\Spectra\` already holds user data: the
   device-only works store (`works/works.db`, `bridge-core/src/works.rs`) and `agent-relay.token`

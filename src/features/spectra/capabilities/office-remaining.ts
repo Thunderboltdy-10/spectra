@@ -338,12 +338,12 @@ const DOCUMENT_SPECS: Spec<"document">[] = [
   [
     "insert.link",
     "Link the selected text to a web address.",
-    { reason: DOCUMENT_NATIVE_REASONS.hyperlink, touches: ["hyperlinks"] },
+    { delta: "replace-paragraph", touches: ["hyperlinks"] },
   ],
   [
     "insert.link.remove",
     "Remove the hyperlink from the selected text.",
-    { reason: DOCUMENT_NATIVE_REASONS.hyperlink, touches: ["hyperlinks"] },
+    { delta: "replace-paragraph", touches: ["hyperlinks"] },
   ],
   [
     "insert.equation",
@@ -423,11 +423,7 @@ const DOCUMENT_SPECS: Spec<"document">[] = [
   [
     "insert.toc",
     "Insert a table of contents field.",
-    {
-      reason: DOCUMENT_NATIVE_REASONS.field,
-      touches: ["fields"],
-      manifest: "insert_blocks",
-    },
+    { delta: "insert-paragraph", touches: ["body"], manifest: "insert_blocks" },
   ],
   [
     "table.row.after",
@@ -467,6 +463,26 @@ const DOCUMENT_SPECS: Spec<"document">[] = [
       reason: DOCUMENT_NATIVE_REASONS.tableStructure,
       touches: ["tableStructure"],
     },
+  ],
+  [
+    "table.style",
+    "Give the whole table a ready-made look: grid, shaded header, banded rows, rows only, outside only or no lines.",
+    { params: text, delta: "set-table-look", touches: ["tables"], manifest: "format_blocks" },
+  ],
+  [
+    "table.lines",
+    "Set which lines the table draws.",
+    { params: text, delta: "set-table-look", touches: ["tables"], manifest: "format_blocks" },
+  ],
+  [
+    "table.lineColor",
+    "Set the colour of the table's lines.",
+    { params: maybeText, delta: "set-table-look", touches: ["tables"], manifest: "format_blocks" },
+  ],
+  [
+    "table.cellFill",
+    "Fill the selected cells with a colour.",
+    { params: maybeText, delta: "set-table-look", touches: ["tables"], manifest: "format_blocks" },
   ],
   [
     "table.row.delete",
@@ -539,6 +555,18 @@ const DOCUMENT_SPECS: Spec<"document">[] = [
     "image.remove",
     "Remove this picture.",
     { delta: "delete-image", touches: ["images"], risk: "confirm" },
+  ],
+  ...(["equations", "fraction", "script", "radical", "integral", "operator", "bracket", "function", "accent", "limit", "relation", "matrix", "symbols"] as const).map(
+    (gallery) => [
+      `equation.gallery.${gallery}`,
+      `Insert from the equation ${gallery} gallery at the caret in this equation (value: the LaTeX of the entry).`,
+      { params: text, delta: "replace-paragraph", touches: ["equations"] },
+    ] as const,
+  ),
+  [
+    "equation.latex",
+    "Switch equation editing between maths as it looks and LaTeX source.",
+    { delta: "replace-paragraph", touches: ["equations"] },
   ],
   [
     "equation.edit",
@@ -696,7 +724,7 @@ const DOCUMENT_SPECS: Spec<"document">[] = [
   [
     "references.crossRef",
     "Insert a cross-reference.",
-    { reason: DOCUMENT_NATIVE_REASONS.hyperlink, touches: ["hyperlinks"] },
+    { delta: "replace-paragraph", touches: ["hyperlinks"] },
   ],
   [
     "review.trackChanges.show",

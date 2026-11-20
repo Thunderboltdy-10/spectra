@@ -215,6 +215,7 @@ import {
   updatingHighlightFallbackPaths,
 } from "./ai-region-path";
 import { useArtifactNativeSync } from "./artifact-native-sync";
+import type { InPlaceConflict, WordConflictChoice } from "../editor/word-conflict-decoration";
 import {
   nativeOfficeDraftPending,
   writeStudioDirty,
@@ -2914,6 +2915,69 @@ function ArtifactStudioEditor({
     queueNativeMaterialization,
     reconcileNativeRevision,
   } = nativeSync;
+  // Paragraphs Word and Spectra both changed are chosen where they are; once
+  // every clash has a choice the whole set is resolved on the server at once.
+  const conflictIdentity = nativeConflict ? JSON.stringify(nativeConflict.regionIds) : "";
+  const [conflictChoices, setConflictChoices] = useState<{ identity: string; regions: Record<string, WordConflictChoice> }>({ identity: "", regions: {} });
+  const chosenRegions = useMemo(
+    () => (conflictChoices.identity === conflictIdentity ? conflictChoices.regions : {}),
+    [conflictChoices, conflictIdentity],
+  );
+  const inPlaceConflicts = useMemo<InPlaceConflict[]>(
+    () =>
+      nativeWordDocument && nativeConflict
+        ? (nativeConflict.previews ?? []).flatMap((preview) =>
+            preview.externalBlock && nativeConflict.regionIds.includes(preview.regionId)
+              ? [{
+                  regionId: preview.regionId,
+                  external: { text: preview.externalBlock.text ?? preview.external, runs: preview.externalBlock.inlineContent },
+                  ...(chosenRegions[preview.regionId] ? { chosen: chosenRegions[preview.regionId] } : {}),
+                }]
+              : [],
+          )
+        : [],
+    [chosenRegions, nativeConflict, nativeWordDocument],
+  );
+  const allConflictsInPlace = Boolean(
+    nativeConflict?.regionIds.length &&
+      nativeConflict.regionIds.every((regionId) => inPlaceConflicts.some((conflict) => conflict.regionId === regionId)),
+  );
+  const conflictFailed = useCallback(
+    (error: unknown) => {
+      setConflictChoices({ identity: "", regions: {} });
+      setNativeWriteError(error instanceof Error ? error.message : "The conflict could not be resolved safely.");
+    },
+    [setNativeWriteError],
+  );
+  /** Whole-document choice; paragraphs already chosen in place keep their choice. */
+  const resolveConflicts = useCallback(
+    (side: "spectra" | "word") => {
+      const chosen = Object.keys(chosenRegions).length;
+      return reconcileNativeRevision(
+        chosen && nativeConflict
+          ? { regions: Object.fromEntries(nativeConflict.regionIds.map((regionId) => [regionId, chosenRegions[regionId] ?? side])) }
+          : side,
+      );
+    },
+    [chosenRegions, nativeConflict, reconcileNativeRevision],
+  );
+  const chooseConflict = useCallback(
+    (regionId: string, choice: WordConflictChoice) => {
+      if (!nativeConflict || readOnly) return;
+      const regions = { ...chosenRegions, [regionId]: choice };
+      setConflictChoices({ identity: conflictIdentity, regions });
+      if (nativeConflict.regionIds.every((candidate) => regions[candidate]))
+        void reconcileNativeRevision({ regions }).catch(conflictFailed);
+    },
+    [chosenRegions, conflictFailed, conflictIdentity, nativeConflict, readOnly, reconcileNativeRevision],
+  );
+  const wordConflicts = useMemo(
+    () =>
+      inPlaceConflicts.length
+        ? { conflicts: inPlaceConflicts, application: nativeOfficeApplication, onChoose: chooseConflict }
+        : undefined,
+    [chooseConflict, inPlaceConflicts, nativeOfficeApplication],
+  );
   const humanSummary = useCallback(
     (value: string | undefined) =>
       (value ?? "").replace(/^(\d+) bytes$/i, (_, bytes: string) =>
@@ -5450,6 +5514,7 @@ function ArtifactStudioEditor({
           : undefined,
         nativeActivity: Boolean(nativeMaterialization),
         nativeConflict: Boolean(nativeConflict),
+        conflictParagraphs: allConflictsInPlace ? nativeConflict?.regionIds.length : undefined,
         draftReview: live.recovery.state === "review_required",
         savedAt: dirty ? undefined : artifact.updatedAt,
         now: statusNow || Date.now(),
@@ -5474,6 +5539,7 @@ function ArtifactStudioEditor({
       historyIsMine,
       live.recovery.state,
       nativeConflict,
+      allConflictsInPlace,
       nativeMaterialization,
       nativeOfficeApplication,
       nativeOfficeDocument,
@@ -5536,7 +5602,7 @@ function ArtifactStudioEditor({
     }
     if (kind === "keep-spectra" || kind === "keep-office") {
       setStatusActionBusy(true);
-      void reconcileNativeRevision(kind === "keep-spectra" ? "spectra" : "word")
+      void resolveConflicts(kind === "keep-spectra" ? "spectra" : "word")
         .catch((error: unknown) =>
           setNativeWriteError(
             error instanceof Error
@@ -6110,7 +6176,33 @@ function ArtifactStudioEditor({
           </DismissibleArtifactNotice>
         </div>
       ) : null}
-      {nativeConflict ? (
+      {nativeConflict && allConflictsInPlace ? (
+        <div
+          role="status"
+          className="flex shrink-0 flex-wrap items-center gap-2 border-y border-[color-mix(in_oklab,var(--warning)_28%,var(--border-default))] bg-[color-mix(in_oklab,var(--warning)_7%,var(--bg-primary))] px-5 py-2 text-caption text-[var(--text-secondary)]"
+        >
+          <AlertCircle className="h-4 w-4 shrink-0 text-[var(--warning)]" />
+          <p className="min-w-0 flex-1 basis-60">
+            {nativeConflict.regionIds.length === 1
+              ? `${nativeOfficeApplication} and Spectra both changed one paragraph. Both versions are shown where it is: choose there.`
+              : `${nativeOfficeApplication} and Spectra both changed ${nativeConflict.regionIds.length} paragraphs. Both versions are shown where each one is: choose there.`}
+          </p>
+          <button
+            type="button"
+            className="rounded-control px-2.5 py-1 text-micro font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
+            onClick={() => {
+              const open = inPlaceConflicts.find((conflict) => !conflict.chosen) ?? inPlaceConflicts[0];
+              if (!open) return;
+              const slip = Array.from(document.querySelectorAll<HTMLElement>(".spectra-word-conflict"))
+                .find((element) => element.dataset.regionId === open.regionId);
+              slip?.scrollIntoView({ block: "center", behavior: "smooth" });
+              slip?.querySelector<HTMLElement>("button")?.focus({ preventScroll: true });
+            }}
+          >
+            {nativeConflict.regionIds.length === 1 ? "Show it" : "Show the next one"}
+          </button>
+        </div>
+      ) : nativeConflict ? (
         <DismissibleArtifactNotice
           artifactId={artifact._id}
           identity={JSON.stringify(nativeConflict)}
@@ -6149,7 +6241,7 @@ function ArtifactStudioEditor({
               type="button"
               className="rounded-control px-2.5 py-1 text-micro font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
               onClick={() =>
-                void reconcileNativeRevision("spectra").catch(
+                void resolveConflicts("spectra").catch(
                   (error: unknown) =>
                     setNativeWriteError(
                       error instanceof Error
@@ -6165,7 +6257,7 @@ function ArtifactStudioEditor({
               type="button"
               className="rounded-control bg-[var(--text-primary)] px-2.5 py-1 text-micro font-medium text-[var(--bg-primary)]"
               onClick={() =>
-                void reconcileNativeRevision("word").catch((error: unknown) =>
+                void resolveConflicts("word").catch((error: unknown) =>
                   setNativeWriteError(
                     error instanceof Error
                       ? error.message
@@ -6318,6 +6410,7 @@ function ArtifactStudioEditor({
                   }
                   header={null}
                   mode={contentMode}
+                  wordConflicts={showingDocumentPerformance ? undefined : wordConflicts}
                 />
               ) : null}
               {artifact.blueprintKey === "flashcard_deck" ? (

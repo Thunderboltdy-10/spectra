@@ -2784,6 +2784,8 @@ export default defineSchema({
           regionId: v.string(),
           spectra: v.string(),
           external: v.string(),
+          /** Word's whole paragraph, for showing it in place (docx paragraphs only). */
+          externalBlock: v.optional(v.any()),
         }),
       ),
     ),

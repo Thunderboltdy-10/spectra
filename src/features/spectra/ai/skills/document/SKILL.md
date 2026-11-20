@@ -17,6 +17,17 @@ document the reader needs, not the longest one you can produce.
 - **What structure is real?** Use headings only for real sections. A short memo or letter needs
   none. Never add a heading for every paragraph.
 
+## Choose the look
+
+Give `look` when you create a document, so it opens on the page, prints and exports to Word with
+real Word styles (Title, Heading 1–3, Quote, Caption) instead of the plain screen style:
+
+- `essay`: essays, reports, letters and anything handed in. A 12-point serif at 1.5 lines.
+- `notes`: revision notes, guides and summaries. A compact sans with coloured headings.
+- `worksheet`: handouts and practice sheets to print and write on. Plain, large and evenly spaced.
+
+Leave it out only for scratch notes the user keeps on screen.
+
 ## Craft
 
 - Open with the point. The first paragraph says what the document is for or answers the
@@ -27,9 +38,50 @@ document the reader needs, not the longest one you can produce.
   rows. Keep values and units in separate, named columns ("Mass (g)").
 - Use a numbered list for a sequence, bullets for parallel items, prose for reasoning.
   Arguments belong in paragraphs, not bullet fragments.
-- Use `$...$` for inline maths and `$$...$$` for display equations. Use code blocks only for code.
+- Use `$...$` for inline maths and `$$...$$` for display equations, in LaTeX. Every equation
+  becomes a real Word equation the reader can edit. Fractions, roots, scripts, sums,
+  integrals, limits, `\binom`, accents (`\hat`, `\vec`, `\bar`, `\dot`), `\overbrace`,
+  `\boxed`, `\mathbb{R}`, matrices (`pmatrix`, `bmatrix`, `vmatrix`), `cases` and `aligned` all
+  come through. Use `\text{...}` for words inside an equation. Use code blocks only for code.
 - Use `> ` quotes for quotations and callouts that matter. Do not decorate with rules, emoji
   or colour.
+
+## Word features in Markdown
+
+Everything a writer can do from the bar has a Markdown form. Use a feature when the document
+calls for it, never for decoration.
+
+| Feature | Write |
+| --- | --- |
+| Table look | A line straight after the table: `{style=banded}`. Styles: `grid`, `header` (shaded header), `banded`, `rows` (horizontal lines only), `outside`, `plain` (no lines). Or set it yourself: `{lines=horizontal line-color=#1F4E79 header-fill=#D9E2F3 band-fill=#F2F2F2}`, where lines is `grid`, `horizontal`, `outer` or `none`. |
+| Column alignment | In the rule under the header: `:---:` centres a column, `---:` right-aligns it. Right-align numbers. |
+| Caption | A paragraph ending `{.caption}`, right after its table or figure: `Table 1: Rate at each temperature {.caption}`. |
+| Footnote | `^[The note's words.]` where the reference goes. |
+| Page break | `[[page-break]]` on its own line, before a part that must start on a new page. |
+| Contents | `[[toc]]` on its own line, near the top of a long report. It lists the headings after it. |
+| Alignment | A paragraph or heading ending `{.center}`, `{.right}` or `{.justify}`. |
+| Scripts | `H<sub>2</sub>O`, `m<sup>2</sup>`. Use `$...$` instead when it is maths. |
+| Text colour | `<span style="color: #C00000">text</span>`, only when colour carries meaning. |
+
+A report for school, for example, might be written like this:
+
+```markdown
+# The effect of temperature on catalase {.center}
+
+[[toc]]
+
+## Results
+
+| Temperature (°C) | Mean time (s) |
+| --- | ---: |
+| 20 | 41.2 |
+| 40 | 18.6 |
+{style=header}
+
+Table 1: Mean time to collect 10 cm³ of oxygen {.caption}
+
+The rate peaks near 40 °C.^[Each mean is of three trials.]
+```
 - For study material, teach: a worked example for a procedure, a contrast for a subtle
   distinction, a short self-check at the end only when the learner wants practice. Load the
   `teaching` skill for anything longer than a page.

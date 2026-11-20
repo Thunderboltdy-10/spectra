@@ -115,18 +115,20 @@ describe("sheet cell plans on a dense workbook", () => {
   it("plans a one-cell save on a 15,000-cell sheet without rescanning it", () => {
     const snapshot = gradebook(5_000);
     let content = snapshot;
-    let worst = 0;
+    const times: number[] = [];
     for (let index = 0; index < 5; index += 1) {
       const next = commit(content, { [`B${100 + index}`]: { value: 1_000 + index } });
       changedArtifactRegionIds("sheets", content, next);
       content = next;
       const start = performance.now();
       const plan = planSheetsCellProjection(snapshot, content);
-      worst = Math.max(worst, performance.now() - start);
+      times.push(performance.now() - start);
       expect(plan?.changes).toHaveLength(index + 1);
     }
     // Measured ~1 ms after, ~60 ms before; the bound only catches a return
-    // to a full normalize-and-compare on every save.
-    expect(worst).toBeLessThan(25);
+    // to a full normalize-and-compare on every save. The median is read so a
+    // garbage-collection pause in a busy test run cannot fail it.
+    times.sort((left, right) => left - right);
+    expect(times[Math.floor(times.length / 2)]).toBeLessThan(25);
   });
 });

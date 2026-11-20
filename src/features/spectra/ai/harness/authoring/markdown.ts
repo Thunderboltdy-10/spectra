@@ -11,9 +11,15 @@
  *   > [!tip] text           callout (note, info, tip, success, warning)
  *   ```lang                 code block
  *   $$ latex $$             display equation
- *   | a | b |               table (first row is the header)
+ *   | a | b |               table (first row is the header; :--: aligns a column)
+ *   {style=banded}          the line after a table: its look (style, lines, fills)
  *   ---                     divider
- *   **b** *i* ~~s~~ `c` ==h== <u>u</u> [t](url) $x^2$   inline marks
+ *   [[page-break]]          page break
+ *   [[toc]]                 a contents list from the headings
+ *   text {.center}          a paragraph's or heading's alignment, {.caption} a caption
+ *   **b** *i* ~~s~~ `c` ==h== <u>u</u> <sup>2</sup> <sub>2</sub> [t](url) $x^2$   inline marks
+ *   <span style="color: #C00000">red</span>   text colour
+ *   ^[note text], or [^1] with a "[^1]: note text" line   footnotes
  *
  * Anything Markdown cannot express (a live reference, a citation, an image)
  * is shown as a keep marker, `<!-- keep:ID label -->`. Leaving the marker in
@@ -21,6 +27,7 @@
  */
 
 import { normalizeMath } from "../../../rich-content/markdown";
+import { TABLE_STYLES, type TableLines } from "../../../editor/table-styles";
 
 export type PmMark = { type: string; attrs?: Record<string, unknown> };
 export type PmNode = {
@@ -60,6 +67,8 @@ const DELIMITERS: Array<{ open: string; close: string; mark: PmMark }> = [
   { open: "~~", close: "~~", mark: { type: "strike" } },
   { open: "==", close: "==", mark: { type: "highlight" } },
   { open: "<u>", close: "</u>", mark: { type: "underline" } },
+  { open: "<sup>", close: "</sup>", mark: { type: "superscript" } },
+  { open: "<sub>", close: "</sub>", mark: { type: "subscript" } },
   { open: "*", close: "*", mark: { type: "italic" } },
   { open: "_", close: "_", mark: { type: "italic" } },
 ];
@@ -83,6 +92,23 @@ function findClose(source: string, from: number, close: string) {
   return -1;
 }
 
+const HEX_COLOR = /^#[0-9a-f]{6}$/i;
+const COLOR_SPAN = /^<span\s+style=["']\s*color\s*:\s*(#[0-9a-fA-F]{6})\s*;?\s*["']\s*>/;
+
+/** The end of a bracketed run that starts at `open`, past nested brackets and escapes. */
+function closingBracket(source: string, open: number) {
+  let depth = 0;
+  for (let index = open; index < source.length; index += 1) {
+    const char = source[index];
+    if (char === "\\") index += 1;
+    else if (char === "[") depth += 1;
+    else if (char === "]" && --depth === 0) return index;
+  }
+  return -1;
+}
+
+const unescapeNote = (text: string) => text.replace(/\\([\\\[\]])/g, "$1").trim();
+
 const CITATION = /^\[\[cite:([^:\]|]+)(?::([^\]|]+))?(?:\|([^\]]+))?\]\]/;
 
 function citationId() {
@@ -100,7 +126,7 @@ export function parseInline(source: string, marks: PmMark[] = []): PmNode[] {
   while (index < source.length) {
     const char = source[index]!;
     const rest = source.slice(index);
-    if (char === "\\" && index + 1 < source.length && /[\\`*_{}[\]()#+\-.!|~=$<>]/.test(source[index + 1]!)) {
+    if (char === "\\" && index + 1 < source.length && /[\\`*_{}[\]()#+\-.!|~=$<>^]/.test(source[index + 1]!)) {
       buffer += source[index + 1];
       index += 2;
       continue;
@@ -131,6 +157,29 @@ export function parseInline(source: string, marks: PmMark[] = []): PmNode[] {
         flush();
         out.push({ type: "inlineEquation", attrs: { latex: source.slice(index + 1, close) } });
         index = close + 1;
+        continue;
+      }
+    }
+    if (char === "^" && source[index + 1] === "[") {
+      // A footnote written where it belongs: ^[the note's words].
+      const close = closingBracket(source, index + 1);
+      if (close > index + 2) {
+        flush();
+        out.push({ type: "footnote", attrs: { text: unescapeNote(source.slice(index + 2, close)) } });
+        index = close + 1;
+        continue;
+      }
+    }
+    if (char === "<") {
+      const color = COLOR_SPAN.exec(rest);
+      const close = color ? source.indexOf("</span>", index + color[0].length) : -1;
+      if (color && close > index + color[0].length) {
+        flush();
+        for (const node of parseInline(source.slice(index + color[0].length, close), [...marks, { type: "textStyle", attrs: { color: color[1]!.toUpperCase() } }])) {
+          if (node.type === "text") pushText(out, node.text ?? "", node.marks ?? []);
+          else out.push(node);
+        }
+        index = close + "</span>".length;
         continue;
       }
     }
@@ -196,9 +245,20 @@ function indentOf(line: string) {
 const LIST_ITEM = /^( *)([-*+]|\d+[.)])\s+(.*)$/;
 const FENCE = /^ {0,3}(```+|~~~+)\s*([\w+#.-]*)\s*$/;
 
+const PAGE_BREAK = /^(?:\[\[page-?break\]\]|\\(?:newpage|pagebreak|clearpage))$/i;
+const TOC = /^\[\[(?:toc|contents)\]\]$/i;
+const NOTE_DEFINITION = /^\[\^([^\]\s]+)\]:\s?(.*)$/;
+/** Attributes after a paragraph or heading: {.center}, {.caption .right}. */
+const BLOCK_ATTRIBUTES = /\s*\{((?:\s*\.[a-z-]+)+)\s*\}\s*$/i;
+/** The look written on the line after a table: {style=banded} or {lines=horizontal line-color=#1F4E79}. */
+const TABLE_ATTRIBUTES = /^\{\s*((?:[a-z-]+\s*=\s*[#\w-]+\s*)+)\}$/i;
+const ALIGNMENTS = new Set(["left", "center", "right", "justify"]);
+
 function isBlockStart(line: string) {
   const trimmed = line.trim();
   return (
+    PAGE_BREAK.test(trimmed) ||
+    TOC.test(trimmed) ||
     /^#{1,6}(\s|$)/.test(trimmed) ||
     LIST_ITEM.test(line) ||
     trimmed.startsWith(">") ||
@@ -238,9 +298,107 @@ function tableCells(line: string) {
   return cells;
 }
 
-function paragraph(text: string): PmNode {
-  const content = parseInline(text.trim());
-  return content.length ? { type: "paragraph", content } : { type: "paragraph" };
+/** A paragraph's or heading's trailing {.center .caption}, read off its text. */
+function blockAttributes(text: string): { text: string; attrs: Record<string, unknown> } {
+  const match = BLOCK_ATTRIBUTES.exec(text);
+  if (!match || text[match.index + match[0].indexOf("{") - 1] === "\\") return { text, attrs: {} };
+  const attrs: Record<string, unknown> = {};
+  for (const name of match[1]!.split(/\s+/).map((entry) => entry.replace(/^\./, "").toLowerCase()).filter(Boolean)) {
+    if (ALIGNMENTS.has(name)) attrs.textAlign = name;
+    else if (name === "centre") attrs.textAlign = "center";
+    else if (name === "caption") attrs.blockStyle = "caption";
+    else return { text, attrs: {} };
+  }
+  return { text: text.slice(0, match.index), attrs };
+}
+
+function paragraph(text: string, align?: string): PmNode {
+  const { text: words, attrs } = blockAttributes(text.trim());
+  if (align && !attrs.textAlign) attrs.textAlign = align;
+  const content = parseInline(words.trim());
+  const withAttrs = Object.keys(attrs).length ? { attrs } : {};
+  return content.length ? { type: "paragraph", ...withAttrs, content } : { type: "paragraph", ...withAttrs };
+}
+
+/** The look on the line after a table, as table attributes and a fill for each row. */
+function tableLook(line: string | undefined) {
+  const match = TABLE_ATTRIBUTES.exec(line?.trim() ?? "");
+  if (!match) return null;
+  const values = new Map<string, string>();
+  for (const pair of match[1]!.trim().split(/\s+(?=[a-z-]+\s*=)/i)) {
+    const [key, value] = pair.split("=").map((part) => part.trim());
+    if (key && value) values.set(key.toLowerCase(), value);
+  }
+  const preset = TABLE_STYLES[values.get("style") as keyof typeof TABLE_STYLES];
+  const lines = (values.get("lines") ?? preset?.lines ?? null) as TableLines | null;
+  const color = (key: string) => {
+    const value = values.get(key);
+    return value && HEX_COLOR.test(value) ? value.toUpperCase() : null;
+  };
+  const header = values.has("header-fill") ? color("header-fill") : (preset?.header ?? null);
+  const band = values.has("band-fill") ? color("band-fill") : (preset?.band ?? null);
+  const lineColor = color("line-color");
+  if (lines !== null && !["grid", "horizontal", "outer", "none"].includes(lines)) return null;
+  const filled = Boolean(preset) || values.has("header-fill") || values.has("band-fill");
+  if (!filled && lines === null && !lineColor) return null;
+  return {
+    attrs: {
+      ...(lines ? { lines, borderless: lines === "none" } : {}),
+      ...(lineColor ? { lineColor } : {}),
+      ...(filled ? { fillsSet: true } : {}),
+    },
+    fills: filled ? { header, band } : null,
+  };
+}
+
+const COLUMN_ALIGN = (cell: string) => {
+  const trimmed = cell.trim();
+  if (trimmed.startsWith(":") && trimmed.endsWith(":")) return "center";
+  if (trimmed.endsWith(":")) return "right";
+  return undefined;
+};
+
+/**
+ * Footnotes written the GitHub way, [^1] in the text and "[^1]: the note" on a
+ * line of its own, become inline notes, ^[the note], where the reference is.
+ */
+function inlineNoteDefinitions(markdown: string) {
+  const definitions = new Map<string, string>();
+  const kept: string[] = [];
+  let fence: string | null = null;
+  for (const line of markdown.split("\n")) {
+    const opening = FENCE.exec(line)?.[1] ?? null;
+    if (fence) {
+      if (line.trim().startsWith(fence)) fence = null;
+    } else if (opening) fence = opening;
+    else {
+      const definition = NOTE_DEFINITION.exec(line.trim());
+      if (definition) {
+        definitions.set(definition[1]!, definition[2]!);
+        continue;
+      }
+    }
+    kept.push(line);
+  }
+  if (!definitions.size) return markdown;
+  const escape = (text: string) => text.replace(/([\\\[\]])/g, "\\$1");
+  fence = null;
+  return kept
+    .map((line) => {
+      const opening = FENCE.exec(line)?.[1] ?? null;
+      if (fence) {
+        if (line.trim().startsWith(fence)) fence = null;
+        return line;
+      }
+      if (opening) {
+        fence = opening;
+        return line;
+      }
+      return line.replace(/\[\^([^\]\s]+)\]/g, (whole, label: string) =>
+        definitions.has(label) ? `^[${escape(definitions.get(label)!)}]` : whole,
+      );
+    })
+    .join("\n");
 }
 
 function parseList(lines: string[], start: number): { node: PmNode; next: number } {
@@ -290,7 +448,7 @@ function parseList(lines: string[], start: number): { node: PmNode; next: number
       break;
     }
     const content: PmNode[] = [paragraph(text)];
-    if (childLines.some((child) => child.trim())) content.push(...parseBlocks(childLines.join("\n")));
+    if (childLines.some((child) => child.trim())) content.push(...parseBlocks(childLines.join("\n"), true));
     items.push(
       task
         ? { type: "taskItem", attrs: { checked: Boolean(checked) }, content }
@@ -333,8 +491,9 @@ function normalizeMathOutsideFences(markdown: string) {
   return parts.join("\n");
 }
 
-export function parseBlocks(markdown: string): PmNode[] {
-  const lines = normalizeMathOutsideFences(markdown.replace(/\r\n?/g, "\n")).split("\n");
+export function parseBlocks(markdown: string, nested = false): PmNode[] {
+  const normalised = normalizeMathOutsideFences(markdown.replace(/\r\n?/g, "\n"));
+  const lines = (nested ? normalised : inlineNoteDefinitions(normalised)).split("\n");
   const nodes: PmNode[] = [];
   let index = 0;
   while (index < lines.length) {
@@ -350,12 +509,23 @@ export function parseBlocks(markdown: string): PmNode[] {
       index += 1;
       continue;
     }
+    if (PAGE_BREAK.test(trimmed)) {
+      nodes.push({ type: "pageBreak" });
+      index += 1;
+      continue;
+    }
+    if (TOC.test(trimmed)) {
+      nodes.push({ type: "__toc" });
+      index += 1;
+      continue;
+    }
     const heading = /^(#{1,6})(?:\s+(.*?))?\s*#*\s*$/.exec(trimmed);
     if (heading) {
-      const content = parseInline(heading[2] ?? "");
+      const { text: title, attrs: extra } = blockAttributes(heading[2] ?? "");
+      const content = parseInline(title.trim());
       nodes.push({
         type: "heading",
-        attrs: { level: Math.min(3, heading[1]!.length) },
+        attrs: { level: Math.min(3, heading[1]!.length), ...(typeof extra.textAlign === "string" ? { textAlign: extra.textAlign } : {}) },
         ...(content.length ? { content } : {}),
       });
       index += 1;
@@ -415,14 +585,14 @@ export function parseBlocks(markdown: string): PmNode[] {
       const callout = /^\[!(\w+)\]\s*(.*)$/.exec(body[0] ?? "");
       if (callout) {
         const inner = [callout[2]!, ...body.slice(1)].join("\n");
-        const content = parseBlocks(inner);
+        const content = parseBlocks(inner, true);
         nodes.push({
           type: "callout",
           attrs: { type: CALLOUT_TYPES[callout[1]!.toLowerCase()] ?? "info" },
           content: content.length ? content : [{ type: "paragraph" }],
         });
       } else {
-        const content = parseBlocks(body.join("\n"));
+        const content = parseBlocks(body.join("\n"), true);
         nodes.push({ type: "blockquote", content: content.length ? content : [{ type: "paragraph" }] });
       }
       continue;
@@ -438,21 +608,30 @@ export function parseBlocks(markdown: string): PmNode[] {
       /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(lines[index + 1] ?? "")
     ) {
       const rows: string[][] = [tableCells(line)];
+      const aligns = tableCells(lines[index + 1]!).map(COLUMN_ALIGN);
       index += 2;
       while (index < lines.length && lines[index]!.trim().startsWith("|")) {
         rows.push(tableCells(lines[index]!));
         index += 1;
       }
+      const look = tableLook(lines[index]);
+      if (look) index += 1;
       const width = Math.max(...rows.map((row) => row.length));
       nodes.push({
         type: "table",
-        content: rows.map((row, rowIndex) => ({
-          type: "tableRow",
-          content: Array.from({ length: width }, (_unused, cellIndex) => ({
-            type: rowIndex === 0 ? "tableHeader" : "tableCell",
-            content: [paragraph(row[cellIndex] ?? "")],
-          })),
-        })),
+        ...(look && Object.keys(look.attrs).length ? { attrs: look.attrs } : {}),
+        content: rows.map((row, rowIndex) => {
+          // Body rows alternate from the first: the second, fourth… take the band.
+          const fill = !look?.fills ? undefined : rowIndex === 0 ? look.fills.header : rowIndex % 2 === 0 ? look.fills.band : null;
+          return {
+            type: "tableRow",
+            content: Array.from({ length: width }, (_unused, cellIndex) => ({
+              type: rowIndex === 0 ? "tableHeader" : "tableCell",
+              ...(fill ? { attrs: { background: fill } } : {}),
+              content: [paragraph(row[cellIndex] ?? "", aligns[cellIndex])],
+            })),
+          };
+        }),
       });
       continue;
     }
@@ -470,10 +649,27 @@ export function parseBlocks(markdown: string): PmNode[] {
 // ---------------------------------------------------------------- serialise
 
 function escapeText(text: string) {
-  return text.replace(/([\\`*_[\]]|~~|==|\$)/g, "\\$1");
+  return text
+    .replace(/([\\`*_[\]]|~~|==|\$)/g, "\\$1")
+    .replace(/\^(?=\\\[)/g, "\\^")
+    .replace(/<(?=\/?(?:u|sup|sub|span)[\s>])/gi, "\\<");
 }
 
-const MARK_ORDER = ["link", "bold", "italic", "strike", "highlight", "underline", "code"];
+const MARK_ORDER = ["link", "textStyle", "bold", "italic", "strike", "highlight", "underline", "superscript", "subscript", "code"];
+
+/** A text colour Markdown writes: a colour and nothing else on the mark (a Word font stays unwritten). */
+export function writtenColor(mark: PmMark) {
+  if (mark.type !== "textStyle") return null;
+  const color = mark.attrs?.color;
+  if (typeof color !== "string" || !HEX_COLOR.test(color)) return null;
+  const others = Object.entries(mark.attrs ?? {}).filter(([key, value]) => key !== "color" && value !== null && value !== undefined);
+  return others.length ? null : color.toUpperCase();
+}
+
+/** True for a mark Markdown writes itself. */
+export function isWrittenMark(mark: PmMark) {
+  return MARK_ORDER.includes(mark.type) && (mark.type !== "textStyle" || writtenColor(mark) !== null);
+}
 
 function wrap(text: string, mark: PmMark) {
   switch (mark.type) {
@@ -487,6 +683,14 @@ function wrap(text: string, mark: PmMark) {
       return `==${text}==`;
     case "underline":
       return `<u>${text}</u>`;
+    case "superscript":
+      return `<sup>${text}</sup>`;
+    case "subscript":
+      return `<sub>${text}</sub>`;
+    case "textStyle": {
+      const color = writtenColor(mark);
+      return color ? `<span style="color: ${color}">${text}</span>` : text;
+    }
     case "link":
       return `[${text}](${String(mark.attrs?.href ?? "")})`;
     default:
@@ -515,6 +719,8 @@ export function serializeInline(nodes: PmNode[] | undefined): string {
     } else if (node.type === "hardBreak") out += "  \n";
     else if (node.type === "inlineEquation" || node.type === "equation")
       out += `$${String(node.attrs?.latex ?? "")}$`;
+    else if (node.type === "footnote")
+      out += `^[${String(node.attrs?.text ?? "").replace(/([\\[\]])/g, "\\$1")}]`;
     else if (node.type === "spectraCitation") {
       const where = typeof node.attrs?.evidenceSpanId === "string" && node.attrs.evidenceSpanId ? `:${node.attrs.evidenceSpanId}` : "";
       out += `[[cite:${String(node.attrs?.sourceId ?? "")}${where}|${String(node.attrs?.label ?? "Source")}]]`;
@@ -563,6 +769,8 @@ const MARKDOWN_NODES = new Set([
   "text",
   "hardBreak",
   "inlineEquation",
+  "pageBreak",
+  "footnote",
 ]);
 
 /** True when a node (and everything in it) has a Markdown form. */
@@ -570,6 +778,8 @@ export function expressibleInMarkdown(node: PmNode): boolean {
   // A citation Spectra made round-trips as [[cite:…]]; one imported from Word
   // carries its native field and stays kept as it is.
   if (node.type === "spectraCitation") return !node.attrs?.native && typeof node.attrs?.sourceId === "string" && Boolean(node.attrs.sourceId);
+  // A note Word wrote keeps its own formatted content; one Spectra made is its words.
+  if (node.type === "footnote") return !node.attrs?.nativeNoteId && !node.attrs?.nativeReadOnly && !node.attrs?.noteContent;
   if (!MARKDOWN_NODES.has(node.type)) return false;
   return (node.content ?? []).every(expressibleInMarkdown);
 }
@@ -578,10 +788,12 @@ export function serializeBlock(node: PmNode): string {
   switch (node.type) {
     case "heading": {
       const level = Math.min(3, Math.max(1, Number(node.attrs?.level) || 2));
-      return `${"#".repeat(level)} ${serializeInline(node.content)}`;
+      return `${"#".repeat(level)} ${serializeInline(node.content)}${attributeSuffix(node, false)}`;
     }
     case "paragraph":
-      return serializeInline(node.content);
+      return `${serializeInline(node.content)}${attributeSuffix(node, true)}`;
+    case "pageBreak":
+      return "[[page-break]]";
     case "bulletList":
     case "orderedList":
     case "taskList": {
@@ -620,7 +832,7 @@ export function serializeBlock(node: PmNode): string {
       const rows = (node.content ?? []).map((row) =>
         (row.content ?? []).map((cell) =>
           (cell.content ?? [])
-            .map((child) => (child.type === "paragraph" ? serializeInline(child.content) : serializeBlock(child)))
+            .map((child) => (child.type === "paragraph" ? `${serializeInline(child.content)}${attributeSuffix(child, true, true)}` : serializeBlock(child)))
             .join(" ")
             .replace(/\|/g, "\\|")
             .replace(/\n+/g, " "),
@@ -630,11 +842,71 @@ export function serializeBlock(node: PmNode): string {
       const width = Math.max(...rows.map((row) => row.length));
       const line = (row: string[]) =>
         `| ${Array.from({ length: width }, (_unused, index) => row[index] ?? "").join(" | ")} |`;
-      return [line(rows[0]!), `| ${Array.from({ length: width }, () => "---").join(" | ")} |`, ...rows.slice(1).map(line)].join("\n");
+      const aligns = Array.from({ length: width }, (_unused, column) => columnAlign(node, column));
+      const rule = aligns.map((align) => (align === "center" ? ":---:" : align === "right" ? "---:" : "---"));
+      const look = tableLookLine(node);
+      return [line(rows[0]!), `| ${rule.join(" | ")} |`, ...rows.slice(1).map(line), ...(look ? [look] : [])].join("\n");
     }
     default:
       return serializeInline(node.content);
   }
+}
+
+function alignOf(node: PmNode | undefined) {
+  const align = node?.attrs?.textAlign;
+  return typeof align === "string" && ALIGNMENTS.has(align) && align !== "left" ? align : undefined;
+}
+
+/** The {.center .caption} a paragraph or heading carries; a table cell's alignment is its column's. */
+function attributeSuffix(node: PmNode, paragraphStyles: boolean, inCell = false) {
+  const names: string[] = [];
+  if (paragraphStyles && (node.attrs?.blockStyle === "caption" || node.attrs?.styleId === "Caption")) names.push("caption");
+  const align = alignOf(node);
+  if (align && !inCell) names.push(align);
+  return names.length ? ` {${names.map((name) => `.${name}`).join(" ")}}` : "";
+}
+
+const cellParagraph = (cell: PmNode | undefined) => cell?.content?.find((child) => child.type === "paragraph");
+
+/** A column's alignment when every cell in it shares one. */
+function columnAlign(table: PmNode, column: number) {
+  const aligns = new Set((table.content ?? []).map((row) => alignOf(cellParagraph(row.content?.[column]))));
+  const [only] = aligns;
+  return aligns.size === 1 ? only : undefined;
+}
+
+/** The look line for a table whose lines or fills were chosen in Spectra. */
+function tableLookLine(table: PmNode) {
+  const attrs = table.attrs ?? {};
+  const lines = typeof attrs.lines === "string" ? attrs.lines : null;
+  const lineColor = typeof attrs.lineColor === "string" && HEX_COLOR.test(attrs.lineColor) ? attrs.lineColor.toUpperCase() : null;
+  if (!lines && !lineColor && !attrs.fillsSet) return "";
+  const rows = table.content ?? [];
+  const rowFill = (row: PmNode) => {
+    const fills = new Set((row.content ?? []).map((cell) => (typeof cell.attrs?.background === "string" ? cell.attrs.background.toUpperCase() : null)));
+    return fills.size === 1 ? [...fills][0]! : undefined;
+  };
+  const headed = rows[0]?.content?.[0]?.type === "tableHeader";
+  const header = headed && rows[0] ? rowFill(rows[0]) : null;
+  const body = rows.slice(headed ? 1 : 0);
+  const band = body[1] ? rowFill(body[1]) : null;
+  const regular =
+    header !== undefined &&
+    band !== undefined &&
+    body.every((row, index) => rowFill(row) === (index % 2 === 1 ? band : null));
+  const fills = attrs.fillsSet && regular ? { header: header ?? null, band: band ?? null } : null;
+  const shownLines = lines ?? (attrs.borderless ? "none" : "grid");
+  if (!lineColor && fills) {
+    const preset = Object.entries(TABLE_STYLES).find(
+      ([, style]) => style.lines === shownLines && style.header === fills.header && style.band === fills.band,
+    );
+    if (preset) return `{style=${preset[0]}}`;
+  }
+  const parts = [`lines=${shownLines}`];
+  if (lineColor) parts.push(`line-color=${lineColor}`);
+  if (fills?.header) parts.push(`header-fill=${fills.header}`);
+  if (fills?.band) parts.push(`band-fill=${fills.band}`);
+  return `{${parts.join(" ")}}`;
 }
 
 function serializeInlinePlain(nodes: PmNode[] | undefined): string {

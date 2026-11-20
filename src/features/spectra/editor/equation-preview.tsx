@@ -81,11 +81,16 @@ export function EquationPreview({
     [displayMode, latex, shouldRender],
   );
   useLayoutEffect(() => {
-    if (!shouldRender) return;
-    const height = elementRef.current?.getBoundingClientRect().height ?? 0;
-    if (height <= 0) return;
-    const next = Math.ceil(height);
-    setMeasuredHeight((current) => Math.max(current, next));
+    const element = elementRef.current;
+    if (!shouldRender || !element) return;
+    // Its own height, without the stand-in's minimum and in layout pixels: a
+    // zoomed page's on-screen box would make it grow each time it comes back
+    // into view.
+    const minimum = element.style.minHeight;
+    element.style.minHeight = "0px";
+    const height = element.offsetHeight;
+    element.style.minHeight = minimum;
+    if (height > 0) setMeasuredHeight(Math.ceil(height));
   }, [html, shouldRender]);
 
   const estimatedHeight = estimatedEquationHeight(latex, displayMode);

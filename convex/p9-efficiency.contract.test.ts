@@ -59,7 +59,8 @@ describe("P9.I2 Convex efficiency contracts", () => {
     expect(crons).not.toContain("schedule-timetable-reminders");
     expect(crons).toContain("safety-sweep-planner-reminders");
     expect(crons).toContain("safety-sweep-timetable-reminders");
-    expect(crons.match(/\{ hours: 1 \}/g)).toHaveLength(3);
+    // The two reminder sweeps, the secret-nonce purge and freeing finished Bridge write bases.
+    expect(crons.match(/\{ hours: 1 \}/g)).toHaveLength(4);
 
     for (const reminderSource of [planner, timetable]) {
       expect(reminderSource).toContain("reconcileArtifact");

@@ -211,20 +211,34 @@ export function projectAcademicFields(root: XmlElement, regionId: string, source
     const citationId = citationIdentity(element, `${regionId}-citation-${index++}`);
     return { kind: "citation" as const, citationId, source, text, instruction, ...(pages ? { pages } : {}), ...(mappings.has(citationId) ? { sourceRef: mappings.get(citationId)! } : {}) };
   };
-  for (const parent of wordElements(root)) {
+  // Only simple fields and the parents of fldChar runs can hold a field, so
+  // the rest of the document is passed over by name alone.
+  const all = wordElements(root);
+  const candidates = new Set<XmlElement>();
+  for (const element of all) {
+    if (element.localName === "fldSimple") candidates.add(element);
+    else if (element.localName === "fldChar" && element.parent?.parent) candidates.add(element.parent.parent);
+  }
+  // Document order, as before: citation fallbacks are numbered in it.
+  const parents = candidates.size ? all.filter((element) => candidates.has(element)) : [];
+  const fieldCharType = (node: XmlElement) => {
+    const marker = node.find(WML_NAMESPACE, "fldChar");
+    return marker ? wordAttr(marker, "fldCharType") : undefined;
+  };
+  for (const parent of parents) {
     if (parent.localName === "fldSimple") {
+      if (parent.namespaceUri() !== WML_NAMESPACE) continue;
       const item = project(parent, wordAttr(parent, "instr") ?? "", wordText(parent));
       if (item) fields.set(parent, item);
       continue;
     }
     const children = parent.elements();
     for (let start = 0; start < children.length; start++) {
-      if (wordAttr(children[start]!.find(WML_NAMESPACE, "fldChar") ?? wordElement("none"), "fldCharType") !== "begin") continue;
+      if (fieldCharType(children[start]!) !== "begin") continue;
       let end = start + 1; let separated = false; let instruction = ""; let text = "";
       for (; end < children.length; end++) {
         const node = children[end]!;
-        const type = node.find(WML_NAMESPACE, "fldChar");
-        const val = type && wordAttr(type, "fldCharType");
+        const val = fieldCharType(node);
         if (val === "begin") break;
         if (val === "end") {
           const item = project(children[start]!, instruction, text);

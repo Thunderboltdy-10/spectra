@@ -33,8 +33,14 @@ import {
   SpectraReferenceNode,
   WordCommentBoundary,
   WordRevision,
+  WordField,
 } from "./reference-citation-nodes";
 import { StableBlockId } from "./stable-block-id";
+import { WordChart } from "./word-chart";
+
+/** How a table's lines are drawn: every line, the rows only, the outside only, or none. */
+export const TABLE_LINES: readonly unknown[] = ["grid", "horizontal", "outer", "none"];
+const HEX = /^#[0-9a-f]{6}$/i;
 
 /** A cell's fill from Word, drawn as its background. */
 function cellFill(this: { parent?: () => Record<string, unknown> }) {
@@ -72,7 +78,12 @@ class WordTableView extends TableView {
   }
 
   private applyLook(node: ProseMirrorNode) {
-    this.table.toggleAttribute("data-borderless", Boolean(node.attrs.borderless));
+    this.table.toggleAttribute("data-borderless", Boolean(node.attrs.borderless) || node.attrs.lines === "none");
+    this.table.toggleAttribute("data-fills-set", Boolean(node.attrs.fillsSet));
+    if (TABLE_LINES.includes(node.attrs.lines) && node.attrs.lines !== "none") this.table.setAttribute("data-lines", node.attrs.lines);
+    else this.table.removeAttribute("data-lines");
+    if (typeof node.attrs.lineColor === "string" && HEX.test(node.attrs.lineColor)) this.table.style.setProperty("--table-line", node.attrs.lineColor);
+    else this.table.style.removeProperty("--table-line");
     const padding = typeof node.attrs.cellPadding === "string" && /^(?:[\d.]+pt ?){4}$/.test(node.attrs.cellPadding)
       ? node.attrs.cellPadding
       : "";
@@ -155,6 +166,33 @@ export function documentSchemaExtensions(options: DocumentSchemaOptions = {}): A
                 ? { style: `--cell-padding: ${attributes.cellPadding}` }
                 : {},
           },
+          // The lines chosen for this table, and their colour.
+          lines: {
+            default: null,
+            parseHTML: (element: HTMLElement) => {
+              const value = element.getAttribute("data-lines");
+              return TABLE_LINES.includes(value) ? value : null;
+            },
+            renderHTML: (attributes: Record<string, unknown>) =>
+              TABLE_LINES.includes(attributes.lines) ? { "data-lines": attributes.lines } : {},
+          },
+          lineColor: {
+            default: null,
+            parseHTML: (element: HTMLElement) => {
+              const value = element.style.getPropertyValue("--table-line").trim();
+              return HEX.test(value) ? value : null;
+            },
+            renderHTML: (attributes: Record<string, unknown>) =>
+              typeof attributes.lineColor === "string" && HEX.test(attributes.lineColor)
+                ? { style: `--table-line: ${attributes.lineColor}` }
+                : {},
+          },
+          // Its cell fills were set in Spectra, so none is a choice too.
+          fillsSet: {
+            default: false,
+            parseHTML: (element: HTMLElement) => element.hasAttribute("data-fills-set"),
+            renderHTML: (attributes: Record<string, unknown>) => attributes.fillsSet ? { "data-fills-set": "" } : {},
+          },
           // A Word table drawn without lines (a layout table).
           borderless: {
             default: false,
@@ -197,6 +235,8 @@ export function documentSchemaExtensions(options: DocumentSchemaOptions = {}): A
     SpectraCitationNode,
     WordCommentBoundary,
     WordRevision,
+    WordField,
+    WordChart,
     StableBlockId.configure({ nativeReadOnlyBlockIds: options.nativeReadOnlyBlockIds ?? [] }),
   ] as AnyExtension[];
 }

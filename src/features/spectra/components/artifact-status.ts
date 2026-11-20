@@ -59,6 +59,8 @@ export type ArtifactStatusInput = {
   nativeActivity?: boolean;
   /** Spectra and the desktop file both changed (the native conflict). */
   nativeConflict?: boolean;
+  /** Clashing paragraphs shown in place in the document, when every clash is. */
+  conflictParagraphs?: number;
   /** A draft kept on this device overlaps a newer change and waits for review. */
   draftReview?: boolean;
   /** When this work was last saved, if no replica has said. */
@@ -175,6 +177,8 @@ function wordsOf(state: ArtifactStatusState, input: ArtifactStatusInput) {
     case "readOnly":
       return "Read only";
     case "versions":
+      if (input.nativeConflict && input.conflictParagraphs)
+        return input.conflictParagraphs === 1 ? "1 paragraph needs a choice" : `${input.conflictParagraphs} paragraphs need a choice`;
       return "Two versions";
     case "offline":
       return input.presentation.key === "offline" ? "Offline" : input.presentation.label;
@@ -220,6 +224,10 @@ export function artifactStatusOf(input: ArtifactStatusInput): ArtifactStatus {
     if (state === "versions") {
       if (input.draftReview && !input.nativeConflict)
         return `A draft kept on this device overlaps a newer change${input.officeApplication ? ` from ${input.officeApplication}` : ""}. Nothing was overwritten: review it to choose.`;
+      if (input.nativeConflict && input.conflictParagraphs)
+        return input.conflictParagraphs === 1
+          ? `One paragraph changed here and in ${app}. Nothing was overwritten: both versions are shown where it is, so choose there.`
+          : `${input.conflictParagraphs} paragraphs changed here and in ${app}. Nothing was overwritten: both versions are shown where each one is, so choose there.`;
       return input.nativeConflict
         ? `This artifact changed here and in ${app}. Nothing was overwritten: choose the version to keep.`
         : "This artifact changed in two places. Nothing was overwritten: choose the version to keep.";

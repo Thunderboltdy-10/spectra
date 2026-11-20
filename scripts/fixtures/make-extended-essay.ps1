@@ -1,4 +1,4 @@
-param([string]$Out, [string]$Image, [string]$Variant = "ee")
+﻿param([string]$Out, [string]$Image, [string]$Variant = "ee")
 $ErrorActionPreference = "Stop"
 $word = New-Object -ComObject Word.Application
 $word.Visible = $false

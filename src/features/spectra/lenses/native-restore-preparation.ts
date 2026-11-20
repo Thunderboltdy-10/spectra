@@ -1,5 +1,5 @@
 import "server-only";
-import { comparePackages } from "@ariadng/office/preservation";
+import { comparePackageVerdicts as comparePackages } from "./package-verdicts";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { convexQuery } from "@/lib/convex-server";
 import { writableNativeReplica } from "@/lib/native-materialization-server";

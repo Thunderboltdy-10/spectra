@@ -13,7 +13,22 @@ export type PageChromeTemplates = {
   footer?: string;
   firstHeader?: string;
   firstFooter?: string;
+  /** Even pages' own, when Word sets odd and even pages apart. */
+  evenHeader?: string;
+  evenFooter?: string;
 };
+
+/** The header and footer one page draws: the first page's own, else an even page's, else the default. */
+export function chromeForPage(templates: PageChromeTemplates, page: number) {
+  const first = page === 1;
+  const even = page % 2 === 0;
+  const pick = (own: string | undefined, firstOwn: string | undefined, evenOwn: string | undefined) =>
+    first && firstOwn !== undefined ? firstOwn : even && evenOwn !== undefined ? evenOwn : own;
+  return {
+    header: pick(templates.header, templates.firstHeader, templates.evenHeader),
+    footer: pick(templates.footer, templates.firstFooter, templates.evenFooter),
+  };
+}
 
 /** A template's page fields filled for one page. */
 export function fillChrome(template: string, page: number, total: number) {
@@ -50,14 +65,12 @@ export function DocumentPageChrome({
   /** The strip at the foot of each sheet slot that shows the desk between sheets. */
   sheetGap: number;
 }) {
-  if (!templates.header && !templates.footer && !templates.firstHeader && !templates.firstFooter) return null;
+  if (!Object.values(templates).some(Boolean)) return null;
   const sheets = Array.from({ length: Math.max(1, total) }, (_, index) => index);
   return (
     <div className="document-page-chrome" aria-hidden>
       {sheets.map((index) => {
-        const first = index === 0;
-        const header = first && templates.firstHeader !== undefined ? templates.firstHeader : templates.header;
-        const footer = first && templates.firstFooter !== undefined ? templates.firstFooter : templates.footer;
+        const { header, footer } = chromeForPage(templates, index + 1);
         const style = {
           "--sheet": index,
           "--chrome-header": twipsCss(geometry.header),

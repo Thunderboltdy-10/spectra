@@ -112,6 +112,14 @@ describe("the status control's states", () => {
     expect(readOnly.words).toBe("Read only");
   });
 
+  it("counts the paragraphs that need a choice when each one is shown in place", () => {
+    const one = status({ replicas: [LOCAL] }, { nativeConflict: true, conflictParagraphs: 1, officeApplication: "Word" });
+    expect(one.words).toBe("1 paragraph needs a choice");
+    expect(one.sentence).toContain("shown where it is");
+    expect(status({ replicas: [LOCAL] }, { nativeConflict: true, conflictParagraphs: 3, officeApplication: "Word" }).words)
+      .toBe("3 paragraphs need a choice");
+  });
+
   it("shows Two versions in the problem hue, with keep and compare first", () => {
     const versions = status({ replicas: [LOCAL] }, { nativeConflict: true, officeApplication: "Word" });
     expect(versions.state).toBe("versions");

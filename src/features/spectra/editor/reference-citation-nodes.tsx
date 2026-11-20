@@ -41,6 +41,47 @@ export const WordRevision = Node.create({
   },
 });
 
+/** The kind of a Word field from its code: `PAGE`, `DATE \@ …` → "PAGE", "DATE". */
+export function wordFieldKind(instruction: unknown) {
+  return typeof instruction === "string" ? (instruction.trim().split(/\s+/u)[0] ?? "").toUpperCase() : "";
+}
+
+const FIELD_NAMES: Record<string, string> = {
+  PAGE: "Page number", NUMPAGES: "Page count", SECTIONPAGES: "Pages in section", DATE: "Date", TIME: "Time",
+  CREATEDATE: "Date created", SAVEDATE: "Date saved", PRINTDATE: "Date printed", AUTHOR: "Author", TITLE: "Title",
+  FILENAME: "File name", REF: "Cross-reference", PAGEREF: "Page reference", NOTEREF: "Note reference",
+  SEQ: "Caption number", STYLEREF: "Heading reference", HYPERLINK: "Link", MERGEFIELD: "Mail merge field",
+  IF: "Condition", DOCPROPERTY: "Document property", TOC: "Table of contents", INDEX: "Index", XE: "Index entry",
+  FORMTEXT: "Form field", FORMCHECKBOX: "Check box", FORMDROPDOWN: "Drop-down", SYMBOL: "Symbol", QUOTE: "Quote",
+};
+
+/**
+ * A Word field Spectra does not edit: its current result, shaded the way Word
+ * shades fields. Word updates it; the words around it stay editable.
+ */
+export const WordField = Node.create({
+  name: "wordField", group: "inline", inline: true, atom: true, selectable: true,
+  addAttributes() { return { native: { default: null } }; },
+  parseHTML() { return [{ tag: "span[data-word-field]" }]; },
+  renderHTML({ node }) {
+    const item = node.attrs.native as { fieldId?: string; instruction?: string; text?: string } | null;
+    const kind = wordFieldKind(item?.instruction);
+    const name = FIELD_NAMES[kind] ?? (kind ? `${kind} field` : "Word field");
+    const text = item?.text?.replace(/\s+$/u, "") || name;
+    return ["span", {
+      "data-word-field": item?.fieldId ?? "",
+      "data-field-kind": kind.toLowerCase(),
+      class: "spectra-word-field",
+      contenteditable: "false",
+      title: `${name}: Word updates it. Edit the field in Word.`,
+      "aria-label": `${name}: ${text}`,
+    }, text];
+  },
+  renderText({ node }) {
+    return typeof node.attrs.native?.text === "string" ? node.attrs.native.text : "";
+  },
+});
+
 function ReferenceNodeView({ node, selected, editor, getPos }: NodeViewProps) {
   const embedId =
     typeof node.attrs.embedId === "string" ? node.attrs.embedId : "";

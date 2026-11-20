@@ -22,7 +22,10 @@ type MergeOptions<T> = {
   equal?: (left: T | undefined, right: T | undefined) => boolean;
   orderId?: string;
   mergeOrder?: boolean;
-  conflictResolution?: "ours" | "theirs";
+  /** One side for every conflict, or a choice per region (undefined leaves that one open). */
+  conflictResolution?: "ours" | "theirs" | ((regionId: string) => "ours" | "theirs" | undefined);
+  /** Merges inside a region both sides changed; undefined leaves it a conflict. */
+  mergeRegion?: (base: T | undefined, ours: T | undefined, theirs: T | undefined) => T | undefined;
 };
 
 // Key order is not content: a Yjs room and a native file serialize the same
@@ -46,6 +49,7 @@ export function mergeThreeWay<T>({
   orderId = "order",
   mergeOrder = true,
   conflictResolution,
+  mergeRegion,
 }: MergeOptions<T>): ThreeWayMergeResult<T> {
   const baseById = new Map(base.map((value) => [id(value), value]));
   const oursById = new Map(ours.map((value) => [id(value), value]));
@@ -55,6 +59,8 @@ export function mergeThreeWay<T>({
   const changedByOurs: string[] = [];
   const changedByTheirs: string[] = [];
   const selected = new Map<string, T>();
+  const sideFor = (regionId: string) =>
+    typeof conflictResolution === "function" ? conflictResolution(regionId) : conflictResolution;
 
   for (const regionId of ids) {
     const ancestor = baseById.get(regionId);
@@ -66,8 +72,14 @@ export function mergeThreeWay<T>({
     if (theirsChanged) changedByTheirs.push(regionId);
 
     if (oursChanged && theirsChanged && !equal(oursValue, theirsValue)) {
+      const combined = mergeRegion?.(ancestor, oursValue, theirsValue);
+      if (combined !== undefined) {
+        selected.set(regionId, combined);
+        continue;
+      }
       conflicts.push({ id: regionId, base: ancestor, ours: oursValue, theirs: theirsValue });
-      const resolved = conflictResolution === "ours" ? oursValue : conflictResolution === "theirs" ? theirsValue : undefined;
+      const side = sideFor(regionId);
+      const resolved = side === "ours" ? oursValue : side === "theirs" ? theirsValue : undefined;
       if (resolved !== undefined) selected.set(regionId, resolved);
       continue;
     }
@@ -98,8 +110,9 @@ export function mergeThreeWay<T>({
   let order = baseSurvivors;
   if (oursOrderChanged && theirsOrderChanged && JSON.stringify(oursBackbone) !== JSON.stringify(theirsBackbone)) {
     conflicts.push({ id: orderId });
-    if (conflictResolution === "ours") order = oursBackbone;
-    else if (conflictResolution === "theirs") order = theirsBackbone;
+    const side = sideFor(orderId);
+    if (side === "ours") order = oursBackbone;
+    else if (side === "theirs") order = theirsBackbone;
   } else if (oursOrderChanged) {
     order = oursBackbone;
   } else if (theirsOrderChanged) {

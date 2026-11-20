@@ -179,6 +179,12 @@ function inlinesFrom(nodes: readonly Json[] | undefined, context: ReadContext = 
       if (anchor) target().push(anchor);
       continue;
     }
+    if (node.type === "wordField") {
+      // A Word field reads as what Word last showed.
+      const text = (node.attrs?.native as { text?: unknown } | undefined)?.text;
+      if (typeof text === "string" && text) target().push({ type: "text", text });
+      continue;
+    }
     if (node.type === "wordRevision") {
       const revision = revisionFrom(node.attrs?.native);
       if (revision) target().push(revision);

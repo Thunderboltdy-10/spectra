@@ -4,7 +4,7 @@ import { queueHumanNativeMaterialization, commitHumanCloudMaterialization, writa
 import { hydrateContentForWrite } from "@/lib/convex-server";
 import { reconcileNativeRevision } from "@/lib/native-reconciliation-server";
 import { NextResponse } from "next/server";
-import { comparePackages } from "@ariadng/office/preservation";
+import { comparePackageVerdicts as comparePackages } from "@/features/spectra/lenses/package-verdicts";
 import { z } from "zod";
 import { assertNativePreservationKept } from "@/features/spectra/lenses/preservation-proof";
 import type { Id } from "../../../../../../convex/_generated/dataModel";
@@ -36,6 +36,7 @@ import {
   type RecentNativeOperation,
 } from "@/features/spectra/lenses/native-reconciliation";
 import { mergeThreeWay, type MergeConflict } from "@/features/spectra/lenses/three-way-merge";
+import { mergeDocxBlock } from "@/features/spectra/lenses/docx-block-merge";
 import { humanizePublicFailure } from "@/features/spectra/bridge/humanize";
 import { nativeOperationId, type NativeSaveReceipt } from "../../../../../../shared/native-office-contract";
 import {
@@ -59,9 +60,16 @@ const requestSchema = z.discriminatedUnion("action", [
   z.object({
     action: z.literal("reconcile"),
     artifactId: z.string().min(1),
-    resolution: z.enum(["word", "spectra"]).optional(),
+    resolution: z.union([
+      z.enum(["word", "spectra"]),
+      // A choice per clashing paragraph, made where it sits in the document.
+      z.object({ regions: z.record(z.string().min(1).max(300), z.enum(["word", "spectra", "both"])) }).strict(),
+    ]).optional(),
   }),
 ]);
+
+type RegionChoice = "word" | "spectra" | "both";
+export type DocxResolution = "spectra" | "word" | { regions: Record<string, RegionChoice> };
 
 type WorkTruth = {
   replicas: Array<{
@@ -358,7 +366,7 @@ export function mergeDocxProjections(
   base: DocxProjection,
   current: DocxProjection,
   external: DocxProjection,
-  resolution?: "spectra" | "word",
+  resolution?: DocxResolution,
   requireStableIdentity = false,
 ) {
   for (const projection of [base, current, external]) {
@@ -385,13 +393,27 @@ export function mergeDocxProjections(
     theirs: external.blocks,
     id: (block) => block.id,
     orderId: "docx:order",
-    conflictResolution: resolution === "spectra" ? "ours" : resolution === "word" ? "theirs" : undefined,
+    conflictResolution: resolution === "spectra" ? "ours" : resolution === "word" ? "theirs" : resolution
+      // An unchosen region keeps Spectra's version, as "Keep Spectra" would.
+      ? (regionId) => (resolution.regions[regionId] === "word" ? "theirs" : "ours")
+      : undefined,
+    mergeRegion: mergeDocxBlock,
   });
+  // "Keep both": Word's paragraph stays where it was, Spectra's follows it as a new one.
+  const kept = typeof resolution === "object"
+    ? merged.value.flatMap((block) => {
+        const conflict = resolution.regions[block.id] === "both"
+          ? merged.conflicts.find((candidate) => candidate.id === block.id)
+          : undefined;
+        if (!conflict?.ours || !conflict.theirs) return [block];
+        return [conflict.theirs, { ...conflict.ours, id: `block_${crypto.randomUUID()}` }];
+      })
+    : merged.value;
   return {
     projection: {
       ...current,
-      blocks: merged.value,
-      outline: merged.value.flatMap((block) => block.type === "heading" ? [{ id: block.id, title: block.text, level: Number(block.attrs?.styleId?.toString().match(/[1-3]$/)?.[0] ?? 2) }] : []),
+      blocks: kept,
+      outline: kept.flatMap((block) => block.type === "heading" ? [{ id: block.id, title: block.text, level: Number(block.attrs?.styleId?.toString().match(/[1-3]$/)?.[0] ?? 2) }] : []),
       nativeBinding: {
         ...external.nativeBinding,
         externalTransaction: { label: "Edited in Word", occurredAt: Date.now() },
@@ -406,8 +428,20 @@ export function mergeDocxProjections(
 function conflictPreview(conflict: MergeConflict<DocxProjection["blocks"][number]>) {
   const preview = (block: DocxProjection["blocks"][number] | undefined) =>
     block ? block.text.slice(0, 160) || "Empty region" : "Deleted";
-  return { regionId: conflict.id, spectra: preview(conflict.ours), external: preview(conflict.theirs) };
+  // A paragraph both sides kept carries Word's whole version, so the document
+  // can show it in place above Spectra's; larger regions keep the summary.
+  const inPlace = conflict.ours && conflict.theirs && ["paragraph", "heading"].includes(conflict.theirs.type) &&
+    ["paragraph", "heading"].includes(conflict.ours.type) && JSON.stringify(conflict.theirs).length <= IN_PLACE_PREVIEW_LIMIT;
+  return {
+    regionId: conflict.id,
+    spectra: preview(conflict.ours),
+    external: preview(conflict.theirs),
+    ...(inPlace ? { externalBlock: conflict.theirs } : {}),
+  };
 }
+
+const IN_PLACE_PREVIEW_LIMIT = 32_000;
+const IN_PLACE_PREVIEW_COUNT = 20;
 
 async function storedDocxBase(workId: Id<"spectraArtifacts">, cloudTruth: Awaited<ReturnType<typeof fetchVerifiedNativePayload>>["truth"], fallback: Uint8Array) {
   return docxLens.open(await fetchStoredNativeBase(workId, cloudTruth, fallback), "strict-native");
@@ -418,7 +452,13 @@ function conflictIds(conflicts: readonly MergeConflict<unknown>[]) {
 }
 
 function conflictDetails(conflicts: readonly MergeConflict<DocxProjection["blocks"][number]>[]) {
-  return conflicts.map(conflictPreview);
+  // A long list of clashes keeps its whole-document choice; the first ones still show in place.
+  return conflicts.map((conflict, index) => {
+    const preview = conflictPreview(conflict);
+    if (index < IN_PLACE_PREVIEW_COUNT) return preview;
+    const { externalBlock: _block, ...summary } = preview;
+    return summary;
+  });
 }
 
 async function commitDocxNative(
@@ -628,12 +668,12 @@ export async function POST(request: Request) {
       docxLens.open(local.payload, "strict-native"),
     ]);
     const diff = await docxLens.diffExternal(baseOpened.preservedCarry.payload, local.payload);
-    if (input.resolution === "spectra") {
+    if (input.resolution === "spectra" || typeof input.resolution === "object") {
       const current = contentProjection(artifact.content, baseOpened.projection);
       const mergedResult = mergeDocxProjections(baseOpened.projection, current, externalOpened.projection, undefined, true);
       const spectraChanged = new Set(mergedResult.spectraChanged);
       const conflictRegionIds = conflictIds(mergedResult.conflicts);
-      const resolved = mergeDocxProjections(baseOpened.projection, current, externalOpened.projection, "spectra", true);
+      const resolved = mergeDocxProjections(baseOpened.projection, current, externalOpened.projection, input.resolution, true);
       const output = await docxLens.materialize({
         projection: resolved.projection,
         carry: externalOpened.preservedCarry,
@@ -701,7 +741,7 @@ export async function POST(request: Request) {
       return NextResponse.json({
         state: "applied",
         projection: nextProjection,
-        attribution: "Kept your Spectra version",
+        attribution: input.resolution === "spectra" ? "Kept your Spectra version" : "Kept your choices",
         requestId: queued.requestId,
         status: "Waiting to save your Spectra version locally",
       });

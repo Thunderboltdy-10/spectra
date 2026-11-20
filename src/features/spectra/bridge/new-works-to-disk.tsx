@@ -13,8 +13,8 @@ const asked = new Set<string>();
  * With new files syncing both ways, a work made in Spectra inside a synced
  * folder gets its file on this computer too: the browser asks for it once,
  * after the work has been quiet for a minute, and the usual write to the
- * computer follows. Native Spectra documents have no file form, so the
- * server lists only the works that do.
+ * computer follows. A document made in Spectra goes as a Word file and is
+ * Word-backed from then on.
  */
 export function NewWorksToDisk({ deviceId }: { deviceId: string }) {
   const waiting = useQuery(api.bridgeSync.waitingForDisk, { deviceId });

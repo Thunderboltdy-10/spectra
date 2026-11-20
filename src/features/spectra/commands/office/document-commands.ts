@@ -16,6 +16,7 @@ import {
   FileText,
   Focus,
   Frame,
+  Grid3x3,
   Heading,
   Heading1,
   Heading2,
@@ -38,6 +39,7 @@ import {
   Minus,
   Outdent,
   PaintBucket,
+  Palette,
   PanelBottom,
   PanelLeft,
   PanelTop,
@@ -89,6 +91,7 @@ import {
   projectBindingsFromIr,
 } from "../../capabilities";
 import type { CommandBinding, CommandControlOption } from "../types";
+import { MATH_GALLERIES } from "../../editor/equation-gallery";
 
 /**
  * The Document command set.
@@ -158,6 +161,30 @@ export const DOCUMENT_BORDER_OPTIONS: readonly CommandControlOption[] = [
 
 export const DOCUMENT_SHADING_COLORS: readonly string[] = [
   "#f2f4f7", "#eff8ff", "#ecfdf3", "#fef0c7", "#fee4e2", "#f4f3ff",
+];
+
+export const DOCUMENT_TABLE_STYLES: readonly CommandControlOption[] = [
+  { value: "grid", label: "Grid", icon: Grid3x3 },
+  { value: "header", label: "Shaded header", icon: PanelTop },
+  { value: "banded", label: "Banded rows", icon: Rows3 },
+  { value: "rows", label: "Rows only", icon: Rows3 },
+  { value: "outside", label: "Outside only", icon: Square },
+  { value: "plain", label: "No lines", icon: SquareX },
+];
+
+export const DOCUMENT_TABLE_LINES: readonly CommandControlOption[] = [
+  { value: "grid", label: "All lines", icon: Grid3x3 },
+  { value: "horizontal", label: "Between rows", icon: Rows3 },
+  { value: "outer", label: "Outside only", icon: Square },
+  { value: "none", label: "No lines", icon: SquareX },
+];
+
+export const DOCUMENT_LINE_COLORS: readonly string[] = [
+  "#000000", "#7f7f7f", "#bfbfbf", "#1f3864", "#2e74b5", "#c00000",
+];
+
+export const DOCUMENT_CELL_FILLS: readonly string[] = [
+  "#f2f2f2", "#d9d9d9", "#d9e2f3", "#deebf6", "#e2efd9", "#fff2cc", "#fbe4d5", "#ededed",
 ];
 
 export const DOCUMENT_IMAGE_WRAP: readonly CommandControlOption[] = [
@@ -923,8 +950,8 @@ function insertBindings(handlers: DocumentCommandHandlers): CommandBinding[] {
       priority: "advanced",
       requires: "edit",
       disabled,
-      hint: "Lists the headings as they are now. It is content, not a Word TOC field, so it does not refresh itself.",
-      touches: ["fields"],
+      hint: "Lists the headings. In a Word file it is Word's own table of contents, and Word adds the page numbers when it updates fields.",
+      touches: ["body"],
       manifestOps: ["insert_blocks"],
       onSelect: () => insert.tableOfContents(),
     },
@@ -947,6 +974,14 @@ export type DocumentTableHandlers = {
   toggleHeaderRow: () => void;
   headerRowActive?: boolean;
   deleteTable: () => void;
+  /** The table's look: a ready-made style, its lines and their colour, and the selected cells' fill. */
+  applyStyle?: (style: string) => void;
+  lines?: string;
+  setLines?: (lines: string) => void;
+  lineColor?: string;
+  setLineColor?: (color: string | null) => void;
+  cellFill?: string;
+  setCellFill?: (color: string | null) => void;
   /**
    * Why a structural change cannot be written to the linked package. Set for a
    * mounted Word file: the lens rewrites cell text safely but cannot yet prove
@@ -970,6 +1005,13 @@ export type DocumentImageHandlers = {
 
 export type DocumentEquationHandlers = {
   active: boolean;
+  /** A Word equation Spectra keeps exactly as Word has it. */
+  readOnly?: boolean;
+  /** Puts a structure, symbol or whole equation at the caret in the equation. */
+  insertMath?: (latex: string) => void;
+  /** True while equations are typed as LaTeX source. */
+  source?: boolean;
+  setSource?: (on: boolean) => void;
   display?: "inline" | "block";
   setDisplay: (display: string) => void;
   alignment?: string;
@@ -1036,6 +1078,66 @@ function tableBindings(handlers: DocumentCommandHandlers): CommandBinding[] {
       priority: "secondary",
       active: table.headerRowActive ?? false,
     }),
+    ...(table.applyStyle ? [{
+      id: "table.style",
+      label: "Table style",
+      icon: Grid3x3,
+      contextualTab: "Table",
+      group: "Look",
+      priority: "essential",
+      requires: "edit",
+      hint: "Lines and fills for the whole table",
+      touches: ["tables"],
+      manifestOps: ["format_blocks"],
+      control: { kind: "menu", options: DOCUMENT_TABLE_STYLES },
+      onSelect: (value) => {
+        if (typeof value === "string") table.applyStyle?.(value);
+      },
+    } satisfies CommandBinding] : []),
+    ...(table.setLines ? [{
+      id: "table.lines",
+      label: "Lines",
+      icon: Frame,
+      contextualTab: "Table",
+      group: "Look",
+      priority: "secondary",
+      requires: "edit",
+      hint: "Which lines the table draws",
+      touches: ["tables"],
+      manifestOps: ["format_blocks"],
+      control: { kind: "menu", options: DOCUMENT_TABLE_LINES, value: table.lines ?? "grid" },
+      onSelect: (value) => {
+        if (typeof value === "string") table.setLines?.(value);
+      },
+    } satisfies CommandBinding] : []),
+    ...(table.setLineColor ? [{
+      id: "table.lineColor",
+      label: "Line colour",
+      icon: Palette,
+      contextualTab: "Table",
+      group: "Look",
+      priority: "secondary",
+      requires: "edit",
+      hint: "The colour of the table's lines",
+      touches: ["tables"],
+      manifestOps: ["format_blocks"],
+      control: { kind: "color", value: table.lineColor, swatches: DOCUMENT_LINE_COLORS, clearLabel: "Automatic" },
+      onSelect: (value) => table.setLineColor?.(typeof value === "string" ? value : null),
+    } satisfies CommandBinding] : []),
+    ...(table.setCellFill ? [{
+      id: "table.cellFill",
+      label: "Cell fill",
+      icon: PaintBucket,
+      contextualTab: "Table",
+      group: "Look",
+      priority: "essential",
+      requires: "edit",
+      hint: "Background of the selected cells",
+      touches: ["tables"],
+      manifestOps: ["format_blocks"],
+      control: { kind: "color", value: table.cellFill, swatches: DOCUMENT_CELL_FILLS, clearLabel: "No fill" },
+      onSelect: (value) => table.setCellFill?.(typeof value === "string" ? value : null),
+    } satisfies CommandBinding] : []),
     structure("table.row.delete", "Delete row", Minus, () => table.deleteRow(), "Removes the row the caret is in", {
       priority: "secondary",
       risk: "confirm",
@@ -1155,10 +1257,73 @@ function imageBindings(handlers: DocumentCommandHandlers): CommandBinding[] {
   ];
 }
 
+/** Which galleries stay on the bar first when it is narrow. */
+const GALLERY_PRIORITY: Readonly<Record<string, CommandBinding["priority"]>> = {
+  equations: "essential",
+  fraction: "essential",
+  script: "essential",
+  radical: "essential",
+  symbols: "essential",
+  integral: "secondary",
+  operator: "secondary",
+  bracket: "secondary",
+  matrix: "secondary",
+  function: "advanced",
+  accent: "advanced",
+  limit: "advanced",
+  relation: "advanced",
+};
+
+function equationGalleryBindings(equation: DocumentEquationHandlers): CommandBinding[] {
+  const insert = equation.insertMath;
+  if (!insert) return [];
+  return MATH_GALLERIES.map((gallery) => ({
+    id: `equation.gallery.${gallery.id}`,
+    label: gallery.label,
+    contextualTab: "Equation",
+    group: gallery.id === "equations" ? "Tools" : gallery.id === "symbols" ? "Symbols" : "Structures",
+    priority: GALLERY_PRIORITY[gallery.id] ?? "secondary",
+    requires: "edit",
+    hint: gallery.hint,
+    touches: ["equations"],
+    nativeDelta: "replace-paragraph",
+    disabled: equation.readOnly || undefined,
+    keepLabel: true,
+    control: {
+      kind: "gallery",
+      columns: gallery.columns,
+      glyph: gallery.glyph,
+      sections: gallery.sections.map((section) => ({
+        label: section.label,
+        options: section.items.map((item) => ({ value: item.latex, label: item.label })),
+      })),
+    },
+    onSelect: (value) => {
+      if (typeof value === "string" && value) insert(value);
+    },
+  } satisfies CommandBinding));
+}
+
 function equationBindings(handlers: DocumentCommandHandlers): CommandBinding[] {
   const equation = handlers.equation;
   if (!equation.active) return [];
   return [
+    ...equationGalleryBindings(equation),
+    ...(equation.setSource ? [{
+      id: "equation.latex",
+      label: "LaTeX",
+      icon: Code2,
+      contextualTab: "Equation",
+      group: "Tools",
+      priority: "essential",
+      requires: "edit",
+      hint: "Type equations as LaTeX source; switch off to type maths as it looks",
+      touches: ["equations"],
+      nativeDelta: "replace-paragraph",
+      active: equation.source ?? false,
+      disabled: equation.readOnly || undefined,
+      onSelect: () => equation.setSource?.(!equation.source),
+    } satisfies CommandBinding] : []),
     {
       id: "equation.edit",
       capabilityId: "document.equation.edit",
@@ -1166,9 +1331,9 @@ function equationBindings(handlers: DocumentCommandHandlers): CommandBinding[] {
       icon: Sigma,
       contextualTab: "Equation",
       group: "Math",
-      priority: "essential",
+      priority: "advanced",
       requires: "edit",
-      hint: "Opens the LaTeX source for this equation",
+      hint: "Puts the caret in this equation, to type where it sits",
       touches: ["equations"],
       nativeDelta: "replace-paragraph",
       onSelect: () => equation.edit(),
@@ -1623,7 +1788,7 @@ function referenceBindings(handlers: DocumentCommandHandlers): CommandBinding[] 
       priority: "secondary",
       requires: "edit",
       disabled,
-      hint: "Links to a heading in this document. It is a link, not a Word REF field.",
+      hint: "Choose a heading from the outline. Its title goes in as a link; Word follows it to the heading's bookmark.",
       touches: ["hyperlinks"],
       manifestOps: ["insert_blocks"],
       onSelect: () => references.crossReference(),
@@ -1856,6 +2021,10 @@ export function documentStubHandlers(): DocumentCommandHandlers {
       canSplit: true,
       toggleHeaderRow: noop,
       deleteTable: noop,
+      applyStyle: noop,
+      setLines: noop,
+      setLineColor: noop,
+      setCellFill: noop,
     },
     image: {
       active: true,
@@ -1871,6 +2040,9 @@ export function documentStubHandlers(): DocumentCommandHandlers {
       active: true,
       display: "block",
       setDisplay: noop,
+      insertMath: noop,
+      source: false,
+      setSource: noop,
       alignment: "center",
       setAlignment: noop,
       edit: noop,

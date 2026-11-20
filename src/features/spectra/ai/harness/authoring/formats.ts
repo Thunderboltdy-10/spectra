@@ -8,7 +8,7 @@ import type { AuthoredType } from "./index";
 
 export const AUTHORING_FORMATS: Record<AuthoredType, { create: string; edit: string; read: string }> = {
   document: {
-    create: '{"markdown": "# Title\\n\\nThe document in Markdown: headings, lists, tables, **bold**, $math$, > quotes, - [ ] checklists."}',
+    create: '{"markdown": "# Title\\n\\nThe document in Markdown: headings, lists, tables, **bold**, $math$ (LaTeX, saved as Word equations), > quotes, - [ ] checklists, ^[footnotes], [[page-break]], [[toc]], {style=banded} on the line after a table, {.caption} or {.center} ending a paragraph.", "look"?: "essay"|"notes"|"worksheet"}. look gives the document real Word styles: essay for work handed in, notes for study notes and guides, worksheet for printed handouts.',
     edit:
       'replace {find, replace, all?} or {from, to, replace}: find quotes the text; for a longer passage, from and to quote only its first and last words and all of it is replaced, so never write out what is going away. Formatting marks need not match; no replace deletes | insert {markdown, after?, before?, position?: "start"|"end"}: after and before take a heading or any unique text | move_section {heading, after?|before?|position?} | delete_section {heading} | rewrite {markdown} (the whole document, only when nearly all of it changes)',
     read: "section: a heading, to read only that section",

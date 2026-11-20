@@ -2,8 +2,6 @@ export const PRESENTATION_TEXT_FORMAT_NATIVE_REASON =
   "Spectra writes the words inside a linked PowerPoint shape, but not its font or paragraph styling. Make this formatting change in PowerPoint.";
 
 export const DOCUMENT_NATIVE_REASONS = {
-  hyperlink:
-    "Spectra preserves hyperlinks in a linked Word file but cannot add, change, or remove them. Make this change in Word.",
   footnote:
     "Spectra preserves Word footnotes and endnotes but cannot add or edit them in the linked file. Make this change in Word.",
   tableStructure:

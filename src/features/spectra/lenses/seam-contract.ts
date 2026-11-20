@@ -1,4 +1,4 @@
-import { comparePackages } from "@ariadng/office/preservation";
+import { comparePackageVerdicts as comparePackages } from "./package-verdicts";
 import { contentProjection } from "@/app/api/spectra/lenses/docx/route";
 import { assertNativePreservationKept } from "./preservation-proof";
 import { docxProjectionFromContent } from "./document-projection";

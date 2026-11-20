@@ -1,10 +1,10 @@
 import { Document, Paragraph, type Run, WML_NAMESPACE } from "@ariadng/office/docx";
-import { comparePackages } from "@ariadng/office/preservation";
+import { comparePackageVerdicts as comparePackages } from "./package-verdicts";
 import { parseXml, serializeNode, XmlElement, XmlText } from "@ariadng/office/xml";
 import { OFFICE_ARCHIVE_LIMITS, prepareBoundedArchiveBytes } from "../../../../shared/parser-limits";
 import { authoredSemanticValue, CELL_PARAGRAPH_BREAK, cellParagraphs } from "../../../../shared/document-projection.mjs";
 import { firstNativeFontFamily } from "../office-fonts";
-import { appendNoteReference, nativeNote, noteReferences, removeNativeNote, storyText, upsertNativeNote, wordElements, wordAttr } from "./docx-academic";
+import { appendNoteReference, nativeNote, noteReferences, removeNativeNote, storyText, upsertNativeNote, wordElements, wordAttr, wordText } from "./docx-academic";
 import { appendCommentBoundary, appendRevision, deleteNativeComment, hasUnsupportedRevision, nativeComment, supportedRevision, upsertNativeComment } from "./docx-academic-review";
 import type { WordCommentData } from "./docx-academic-schema";
 import { academicMappingParts, appendWordBibliography, appendWordCitation, bibliographyContainer, citationMappings, collectWordSources, projectAcademicFields, wordSourceParts, writeCitationMapping } from "./docx-citations";
@@ -12,6 +12,7 @@ import type { WordSource, WordCitationInline } from "./docx-citation-schema";
 import { applyDocumentAcademicOperations } from "../commands/office/document-academic-operations";
 import { latexToEquation } from "./equation-interchange";
 import { docxOperationsBetween } from "./document-projection";
+import { crossReferenceAnchor, internalAnchor, isCrossReferenceAnchor } from "./word-bookmarks";
 import { docxStyleCatalogue, paragraphStyleRoles, wordListCounter } from "./docx-styles";
 import { blockStyle, directFormatBlocks, styleParagraphValue } from "./direct-run-format";
 import { CHROME_DISTANCE_TWIPS, MARGIN_TWIPS, MAX_PAGE_TWIPS, PAGE_SIZES_TWIPS, nearestMargins, nearestPaper, type PageGeometry } from "./page-geometry";
@@ -108,21 +109,28 @@ function isElement(value: { kind: string }): value is XmlElement {
   return value.kind === "element";
 }
 
+/** Every element under this one, in document order. */
 function descendants(element: XmlElement): XmlElement[] {
   const found: XmlElement[] = [];
-  for (const child of element.children) {
-    if (!isElement(child)) continue;
-    found.push(child, ...descendants(child));
-  }
+  const walk = (parent: XmlElement) => {
+    for (const child of parent.children) {
+      if (!isElement(child)) continue;
+      found.push(child);
+      walk(child);
+    }
+  };
+  walk(element);
   return found;
 }
 
 function hasWml(element: XmlElement, ...names: string[]) {
   const wanted = new Set(names);
+  // The local name is a field; the namespace is resolved through the
+  // ancestors, so it is only asked of a name that matches.
   return [element, ...descendants(element)].some(
     (candidate) =>
-      candidate.namespaceUri() === WML_NAMESPACE &&
-      wanted.has(candidate.localName),
+      wanted.has(candidate.localName) &&
+      candidate.namespaceUri() === WML_NAMESPACE,
   );
 }
 
@@ -347,6 +355,13 @@ const OMML_SYMBOLS: Readonly<Record<string, string>> = {
   "〖": "",
   "〗": "",
   "−": "-",
+  "ℂ": "\\mathbb{C}",
+  "ℍ": "\\mathbb{H}",
+  "ℕ": "\\mathbb{N}",
+  "ℙ": "\\mathbb{P}",
+  "ℚ": "\\mathbb{Q}",
+  "ℝ": "\\mathbb{R}",
+  "ℤ": "\\mathbb{Z}",
 };
 
 function ommlTextToLatex(value: string, equationArray = false) {
@@ -446,9 +461,33 @@ function naryOperator(value: string) {
     "∐": "\\coprod",
     "⋃": "\\bigcup",
     "⋂": "\\bigcap",
+    "⋁": "\\bigvee",
+    "⋀": "\\bigwedge",
+    "⨁": "\\bigoplus",
+    "⨂": "\\bigotimes",
+    "⨀": "\\bigodot",
+    "⨄": "\\biguplus",
+    "⨆": "\\bigsqcup",
+    "∯": "\\oiint",
+    "∰": "\\oiiint",
   };
   return mapped[value] ?? ommlTextToLatex(value || "∫");
 }
+
+const OMML_MATRIX_ENVIRONMENTS: Readonly<Record<string, string>> = {
+  "()": "pmatrix",
+  "[]": "bmatrix",
+  "\\{\\}": "Bmatrix",
+  "||": "vmatrix",
+  "\\Vert\\Vert": "Vmatrix",
+};
+
+/** Function names LaTeX knows by command; any other name is written as an operator name. */
+const OMML_FUNCTION_NAMES = new Set([
+  "sin", "cos", "tan", "cot", "sec", "csc", "sinh", "cosh", "tanh", "coth", "csch", "sech",
+  "arcsin", "arccos", "arctan", "log", "ln", "lg", "exp", "min", "max", "det", "gcd", "lim",
+  "sup", "inf", "arg", "deg", "dim", "ker", "hom", "Pr", "limsup", "liminf",
+]);
 
 function renderOmmlElement(element: XmlElement, equationArray = false): string {
   if (element.namespaceUri() !== OMML_NAMESPACE) return "";
@@ -482,12 +521,14 @@ function renderOmmlElement(element: XmlElement, equationArray = false): string {
   )
     return renderChildren();
 
+  // An empty base (scripts set before what follows them) stays empty.
+  const scriptBase = () => `{${renderSlot("e")}}`;
   if (element.localName === "sSup")
-    return `${latexGroup(renderSlot("e"))}^{${renderSlot("sup")}}`;
+    return `${scriptBase()}^{${renderSlot("sup")}}`;
   if (element.localName === "sSub")
-    return `${latexGroup(renderSlot("e"))}_{${renderSlot("sub")}}`;
+    return `${scriptBase()}_{${renderSlot("sub")}}`;
   if (element.localName === "sSubSup")
-    return `${latexGroup(renderSlot("e"))}_{${renderSlot("sub")}}^{${renderSlot("sup")}}`;
+    return `${scriptBase()}_{${renderSlot("sub")}}^{${renderSlot("sup")}}`;
   if (element.localName === "sPre")
     return `{}_{${renderSlot("sub")}}^{${renderSlot("sup")}}${latexGroup(renderSlot("e"))}`;
   if (element.localName === "f") {
@@ -514,15 +555,22 @@ function renderOmmlElement(element: XmlElement, equationArray = false): string {
       ? entries[0]!.match(/^\\begin\{matrix\}([\s\S]*)\\end\{matrix\}$/u)
       : null;
     if (matrix) {
-      const environment = beginning === "(" && ending === ")"
-        ? "pmatrix"
-        : beginning === "[" && ending === "]"
-          ? "bmatrix"
-          : "matrix";
-      if (environment !== "matrix")
-        return `\\begin{${environment}}${matrix[1]}\\end{${environment}}`;
+      const environment = OMML_MATRIX_ENVIRONMENTS[`${beginning}${ending}`];
+      if (environment) return `\\begin{${environment}}${matrix[1]}\\end{${environment}}`;
     }
-    return `\\left${beginning}${entries.join(` ${separator} `)}\\right${ending}`;
+    // A brace that opens and never closes, around stacked lines, is a cases block.
+    const lines = entries.length === 1 && beginning === "\\{" && ending === "."
+      ? entries[0]!.match(/^\\begin\{aligned\}([\s\S]*)\\end\{aligned\}$/u)
+      : null;
+    if (lines) return `\\begin{cases}${lines[1]}\\end{cases}`;
+    // A pair of round brackets holding one bar-less fraction is a binomial coefficient.
+    const only = entries.length === 1 ? ommlChildren(element, "e")[0]?.elements().filter((child) => child.namespaceUri() === OMML_NAMESPACE) : undefined;
+    if (beginning === "(" && ending === ")" && only?.length === 1 && only[0]!.localName === "f"
+      && ommlValue(ommlChild(only[0]!, "fPr"), "type", "bar") === "noBar")
+      return entries[0]!;
+    // A command delimiter (\langle) needs a space before the letter that follows it.
+    const spaced = (delimiter: string) => (/^\\[A-Za-z]+$/u.test(delimiter) ? `${delimiter} ` : delimiter);
+    return `\\left${spaced(beginning)}${entries.join(` ${separator} `)}\\right${spaced(ending)}`;
   }
   if (element.localName === "nary") {
     const properties = ommlChild(element, "naryPr");
@@ -543,10 +591,34 @@ function renderOmmlElement(element: XmlElement, equationArray = false): string {
     return `\\begin{aligned}${rows.join(" \\\\ ")}\\end{aligned}`;
   }
   if (element.localName === "func") {
-    const rawName = renderSlot("fName").replace(/\\,/g, "");
-    const known = rawName.match(/^\\?(sin|cos|tan|cot|sec|csc|sinh|cosh|tanh|log|ln|exp|min|max|det|gcd)$/)?.[1];
-    const name = known ? `\\${known}` : `\\operatorname{${rawName.replace(/[^A-Za-z0-9 ]/g, "") || "f"}}`;
-    return `${name}${latexGroup(renderSlot("e"))}`;
+    // The name may wear scripts (log₂, sin²) or a limit set under it (lim over x→0).
+    const fName = ommlChild(element, "fName");
+    const dressed = fName
+      ?.elements()
+      .find((child) => child.namespaceUri() === OMML_NAMESPACE && ["limLow", "limUpp", "sSub", "sSup", "sSubSup"].includes(child.localName));
+    const nameElement = dressed ? ommlChild(dressed, "e") : fName;
+    const rawName = nameElement
+      ? [nameElement, ...descendants(nameElement)]
+          .filter((candidate) => candidate.namespaceUri() === OMML_NAMESPACE && candidate.localName === "t")
+          .map((candidate) => candidate.text())
+          .join("")
+          .trim()
+      : "";
+    const slotOf = (name: string) => {
+      const slot = dressed ? ommlChild(dressed, name) : undefined;
+      return slot ? renderOmmlElement(slot, equationArray) : "";
+    };
+    const scripts = !dressed
+      ? ""
+      : dressed.localName === "limLow"
+        ? `_{${slotOf("lim")}}`
+        : dressed.localName === "limUpp"
+          ? `^{${slotOf("lim")}}`
+          : `${dressed.localName !== "sSup" ? `_{${slotOf("sub")}}` : ""}${dressed.localName !== "sSub" ? `^{${slotOf("sup")}}` : ""}`;
+    const name = OMML_FUNCTION_NAMES.has(rawName)
+      ? `\\${rawName}`
+      : `\\operatorname{${rawName.replace(/[^A-Za-z0-9 ]/g, "") || "f"}}`;
+    return `${name}${scripts}${latexGroup(renderSlot("e"))}`;
   }
   if (element.localName === "bar") {
     const position = ommlValue(ommlChild(element, "barPr"), "pos", "top");
@@ -565,6 +637,13 @@ function renderOmmlElement(element: XmlElement, equationArray = false): string {
       "̇": "dot",
       "̈": "ddot",
       "⃗": "vec",
+      "́": "acute",
+      "̀": "grave",
+      "̆": "breve",
+      "̊": "mathring",
+      "⃛": "dddot",
+      "⃖": "overleftarrow",
+      "⃡": "overleftrightarrow",
     };
     const command = commands[character];
     return command
@@ -600,6 +679,97 @@ export function ommlToLatex(element: XmlElement) {
 function positiveInteger(value: string | undefined) {
   const parsed = Number(value);
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+const CHART_NAMESPACE = "http://schemas.openxmlformats.org/drawingml/2006/chart";
+
+/**
+ * The charts drawn in a paragraph: their part and size. Spectra shows them and
+ * never writes them; the drawing run stays as Word wrote it.
+ */
+const DIAGRAM_NAMESPACE = "http://schemas.openxmlformats.org/drawingml/2006/diagram";
+const VML_NAMESPACE = "urn:schemas-microsoft-com:vml";
+const EMU_PER_POINT = 12_700;
+const WORD_OBJECT_TEXT_LIMIT = 2_000;
+
+/** Word-only content Spectra shows but does not edit: charts, text boxes, SmartArt and embedded objects. */
+export type WordObject = {
+  partName?: string;
+  kind?: "textBox" | "smartArt" | "object";
+  text?: string;
+  widthEmu: number;
+  heightEmu: number;
+};
+
+function insideFallback(element: XmlElement, stop: XmlElement) {
+  for (let node = element.parent; node && node !== stop; node = node.parent)
+    if (node.localName === "Fallback" || node.localName === "txbxContent") return true;
+  return false;
+}
+
+function textBoxText(element: XmlElement) {
+  const box = descendants(element).find((candidate) => candidate.namespaceUri() === WML_NAMESPACE && candidate.localName === "txbxContent");
+  if (!box) return undefined;
+  const lines = box.elements()
+    .filter((child) => child.namespaceUri() === WML_NAMESPACE && child.localName === "p")
+    .map((line) => descendants(line).filter((node) => node.namespaceUri() === WML_NAMESPACE && node.localName === "t").map((node) => node.text()).join(""));
+  return lines.join("\n").trim().slice(0, WORD_OBJECT_TEXT_LIMIT);
+}
+
+/** A VML shape's size from its style ("width:120pt;height:40pt"). */
+function vmlSize(element: XmlElement) {
+  const shape = descendants(element).find((candidate) => candidate.namespaceUri() === VML_NAMESPACE && ["shape", "rect", "roundrect"].includes(candidate.localName));
+  const style = shape?.getAttribute("style") ?? "";
+  const length = (name: string) => {
+    const match = new RegExp(String.raw`(?:^|;)\s*${name}\s*:\s*([\d.]+)(pt|in|px|cm|mm)?`, "iu").exec(style);
+    if (!match) return 0;
+    const value = Number(match[1]);
+    const unit = (match[2] ?? "px").toLowerCase();
+    const points = unit === "pt" ? value : unit === "in" ? value * 72 : unit === "cm" ? value * 72 / 2.54 : unit === "mm" ? value * 72 / 25.4 : value * 0.75;
+    return Math.round(points * EMU_PER_POINT);
+  };
+  return { widthEmu: length("width"), heightEmu: length("height") };
+}
+
+/**
+ * The Word-only objects in a paragraph, in reading order. A chart names its
+ * part so it can be drawn; the others carry their kind (and a text box its
+ * words) and show as a frame at their real size. Fallback copies Word keeps
+ * for older readers are not counted twice.
+ */
+export function wordChartsIn(document: Document, paragraph: XmlElement): WordObject[] {
+  const sized = (object: Omit<WordObject, "widthEmu" | "heightEmu">, widthEmu: number, heightEmu: number, fallback: [number, number]): WordObject => ({
+    ...object,
+    widthEmu: Number.isInteger(widthEmu) && widthEmu > 0 ? widthEmu : fallback[0],
+    heightEmu: Number.isInteger(heightEmu) && heightEmu > 0 ? heightEmu : fallback[1],
+  });
+  return descendants(paragraph).flatMap((element): WordObject[] => {
+    if (element.namespaceUri() !== WML_NAMESPACE || insideFallback(element, paragraph)) return [];
+    if (element.localName === "drawing") {
+      const extent = descendants(element).find((candidate) => candidate.namespaceUri() === WORDPROCESSING_DRAWING_NAMESPACE && candidate.localName === "extent");
+      const widthEmu = Number(extent?.getAttribute("cx"));
+      const heightEmu = Number(extent?.getAttribute("cy"));
+      const reference = descendants(element).find((candidate) => candidate.namespaceUri() === CHART_NAMESPACE && candidate.localName === "chart");
+      const relationshipId = reference?.getAttributeNs(OFFICE_RELATIONSHIP_NAMESPACE, "id");
+      if (relationshipId) {
+        const part = document.office.package.relatedPart(document.office.mainPart, relationshipId);
+        if (!part || !/^\/word\/charts\/chart\d{1,5}\.xml$/iu.test(part.name)) return [];
+        return [sized({ partName: part.name }, widthEmu, heightEmu, [5_486_400, 3_200_400])];
+      }
+      if (descendants(element).some((candidate) => candidate.namespaceUri() === DIAGRAM_NAMESPACE && candidate.localName === "relIds"))
+        return [sized({ kind: "smartArt" }, widthEmu, heightEmu, [5_486_400, 3_200_400])];
+      const text = textBoxText(element);
+      if (text !== undefined) return [sized({ kind: "textBox", text }, widthEmu, heightEmu, [2_743_200, 914_400])];
+      return [];
+    }
+    if (element.localName === "pict" || element.localName === "object") {
+      const { widthEmu, heightEmu } = vmlSize(element);
+      const text = textBoxText(element);
+      if (text !== undefined) return [sized({ kind: "textBox", text }, widthEmu, heightEmu, [2_743_200, 914_400])];
+      if (element.localName === "object") return [sized({ kind: "object" }, widthEmu, heightEmu, [1_828_800, 1_371_600])];
+    }
+    return [];
+  });
 }
 
 function imageOccurrenceId(drawing: XmlElement) {
@@ -753,8 +923,29 @@ function textRunFormat(run: Run): ReturnType<Run["format"]> {
   while (paragraph && !(paragraph.localName === "p" && paragraph.namespaceUri() === WML_NAMESPACE)) paragraph = paragraph.parent;
   const properties = paragraph?.find(WML_NAMESPACE, "pPr");
   // Numbering reaches a paragraph through its own numPr or its style.
-  if (!paragraph || !properties || !(properties.find(WML_NAMESPACE, "numPr") || properties.find(WML_NAMESPACE, "pStyle")))
-    return run.format();
+  const plain = !paragraph || !properties || !(properties.find(WML_NAMESPACE, "numPr") || properties.find(WML_NAMESPACE, "pStyle"));
+  // With numbering off, a run's look depends only on its paragraph's style and
+  // its own properties (and the styles part, fixed while a projection runs).
+  let top: XmlElement | null = paragraph ?? run.element;
+  while (top?.parent) top = top.parent;
+  const cache = top ? runFormatCaches.get(top) : undefined;
+  const key = cache
+    ? `${plain ? 1 : 0}|${properties?.find(WML_NAMESPACE, "pStyle")?.getAttributeNs(WML_NAMESPACE, "val") ?? ""}|${(() => {
+        const rPr = run.element.find(WML_NAMESPACE, "rPr");
+        return rPr ? serializeNode(rPr) : "";
+      })()}`
+    : "";
+  const known = cache?.get(key);
+  if (known) return { ...known };
+  const resolved = plain ? run.format() : textRunFormatWithoutNumbering(run, properties!);
+  cache?.set(key, resolved);
+  return cache ? { ...resolved } : resolved;
+}
+
+/** Run formats resolved during one projection pass, by the part's root element. */
+const runFormatCaches = new WeakMap<XmlElement, Map<string, ReturnType<Run["format"]>>>();
+
+function textRunFormatWithoutNumbering(run: Run, properties: XmlElement): ReturnType<Run["format"]> {
   const original = properties.find(WML_NAMESPACE, "numPr");
   const off = new XmlElement("numPr", properties.prefix);
   properties.insertBefore(off, original ?? properties.children[0] ?? null);
@@ -800,13 +991,139 @@ function hyperlinkHref(document: Document, element: XmlElement) {
     OFFICE_RELATIONSHIP_NAMESPACE,
     "id",
   );
-  if (!relationshipId) return undefined;
+  // A link to a place in this document: Word's cross-reference to a bookmark.
+  const anchor = element.getAttributeNs(WML_NAMESPACE, "anchor");
+  if (!relationshipId) return anchor && internalAnchor(`#${anchor}`) ? `#${anchor}` : undefined;
   const relationship = document.office.mainPart.relationships().byId(relationshipId);
   if (!relationship || relationship.type !== HYPERLINK_RELATIONSHIP || relationship.targetMode !== "External")
     return undefined;
   return /^(?:https?:|mailto:)/i.test(relationship.target)
     ? relationship.target
     : undefined;
+}
+
+type NativeFieldInline = Extract<DocxRichInline, { kind: "field" }>;
+
+/** Largest field (its runs as XML) carried as an atom; a larger one keeps its paragraph read-only. */
+const NATIVE_FIELD_XML_LIMIT = 32_000;
+
+/** The first field marker a run holds (begin, separate or end), if any. */
+const fieldCharTypeOf = (node: XmlElement) => {
+  if (node.localName !== "r") return undefined;
+  const marker = node.find(WML_NAMESPACE, "fldChar");
+  return marker ? wordAttr(marker, "fldCharType") : undefined;
+};
+
+/**
+ * A field's runs as one XML string that parses on its own: a `w:fieldRuns`
+ * wrapper declares every prefix the runs use.
+ */
+function serializedFieldRuns(nodes: readonly XmlElement[]) {
+  const wrapper = new XmlElement("fieldRuns", "w");
+  const prefixes = new Set<string>(["w"]);
+  for (const node of nodes)
+    for (const element of [node, ...descendants(node)]) {
+      if (element.prefix) prefixes.add(element.prefix);
+      for (const attribute of element.attributes)
+        if (attribute.prefix && attribute.prefix !== "xmlns" && attribute.prefix !== "xml") prefixes.add(attribute.prefix);
+    }
+  for (const prefix of prefixes) {
+    const namespace = nodes[0]?.resolvePrefix(prefix);
+    if (namespace) wrapper.setAttribute(`xmlns:${prefix}`, namespace);
+  }
+  for (const node of nodes) wrapper.appendChild(node.clone());
+  return serializeNode(wrapper);
+}
+
+/**
+ * Word fields Spectra does not model, found among a paragraph's own runs:
+ * a `w:fldSimple`, or a `begin … separate … end` run sequence that starts and
+ * ends in this paragraph (nested fields ride inside the outer one). A field
+ * that runs past the paragraph, sits inside a link or control, or is very
+ * large is not taken here, which keeps its paragraph read-only as before.
+ */
+function nativeFieldsOf(root: XmlElement, regionId: string, taken: ReadonlySet<XmlElement>) {
+  const fields = new Map<XmlElement, NativeFieldInline>();
+  const skipped = new Set<XmlElement>();
+  const children = root.elements();
+  let index = 0;
+  const add = (start: XmlElement, nodes: XmlElement[], instruction: string, text: string) => {
+    const xml = serializedFieldRuns(nodes);
+    if (xml.length > NATIVE_FIELD_XML_LIMIT) return;
+    fields.set(start, { kind: "field", fieldId: `${regionId}-field-${index}`, instruction: instruction.trim(), text, xml });
+    index += 1;
+    for (const node of nodes.slice(1)) skipped.add(node);
+  };
+  for (let start = 0; start < children.length; start += 1) {
+    const child = children[start]!;
+    if (taken.has(child) || child.namespaceUri() !== WML_NAMESPACE) continue;
+    if (child.localName === "fldSimple") {
+      add(child, [child], wordAttr(child, "instr") ?? "", wordText(child));
+      continue;
+    }
+    if (fieldCharTypeOf(child) !== "begin") continue;
+    // Word may write a whole field in one run or spread it over many; the
+    // markers are read in order inside each run.
+    let depth = 0;
+    let separated = false;
+    let instruction = "";
+    let text = "";
+    let end = -1;
+    // Words sharing a run with the field's first or last marker would be
+    // carried inside the field, out of the paragraph's text: such a field is
+    // not taken.
+    let mixed = false;
+    for (let cursor = start; cursor < children.length && end < 0; cursor += 1) {
+      const node = children[cursor]!;
+      if (taken.has(node)) break;
+      const parts = node.localName === "r" && node.namespaceUri() === WML_NAMESPACE ? node.elements() : [node];
+      for (const part of parts) {
+        if (part.localName === "fldChar") {
+          const type = wordAttr(part, "fldCharType");
+          if (type === "begin") depth += 1;
+          else if (type === "separate" && depth === 1) separated = true;
+          else if (type === "end") {
+            depth -= 1;
+            if (depth === 0) end = cursor;
+          }
+          continue;
+        }
+        if (depth === 0) {
+          if (part.localName !== "rPr") mixed = true;
+          continue;
+        }
+        if (part.localName === "instrText") {
+          if (depth === 1 && !separated) instruction += part.text();
+          continue;
+        }
+        if (separated && part.localName !== "rPr") text += wordText(part);
+      }
+      if (depth === 0 && end < 0) break;
+    }
+    if (end < 0 || mixed) continue;
+    add(child, children.slice(start, end + 1), instruction, text);
+    start = end;
+  }
+  return { fields, skipped };
+}
+
+/** Writes a carried field's runs back into a paragraph, exactly as they were. */
+export function appendNativeField(paragraph: XmlElement, xml: string) {
+  const wrapper = parseXml(xml).root;
+  for (const node of [...wrapper.elements()]) {
+    const used = new Set<string>();
+    for (const element of [node, ...descendants(node)]) {
+      if (element.prefix) used.add(element.prefix);
+      for (const attribute of element.attributes)
+        if (attribute.prefix && attribute.prefix !== "xmlns" && attribute.prefix !== "xml") used.add(attribute.prefix);
+    }
+    const namespaces = [...used].map((prefix) => [prefix, node.resolvePrefix(prefix)] as const);
+    paragraph.appendChild(node);
+    // A prefix the target document does not declare (a field pasted from
+    // another file) is declared on the run itself.
+    for (const [prefix, namespace] of namespaces)
+      if (namespace && node.resolvePrefix(prefix) !== namespace) node.setAttribute(`xmlns:${prefix}`, namespace);
+  }
 }
 
 function projectedRichContent(
@@ -819,6 +1136,9 @@ function projectedRichContent(
 ) {
   const content: DocxRichInline[] = [];
   const fields = sourceInfo ? projectAcademicFields(root, sourceInfo.regionId, sourceInfo.sources, sourceInfo.mappings, sourceInfo.usedSources) : undefined;
+  const otherFields = sourceInfo && fields
+    ? nativeFieldsOf(root, sourceInfo.regionId, new Set([...fields.fields.keys(), ...fields.skipped]))
+    : undefined;
   const formats = new Map(
     (paragraph?.runs() ?? []).map((run) => [run.element, compactRunFormat(run)] as const),
   );
@@ -829,6 +1149,8 @@ function projectedRichContent(
   ) => {
     if (fields?.skipped.has(element)) return;
     if (fields?.fields.has(element)) { content.push(fields.fields.get(element)!); return; }
+    if (otherFields?.skipped.has(element)) return;
+    if (otherFields?.fields.has(element)) { content.push(otherFields.fields.get(element)!); return; }
     const namespace = element.namespaceUri();
     // Properties are not words: a tab stop in w:pPr/w:tabs is not a tab.
     if (namespace === WML_NAMESPACE && WML_PROPERTY_ELEMENTS.has(element.localName)) return;
@@ -950,7 +1272,7 @@ function projectedRichContent(
   return mergeRichText(content);
 }
 
-function semanticRichText(content: readonly DocxRichInline[]) {
+export function semanticRichText(content: readonly DocxRichInline[]) {
   return content
     .map((item) => {
       if (item.kind === "text") return item.text;
@@ -958,13 +1280,13 @@ function semanticRichText(content: readonly DocxRichInline[]) {
       if (item.kind === "noteRef") return "";
       if (item.kind === "commentBoundary") return "";
       if (item.kind === "revision") return item.revisionKind === "ins" ? item.text : "";
-      if (item.kind === "citation" || item.kind === "bibliography") return item.text;
+      if (item.kind === "citation" || item.kind === "bibliography" || item.kind === "field") return item.text;
       return item.altText;
     })
     .join("");
 }
 
-function hasRichSemantics(content: readonly DocxRichInline[]) {
+export function hasRichSemantics(content: readonly DocxRichInline[]) {
   return content.some(
     (item) =>
       item.kind !== "text" ||
@@ -1060,6 +1382,92 @@ function cellPaddingOf(table: { element: XmlElement; rows(): readonly { cells():
   };
   const padding = [side(["top"], 0), side(["right", "end"], 5.4), side(["bottom"], 0), side(["left", "start"], 5.4)];
   return padding.every((value) => value >= 0 && value <= 72) ? { cellPadding: padding } : {};
+}
+
+const LINE_SIDES = { grid: ["top", "left", "bottom", "right", "insideH", "insideV"], horizontal: ["top", "bottom", "insideH"], outer: ["top", "left", "bottom", "right"], none: [] } as const;
+
+/**
+ * A table's own lines as one of the looks Spectra offers (every line, the rows
+ * only, the outside only, none), with their colour when all of them share one.
+ * Lines from a table style or from single cells are Word's own and say nothing.
+ */
+function tableLinesOf(table: { element: XmlElement }): { borders?: keyof typeof LINE_SIDES; borderColor?: string } {
+  const own = table.element.find(WML_NAMESPACE, "tblPr")?.find(WML_NAMESPACE, "tblBorders");
+  if (!own || cellBorders(table)) return {};
+  const drawn = own.elements().filter(drawsSide);
+  const sides = new Set(drawn.map((side) => side.localName === "start" ? "left" : side.localName === "end" ? "right" : side.localName));
+  const lines = (Object.keys(LINE_SIDES) as (keyof typeof LINE_SIDES)[]).find((look) =>
+    LINE_SIDES[look].length === sides.size && LINE_SIDES[look].every((side) => sides.has(side)));
+  if (!lines || lines === "none") return {};
+  const colours = new Set(drawn.map((side) => (side.getAttributeNs(WML_NAMESPACE, "color") ?? "auto").toUpperCase()));
+  const [colour] = colours;
+  return { borders: lines, ...(colours.size === 1 && colour && /^[0-9A-F]{6}$/u.test(colour) && colour !== "000000" ? { borderColor: colour } : {}) };
+}
+
+const TABLE_PROPERTIES_AFTER_BORDERS = ["shd", "tblLayout", "tblCellMar", "tblLook", "tblCaption", "tblDescription", "tblPrChange"];
+const CELL_PROPERTIES_AFTER_SHADING = ["noWrap", "tcMar", "textDirection", "tcFitText", "vAlign", "hideMark", "headers", "cellIns", "cellDel", "cellMerge", "tcPrChange"];
+
+function wordChild(parent: XmlElement, localName: string) {
+  return parent.elements().find((element) => element.localName === localName && element.namespaceUri() === WML_NAMESPACE);
+}
+
+function ownProperties(element: XmlElement, localName: "tblPr" | "tcPr") {
+  const existing = wordChild(element, localName);
+  if (existing) return existing;
+  const properties = new XmlElement(localName, "w");
+  element.insertBefore(properties, element.children[0] ?? null);
+  return properties;
+}
+
+/**
+ * Writes a table's look: its lines as the table's own borders (a cell's own
+ * borders go, so the whole table draws one way) and each cell's fill.
+ */
+function setTableLook(document: Document, table: NativeTable, look: Extract<DocxSemanticDelta, { kind: "set-table-look" }>) {
+  if (look.borders !== undefined || look.borderColor !== undefined) {
+    const lines: keyof typeof LINE_SIDES = look.borders ?? tableLinesOf(table).borders ?? "grid";
+    const colour = look.borderColor ?? "auto";
+    const properties = ownProperties(table.element, "tblPr");
+    const previous = wordChild(properties, "tblBorders");
+    if (previous) properties.removeChild(previous);
+    const borders = new XmlElement("tblBorders", "w");
+    for (const side of LINE_SIDES.grid) {
+      const line = new XmlElement(side, "w");
+      const drawn = (LINE_SIDES[lines] as readonly string[]).includes(side);
+      line.setAttribute("w:val", drawn ? "single" : "nil");
+      if (drawn) {
+        line.setAttribute("w:sz", "4");
+        line.setAttribute("w:space", "0");
+        line.setAttribute("w:color", colour);
+      }
+      borders.appendChild(line);
+    }
+    const later = properties.elements().find((child) => TABLE_PROPERTIES_AFTER_BORDERS.includes(child.localName));
+    properties.insertBefore(borders, later ?? null);
+    for (const cell of descendants(table.element).filter((element) => element.localName === "tcBorders" && element.namespaceUri() === WML_NAMESPACE))
+      cell.parent?.removeChild(cell);
+  }
+  if (look.cellShading) {
+    tableRows(table).forEach((row, rowIndex) =>
+      tableCells(row).forEach((cell, columnIndex) => {
+        const fill = look.cellShading![rowIndex]?.[columnIndex] ?? null;
+        const existing = wordChild(cell, "tcPr");
+        const previous = existing && wordChild(existing, "shd");
+        if (!fill) {
+          if (previous) existing!.removeChild(previous);
+          return;
+        }
+        const properties = existing ?? ownProperties(cell, "tcPr");
+        if (previous) properties.removeChild(previous);
+        const shading = new XmlElement("shd", "w");
+        shading.setAttribute("w:val", "clear");
+        shading.setAttribute("w:color", "auto");
+        shading.setAttribute("w:fill", fill);
+        const later = properties.elements().find((child) => CELL_PROPERTIES_AFTER_SHADING.includes(child.localName));
+        properties.insertBefore(shading, later ?? null);
+      }));
+  }
+  document._markMainDirty();
 }
 
 /** Each cell's fill, kept only when a cell has one. */
@@ -1566,6 +1974,47 @@ function safeStyleId(value: string) {
   return value;
 }
 
+const MC_NAMESPACE = "http://schemas.openxmlformats.org/markup-compatibility/2006";
+
+/**
+ * Word 2010's paragraph ids (`w14:paraId`) are declared once on the document
+ * root, as Word writes them, and marked ignorable for older readers. Without
+ * the declaration every paragraph Spectra writes carries its own `ns1:`
+ * namespace, which Word accepts but rewrites on its next save.
+ */
+export function declareWordml2010(document: Document) {
+  const root = document.body().parent;
+  if (!root) return;
+  const declares = (namespace: string) =>
+    root.attributes.find((attribute) => attribute.prefix === "xmlns" && attribute.value === namespace)?.localName;
+  // Paragraphs written with their own declaration ("xmlns:ns1") take the root's.
+  let used = false;
+  let changed = false;
+  const stack = [...root.elements()];
+  while (stack.length) {
+    const element = stack.pop()!;
+    for (const attribute of [...element.attributes]) {
+      if (attribute.prefix !== "xmlns" || attribute.value !== W14_NAMESPACE || attribute.localName === "w14") continue;
+      const local = attribute.localName;
+      element.removeAttribute(`xmlns:${local}`);
+      for (const owned of element.attributes) if (owned.prefix === local) owned.prefix = "w14";
+      changed = true;
+    }
+    if (!used && element.attributes.some((attribute) => attribute.prefix === "w14")) used = true;
+    for (const child of element.elements()) stack.push(child);
+  }
+  if (!used || declares(W14_NAMESPACE) === "w14") {
+    if (changed) document._markMainDirty();
+    return;
+  }
+  root.setAttribute("xmlns:w14", W14_NAMESPACE);
+  const mc = declares(MC_NAMESPACE) ?? (root.setAttribute("xmlns:mc", MC_NAMESPACE), "mc");
+  const ignorable = root.attributes.find((attribute) => attribute.prefix === mc && attribute.localName === "Ignorable");
+  const listed = ignorable?.value.split(/\s+/u).filter(Boolean) ?? [];
+  if (!listed.includes("w14")) root.setAttribute(`${mc}:Ignorable`, [...listed, "w14"].join(" "));
+  document._markMainDirty();
+}
+
 export async function resolveParagraphStyleId(document: Document, requested: string) {
   const safeRequested = safeStyleId(requested);
   const stylesPart = document.office.package.getPart("/word/styles.xml");
@@ -1625,6 +2074,9 @@ export async function resolveParagraphStyleId(document: Document, requested: str
     document.office.markDirty(stylesPart.name);
     return `Heading${level}`;
   }
+  // A file that never wrote a Normal style draws body text from its document
+  // defaults: a paragraph with no style is Normal there.
+  if (safeRequested.toLocaleLowerCase() === "normal") return undefined;
   throw new DocxLensError(
     "DOCX_UNSUPPORTED_EDIT",
     `The Word style ${safeRequested} does not exist in this file, so Spectra will not create a dangling style reference.`,
@@ -1634,6 +2086,14 @@ export async function resolveParagraphStyleId(document: Document, requested: str
 async function setParagraphStyle(document: Document, paragraph: Paragraph, style: string) {
   const styleId = await resolveParagraphStyleId(document, style);
   let properties = paragraph.element.find(WML_NAMESPACE, "pPr");
+  if (styleId === undefined) {
+    const current = properties?.find(WML_NAMESPACE, "pStyle");
+    if (current) {
+      properties!.removeChild(current);
+      document._markMainDirty();
+    }
+    return;
+  }
   if (!properties) {
     properties = new XmlElement("pPr", "w");
     paragraph.element.insertBefore(properties, paragraph.element.children[0] ?? null);
@@ -1849,7 +2309,7 @@ async function customXmlTargets(document: Document, cell: NativeTableCell) {
 async function boundCustomXmlPartNames(document: Document) {
   const itemIds = new Set<string>();
   for (const element of descendants(document.body())) {
-    if (element.namespaceUri() !== WML_NAMESPACE || element.localName !== "dataBinding")
+    if (element.localName !== "dataBinding" || element.namespaceUri() !== WML_NAMESPACE)
       continue;
     const itemId = element.getAttributeNs(WML_NAMESPACE, "storeItemID")?.toLocaleLowerCase();
     if (itemId) itemIds.add(itemId);
@@ -2494,7 +2954,11 @@ function appendRichText(
   }
   if (href) {
     const link = new XmlElement("hyperlink", "w");
-    link.setAttributeNs(OFFICE_RELATIONSHIP_NAMESPACE, "id", hyperlinkRelationship(document, href));
+    const anchor = internalAnchor(href);
+    if (anchor) {
+      link.setAttribute("w:anchor", anchor);
+      link.setAttribute("w:history", "1");
+    } else link.setAttributeNs(OFFICE_RELATIONSHIP_NAMESPACE, "id", hyperlinkRelationship(document, href));
     link.appendChild(run);
     parent.appendChild(link);
   } else parent.appendChild(run);
@@ -2763,6 +3227,8 @@ async function replaceParagraphRich(
       await appendWordCitation(document, paragraph.element, item);
     } else if (item.kind === "bibliography") {
       await appendWordBibliography(document, paragraph.element, item);
+    } else if (item.kind === "field") {
+      appendNativeField(paragraph.element, item.xml);
     }
   }
   if (usedNativeRuns.size !== nativeRuns.length)
@@ -3138,9 +3604,16 @@ function orderedSectionChild(section: XmlElement, localName: string) {
 
 function sectionProperties(document: Document) {
   const output: XmlElement[] = [];
+  // A section ends at the body's last sectPr or at a paragraph's pPr/sectPr;
+  // runs never hold one, so a paragraph is read through its properties only.
   const visit = (element: XmlElement) => {
     for (const child of element.elements()) {
-      if (child.namespaceUri() === WML_NAMESPACE && child.localName === "sectPr") {
+      if (child.localName === "p" && child.namespaceUri() === WML_NAMESPACE) {
+        const section = child.find(WML_NAMESPACE, "pPr")?.find(WML_NAMESPACE, "sectPr");
+        if (section) output.push(section);
+        continue;
+      }
+      if (child.localName === "sectPr" && child.namespaceUri() === WML_NAMESPACE) {
         output.push(child);
         continue;
       }
@@ -3295,7 +3768,7 @@ function pageSetupFromDocument(document: Document) {
   // own when Word gives the section a different first page.
   const templates: Record<string, string> = {};
   const loaded = document._internal().headerFooterParts();
-  const templateOf = (slot: "header" | "footer", type: "default" | "first") => {
+  const templateOf = (slot: "header" | "footer", type: "default" | "first" | "even") => {
     const ref = section?.findAll(WML_NAMESPACE, `${slot}Reference`).find((candidate) =>
       (candidate.getAttributeNs(WML_NAMESPACE, "type") ?? "default") === type,
     );
@@ -3311,6 +3784,13 @@ function pageSetupFromDocument(document: Document) {
   if (titlePage && !["0", "false", "off"].includes(titlePage.getAttributeNs(WML_NAMESPACE, "val") ?? "")) {
     templates.firstHeader = templateOf("header", "first") ?? "";
     templates.firstFooter = templateOf("footer", "first") ?? "";
+  }
+  // Odd and even pages differ when the document says so: even pages draw their
+  // own header and footer, blank where Word has none.
+  const evenAndOdd = document._internal().settings()?.doc.root.find(WML_NAMESPACE, "evenAndOddHeaders");
+  if (evenAndOdd && !["0", "false", "off"].includes(evenAndOdd.getAttributeNs(WML_NAMESPACE, "val") ?? "")) {
+    templates.evenHeader = templateOf("header", "even") ?? "";
+    templates.evenFooter = templateOf("footer", "even") ?? "";
   }
   return {
     page,
@@ -3628,9 +4108,9 @@ const REGION_FIDELITY: ReadonlyArray<{
   },
   {
     region: "hyperlinks",
-    class: "PRESERVED",
+    class: "NATIVE",
     reason:
-      "Spectra preserves hyperlinks in a linked Word file but cannot add, change, or remove them. Make hyperlink edits in Word.",
+      "Links to web and email addresses and to headings in this document are written as Word hyperlinks. A link around a picture or field stays as Word has it.",
   },
   {
     region: "lists",
@@ -3693,6 +4173,24 @@ async function projectDocument(
   profile: LensCompatibilityProfile,
   identityStable: boolean,
 ) {
+  // Every run in a long document resolves its look through the style chain;
+  // runs that share a paragraph style and properties resolve once per pass.
+  let top: XmlElement | null = document.body();
+  while (top?.parent) top = top.parent;
+  const owner = top && !runFormatCaches.has(top) ? top : null;
+  if (owner) runFormatCaches.set(owner, new Map());
+  try {
+    return await projectDocumentPass(document, profile, identityStable);
+  } finally {
+    if (owner) runFormatCaches.delete(owner);
+  }
+}
+
+async function projectDocumentPass(
+  document: Document,
+  profile: LensCompatibilityProfile,
+  identityStable: boolean,
+) {
   const fidelityEntries: LensFidelityEntry[] = [];
   const blocks: DocxProjectionBlock[] = [];
   const [wordNotes, wordComments, wordSources, mappings] = await Promise.all([
@@ -3707,6 +4205,8 @@ async function projectDocument(
   const usedSourceMap = new Map<string, WordSource>();
   for (const item of projectAcademicFields(document.body(), "inventory", wordSources, mappings).fields.values()) if (item.kind === "citation") usedSourceMap.set(item.source.tag, item.source);
   const usedSources = [...usedSourceMap.values()];
+  /** Nodes of fields carried as atoms; they are not unsupported fields. */
+  const carriedFieldNodes = new Set<XmlElement>();
   const bodyChildren = topLevelFlow(document.body());
   const styleRoles = paragraphStyleRoles(document);
   const countList = wordListCounter();
@@ -3738,11 +4238,17 @@ async function projectDocument(
         sourceInfo,
       );
       const academicFields = projectAcademicFields(element, regionId, wordSources, mappings);
-      const protectedFields = wordElements(element).some((candidate) => {
+      const academicNodes = new Set([...academicFields.fields.keys(), ...academicFields.skipped]);
+      // Fields Spectra does not model are carried whole as atoms (see
+      // nativeFieldsOf), so they no longer lock the paragraph around them.
+      const carriedFields = bibliography ? undefined : nativeFieldsOf(element, regionId, academicNodes);
+      const carriedParts = [...(carriedFields?.fields.keys() ?? []), ...(carriedFields?.skipped ?? [])].flatMap(wordElements);
+      for (const node of carriedParts) carriedFieldNodes.add(node);
+      const fieldParts = new Set([...[...academicNodes].flatMap(wordElements), ...carriedParts]);
+      const protectedFields = !bibliography && wordElements(element).some((candidate) => {
         if (!["fldSimple", "fldChar", "instrText", "sdt"].includes(candidate.localName)) return false;
-        if (bibliography) return false;
-        if ([...academicFields.fields.keys(), ...academicFields.skipped].some((field) => wordElements(field).includes(candidate))) return false;
-        if (candidate.localName === "sdt" && candidate.find(WML_NAMESPACE, "sdtPr")?.find(WML_NAMESPACE, "citation") && [...academicFields.fields.keys()].some((field) => wordElements(candidate).includes(field))) return false;
+        if (fieldParts.has(candidate)) return false;
+        if (candidate.localName === "sdt" && candidate.find(WML_NAMESPACE, "sdtPr")?.find(WML_NAMESPACE, "citation") && wordElements(candidate).some((part) => academicFields.fields.has(part))) return false;
         return true;
       });
       const unsafeHyperlink = descendants(element).some(
@@ -3776,6 +4282,7 @@ async function projectDocument(
           ? `Heading${styleId}`
           : styleId;
       const listNumber = list ? countList(list) : undefined;
+      const charts = wordChartsIn(document, element);
       const runFormat = readOnly ? undefined : uniformRunFormat(paragraph);
       const paragraphFormat = readOnly ? undefined : projectedParagraphFormat(paragraph);
       const meaningfulRichContent = richContent.filter(
@@ -3822,6 +4329,8 @@ async function projectDocument(
               }
             : {}),
           ...(readOnly ? { nativeReadOnly: true } : {}),
+          // Word's charts in this paragraph, drawn read-only from their parts.
+          ...(charts.length ? { wordCharts: charts } : {}),
           // Formatting travels with the block so a writer sees the file's own
           // bold and leading rather than Spectra defaults, and so materialize
           // can tell an edit from an unchanged value. A read-only paragraph
@@ -3905,6 +4414,7 @@ async function projectDocument(
             ...cellAlignmentsOf(document, table),
             ...cellStylesOf(table),
             ...cellShadingOf(table),
+            ...tableLinesOf(table),
             ...cellPaddingOf(table),
             ...tableBordersOf(document, table),
             ...cellSpansOf(table),
@@ -3930,14 +4440,18 @@ async function projectDocument(
   }
 
   const allMainElements = [document.body(), ...descendants(document.body())];
+  const mainByName = new Map<string, XmlElement[]>();
+  for (const element of allMainElements) {
+    const named = mainByName.get(element.localName);
+    if (named) named.push(element);
+    else mainByName.set(element.localName, [element]);
+  }
+  const mainNamed = (...names: string[]) => names.flatMap((name) => mainByName.get(name) ?? []);
   const mainHas = (...names: string[]) =>
-    allMainElements.some(
-      (element) =>
-        element.namespaceUri() === WML_NAMESPACE && names.includes(element.localName),
-    );
+    mainNamed(...names).some((element) => element.namespaceUri() === WML_NAMESPACE);
   const projectedFields = projectAcademicFields(document.body(), "features", wordSources, mappings);
   const academicFieldNodes = new Set([...projectedFields.fields.keys(), ...projectedFields.skipped].flatMap(wordElements));
-  if (allMainElements.some((element) => ["fldSimple", "fldChar", "instrText"].includes(element.localName) && !academicFieldNodes.has(element) && !bibliographyContainer(element)))
+  if (mainNamed("fldSimple", "fldChar", "instrText").some((element) => !academicFieldNodes.has(element) && !carriedFieldNodes.has(element) && !bibliographyContainer(element)))
     fidelityFeature(fidelityEntries, "field", "/word/document.xml", {
       readOnly: true,
       reason: "This field is outside the supported citation and bibliography fields. Refresh or edit it in Word.",
@@ -3957,7 +4471,7 @@ async function projectDocument(
       readOnly: true,
       reason: "This document contains structural, nested, moved or unmodeled formatting revisions. Those spans stay in Word; supported text revisions remain individually editable.",
     });
-  if (allMainElements.some((element) => element.localName === "sdt" && !element.find(WML_NAMESPACE, "sdtPr")?.find(WML_NAMESPACE, "bibliography") && ![...projectedFields.fields.keys()].some((field) => wordElements(element).includes(field))))
+  if (mainNamed("sdt").some((element) => !element.find(WML_NAMESPACE, "sdtPr")?.find(WML_NAMESPACE, "bibliography") && ![...projectedFields.fields.keys()].some((field) => wordElements(element).includes(field))))
     fidelityFeature(fidelityEntries, "contentControl", "/word/document.xml", {
       readOnly: true,
     });
@@ -4263,6 +4777,8 @@ export async function docxProjectionReadbackDigest(
       if (intent.attrs?.rowCount === undefined && attrs.rowCount === block.rows?.length) delete attrs.rowCount;
       if (intent.attrs?.cellAlignments === undefined) delete attrs.cellAlignments;
       if (intent.attrs?.cellStyles === undefined) delete attrs.cellStyles;
+      if (intent.attrs?.borders === undefined) delete attrs.borders;
+      if (intent.attrs?.borderColor === undefined) delete attrs.borderColor;
       if (intent.attrs?.columnCount === undefined && attrs.columnCount === block.rows?.[0]?.length) delete attrs.columnCount;
     }
     // Where Word put a new paragraph is its own business.
@@ -4277,6 +4793,9 @@ export async function docxProjectionReadbackDigest(
       attrs.list = { format: readList.format === "bullet" ? "bullet" : readList.format, level: readList.level, group: requestedList.group };
       if (!intent.attrs?.styleId) delete attrs.styleId;
     }
+    // Body text asked for by name reopens unnamed where the file never wrote a Normal style.
+    if (attrs && attrs.styleId === undefined && intent.attrs?.styleId === (catalogue?.defaultStyleId ?? "Normal"))
+      attrs.styleId = intent.attrs.styleId;
     if (!intent.attrs?.paragraphFormat && attrs?.paragraphFormat)
       delete attrs.paragraphFormat;
     else if (attrs?.paragraphFormat) {
@@ -4320,8 +4839,21 @@ export async function docxProjectionReadbackDigest(
     const plainRuns = block.inlineContent?.every((item) => item.kind === "text");
     const textMatchesRuns = !plainRuns
       || block.inlineContent!.map((item) => ("text" in item ? item.text : "")).join("").replace(/ +$/u, "") === block.text.replace(/ +$/u, "");
-    const agreed = block.inlineContent && textMatchesRuns && block.type !== "table" && block.type === intent.type && runsAgree(
-      block.inlineContent,
+    // A paragraph Word reads as one plain run has no runs of its own; its text
+    // and summary format are that run, which a request's runs may still match.
+    const readRuns: DocxRichInline[] | undefined = block.inlineContent ?? (
+      intent.inlineContent && block.text && (block.type === "paragraph" || block.type === "heading")
+        ? [{
+            kind: "text",
+            text: block.text,
+            format: Object.fromEntries(
+              Object.entries(block.attrs?.format ?? {}).filter(([, value]) => value !== null && value !== false),
+            ) as DocxRunFormat,
+          }]
+        : undefined
+    );
+    const agreed = readRuns && textMatchesRuns && block.type !== "table" && block.type === intent.type && runsAgree(
+      readRuns,
       intent.inlineContent ?? [{ kind: "text", text: intent.text }],
       // Runs of their own say what they want; the paragraph summary speaks only for bare text.
       intent.inlineContent ? {} : requestedRunFormat,
@@ -4363,17 +4895,53 @@ function assertEditable(map: LensFidelityMap, regionId: string) {
     );
 }
 
+/*
+ * What open() read from a package, kept beside the exact bytes it read so a
+ * save that follows starts from it instead of reading the whole document
+ * again. Keyed by the byte array itself: a carry rebuilt from other bytes
+ * never matches, and a copy is kept so nothing the caller does to the
+ * projection it was handed reaches here.
+ */
+type DocumentRead = Awaited<ReturnType<typeof projectDocument>>;
+const readsByPayload = new WeakMap<Uint8Array, Map<LensCompatibilityProfile, DocumentRead>>();
+
+function rememberRead(payload: Uint8Array, profile: LensCompatibilityProfile, read: DocumentRead) {
+  const reads = readsByPayload.get(payload) ?? new Map<LensCompatibilityProfile, DocumentRead>();
+  reads.set(profile, structuredClone(read));
+  readsByPayload.set(payload, reads);
+}
+
+function rememberedRead(payload: Uint8Array, profile: LensCompatibilityProfile) {
+  const read = readsByPayload.get(payload)?.get(profile);
+  return read && structuredClone(read);
+}
+
 async function applyDelta(
   carry: LensPreservedCarry<DocxProjection>,
   delta: DocxSemanticDelta,
   options?: DocxWriteOptions,
 ) {
-  const document = await Document.open(carry.safePayload ?? carry.payload);
+  const source = carry.safePayload ?? carry.payload;
+  const document = await Document.open(source);
   const identity = ensureStableRegionIds(document);
   const aliases = identity.aliases;
-  let opened = await projectDocument(document, carry.profile, identity.identityStable);
-  const commentMarkerShape = (id: string) => wordElements(document.body()).filter((node) => ["commentRangeStart", "commentRangeEnd", "commentReference"].includes(node.localName) && wordAttr(node, "id") === id).map((node) => node.localName).join(",");
-  const originalCommentShapes = new Map((opened.projection.nativeBinding.wordComments ?? []).map((comment) => [comment.id, commentMarkerShape(comment.id)]));
+  let opened = rememberedRead(source, carry.profile) ?? await projectDocument(document, carry.profile, identity.identityStable);
+  // Each comment's markers in document order, read in one walk of the body.
+  const commentMarkerShapes = () => {
+    const shapes = new Map<string, string[]>();
+    for (const node of wordElements(document.body())) {
+      if (node.localName !== "commentRangeStart" && node.localName !== "commentRangeEnd" && node.localName !== "commentReference") continue;
+      const id = wordAttr(node, "id");
+      if (id === undefined) continue;
+      const shape = shapes.get(id);
+      if (shape) shape.push(node.localName);
+      else shapes.set(id, [node.localName]);
+    }
+    return (id: string) => shapes.get(id)?.join(",") ?? "";
+  };
+  const wordComments = opened.projection.nativeBinding.wordComments ?? [];
+  const originalShapeOf = wordComments.length ? commentMarkerShapes() : () => "";
+  const originalCommentShapes = new Map(wordComments.map((comment) => [comment.id, originalShapeOf(comment.id)]));
   const operations = [...(delta.kind === "ai-edit" ? delta.operations : [delta])];
   const born = new Map<string, string>();
   const resolveRegionId = (regionId: string) =>
@@ -4551,6 +5119,10 @@ async function applyDelta(
         anchor?.removeAttributeNs(W14_NAMESPACE, "paraId");
         nextAnchor.setAttributeNs(W14_NAMESPACE, "paraId", anchorId);
       }
+    } else if (operation.kind === "set-table-look") {
+      if (!region.table)
+        throw new DocxLensError("DOCX_UNSUPPORTED_EDIT", `The Word region ${operation.regionId} is not a table.`);
+      setTableLook(document, region.table, operation);
     } else if (operation.kind === "update-image") {
       updateImage(document, region, operation);
     } else if (operation.kind === "insert-image") {
@@ -4594,10 +5166,66 @@ async function applyDelta(
     if (["commentRangeStart", "commentRangeEnd", "commentReference"].some((name) => nodes.filter((node) => node.localName === name).length !== 1) || nodes[0]?.localName !== "commentRangeStart" || nodes[1]?.localName !== "commentRangeEnd")
       throw new DocxLensError("DOCX_UNSUPPORTED_EDIT", "A native comment anchor was split or removed. Reload the paragraph and delete the whole comment or select its range again.");
   }
-  for (const [id, shape] of originalCommentShapes) if (shape !== "commentRangeStart,commentRangeEnd,commentReference" && commentMarkerShape(id) !== shape) throw new DocxLensError("DOCX_REGION_READ_ONLY", "This native comment uses a point or complex anchor. Keep its markers unchanged and edit this annotation in Word.");
-  const retainedCitationIds = new Set((await projectDocument(document, carry.profile, identity.identityStable)).projection.blocks.flatMap((block) => block.inlineContent?.flatMap((item) => item.kind === "citation" ? [item.citationId] : []) ?? []));
-  for (const block of carry.projection.blocks) for (const item of block.inlineContent ?? []) if (item.kind === "citation" && item.sourceRef && !retainedCitationIds.has(item.citationId)) await writeCitationMapping(document, { ...item, sourceRef: undefined });
+  const currentShapeOf = originalCommentShapes.size ? commentMarkerShapes() : () => "";
+  for (const [id, shape] of originalCommentShapes) if (shape !== "commentRangeStart,commentRangeEnd,commentReference" && currentShapeOf(id) !== shape) throw new DocxLensError("DOCX_REGION_READ_ONLY", "This native comment uses a point or complex anchor. Keep its markers unchanged and edit this annotation in Word.");
+  // A removed citation's source mapping is cleared; only a document that had
+  // mapped citations needs the read-back that finds which ones remain.
+  const mappedCitations = carry.projection.blocks.flatMap((block) =>
+    (block.inlineContent ?? []).flatMap((item) => (item.kind === "citation" && item.sourceRef ? [item] : [])));
+  if (mappedCitations.length) {
+    const retainedCitationIds = new Set((await projectDocument(document, carry.profile, identity.identityStable)).projection.blocks.flatMap((block) => block.inlineContent?.flatMap((item) => item.kind === "citation" ? [item.citationId] : []) ?? []));
+    for (const item of mappedCitations) if (!retainedCitationIds.has(item.citationId)) await writeCitationMapping(document, { ...item, sourceRef: undefined });
+  }
+  // A heading goes by its Word region and by any id this save inserted or renamed it from.
+  const askedAs = new Map<string, string[]>();
+  for (const map of [born, aliases])
+    for (const [asked, regionId] of map) askedAs.set(regionId, [...(askedAs.get(regionId) ?? []), asked]);
+  const regionOf = new Map(nativeRegions(document).flatMap((region) => (region.paragraph ? [[region.paragraph.element, region.id] as const] : [])));
+  markCrossReferenceTargets(document, (paragraph) => {
+    const regionId = regionOf.get(paragraph);
+    return regionId ? [regionId, ...(askedAs.get(regionId) ?? [])] : [];
+  });
+  declareWordml2010(document);
   return document.save();
+}
+
+/**
+ * Gives each heading a Spectra cross-reference points at its Word bookmark.
+ * The link names the bookmark after the heading's block, which is the id the
+ * editor knew it by; `blockIdsOf` says which ids a paragraph went by.
+ */
+export function markCrossReferenceTargets(document: Document, blockIdsOf: (paragraph: XmlElement) => readonly string[]) {
+  const body = document.body();
+  const nodes = descendants(body);
+  const wanted = new Set(
+    nodes
+      .filter((node) => node.namespaceUri() === WML_NAMESPACE && node.localName === "hyperlink")
+      .map((node) => node.getAttributeNs(WML_NAMESPACE, "anchor") ?? "")
+      .filter(isCrossReferenceAnchor),
+  );
+  if (!wanted.size) return;
+  const bookmarks = nodes.filter((node) => node.namespaceUri() === WML_NAMESPACE && node.localName === "bookmarkStart");
+  for (const bookmark of bookmarks) wanted.delete(bookmark.getAttributeNs(WML_NAMESPACE, "name") ?? "");
+  if (!wanted.size) return;
+  let nextId = Math.max(-1, ...bookmarks.map((bookmark) => Number(bookmark.getAttributeNs(WML_NAMESPACE, "id")) || 0)) + 1;
+  for (const paragraph of nodes) {
+    if (!wanted.size) return;
+    if (paragraph.namespaceUri() !== WML_NAMESPACE || paragraph.localName !== "p") continue;
+    const name = blockIdsOf(paragraph).map(crossReferenceAnchor).find((candidate) => wanted.has(candidate));
+    if (!name) continue;
+    wanted.delete(name);
+    const start = new XmlElement("bookmarkStart", "w");
+    start.setAttribute("w:id", String(nextId));
+    start.setAttribute("w:name", name);
+    const end = new XmlElement("bookmarkEnd", "w");
+    end.setAttribute("w:id", String(nextId));
+    nextId += 1;
+    const properties = paragraph.find(WML_NAMESPACE, "pPr");
+    const first = paragraph.elements().find((child) => child !== properties) ?? null;
+    paragraph.insertBefore(start, first);
+    paragraph.appendChild(end);
+    document._markMainDirty();
+  }
 }
 
 export const docxLens: SpectraLens<DocxProjection, DocxSemanticDelta> = {
@@ -4621,7 +5249,9 @@ export const docxLens: SpectraLens<DocxProjection, DocxSemanticDelta> = {
       );
     }
     const identity = ensureStableRegionIds(document);
-    const { projection, fidelityMap } = await projectDocument(document, profile, identity.identityStable);
+    const read = await projectDocument(document, profile, identity.identityStable);
+    rememberRead(safePayload, profile, read);
+    const { projection, fidelityMap } = read;
     const basePayloadHash = await sha256Payload(payload);
     return {
       projection,

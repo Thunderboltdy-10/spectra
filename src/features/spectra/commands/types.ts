@@ -114,7 +114,14 @@ export type CommandControlOption = {
   hint?: string;
   /** Renders the option in its own typeface — used by the font picker. */
   previewFontFamily?: string;
+  /** Drawn as maths (LaTeX) in a gallery tile — used by the Equation tab. */
+  math?: string;
   disabled?: boolean;
+};
+
+export type CommandGallerySection = {
+  label: string;
+  options: readonly CommandControlOption[];
 };
 
 /**
@@ -160,6 +167,15 @@ export type CommandControl =
       kind: "menu";
       options: readonly CommandControlOption[];
       value?: string;
+    }
+  | {
+      /** A grid of drawn choices in titled sections, as Word's galleries are. */
+      kind: "gallery";
+      sections: readonly CommandGallerySection[];
+      /** Tiles per row. */
+      columns: number;
+      /** Maths drawn on the bar's button beside the label. */
+      glyph?: string;
     };
 
 export type CommandControlKind = CommandControl["kind"];

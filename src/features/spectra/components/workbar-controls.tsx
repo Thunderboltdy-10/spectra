@@ -9,6 +9,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import type { CommandBinding, CommandControl, CommandControlOption, CommandParam } from "../commands";
+import { MathGlyph } from "./math-glyph";
 
 /**
  * The controls a command can be.
@@ -406,6 +407,106 @@ function SegmentedControl({
   );
 }
 
+/* ----------------------------------------------------------------- gallery */
+
+type GalleryControlShape = Extract<CommandControl, { kind: "gallery" }>;
+
+/** Tiles of drawn maths in titled sections. Choosing one keeps the caret where it was. */
+function GalleryGrid({
+  control,
+  emit,
+}: {
+  control: GalleryControlShape;
+  emit: (value: string) => void;
+}) {
+  const wide = control.columns === 1;
+  return (
+    <div className="spectra-gallery">
+      {control.sections.map((section) => (
+        <section key={section.label} className="spectra-gallery-section" aria-label={section.label}>
+          <h3 className="spectra-gallery-heading">{section.label}</h3>
+          <div
+            className="spectra-gallery-grid"
+            data-wide={wide || undefined}
+            style={{ gridTemplateColumns: `repeat(${control.columns}, minmax(0, 1fr))` }}
+          >
+            {section.options.map((option) => (
+              <button
+                key={`${section.label}:${option.value}`}
+                type="button"
+                role="option"
+                aria-selected={false}
+                aria-label={option.label}
+                title={option.hint ?? option.label}
+                disabled={option.disabled}
+                className="spectra-gallery-tile"
+                // The equation being typed keeps the focus while a tile is chosen.
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => emit(option.value)}
+              >
+                {wide ? <span className="spectra-gallery-tile-label">{option.label}</span> : null}
+                <MathGlyph latex={option.math ?? option.value} display={wide} fit={!wide} />
+              </button>
+            ))}
+          </div>
+        </section>
+      ))}
+    </div>
+  );
+}
+
+function GalleryControl({
+  action,
+  control,
+  emit,
+}: {
+  action: CommandBinding;
+  control: GalleryControlShape;
+  emit: Emit;
+}) {
+  const [open, setOpen] = useState(false);
+  const width = control.columns === 1 ? 460 : Math.min(600, Math.max(320, control.columns * (control.columns > 6 ? 44 : 96) + 18));
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-haspopup="listbox"
+          aria-expanded={open}
+          aria-label={action.label}
+          title={action.hint ? `${action.label} · ${action.hint}` : action.label}
+          disabled={action.disabled}
+          onMouseDown={(event) => event.preventDefault()}
+          className="spectra-workbar-control spectra-workbar-control-gallery"
+        >
+          {control.glyph ? <MathGlyph latex={control.glyph} className="spectra-workbar-gallery-glyph" /> : null}
+          <span className="min-w-0 truncate">{action.label}</span>
+          <ChevronDown className="size-3 shrink-0 text-[var(--text-tertiary)]" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        role="listbox"
+        aria-label={action.label}
+        align="start"
+        layer="dropdown"
+        className="spectra-workbar-control-popover spectra-gallery-popover"
+        data-columns={control.columns}
+        style={{ width }}
+        onOpenAutoFocus={(event) => event.preventDefault()}
+        onCloseAutoFocus={(event) => event.preventDefault()}
+      >
+        <GalleryGrid
+          control={control}
+          emit={(value) => {
+            setOpen(false);
+            emit(value);
+          }}
+        />
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 /* ------------------------------------------------------------------ facade */
 
 /**
@@ -431,6 +532,8 @@ export function WorkbarCommandControl({
       return <ColorControl action={action} control={control} emit={onEmit} />;
     case "segmented":
       return <SegmentedControl action={action} control={control} emit={onEmit} />;
+    case "gallery":
+      return <GalleryControl action={action} control={control} emit={onEmit} />;
     default:
       return null;
   }
@@ -438,7 +541,7 @@ export function WorkbarCommandControl({
 
 export function isRenderedControl(action: CommandBinding) {
   const kind = action.control?.kind;
-  return kind === "select" || kind === "menu" || kind === "numeric" || kind === "color" || kind === "segmented";
+  return kind === "select" || kind === "menu" || kind === "numeric" || kind === "color" || kind === "segmented" || kind === "gallery";
 }
 
 /**
@@ -470,6 +573,8 @@ export function WorkbarControlMenuRow({
         <NumericControl action={action} control={control} emit={onEmit} />
       ) : control.kind === "segmented" ? (
         <SegmentedControl action={action} control={control} emit={onEmit} />
+      ) : control.kind === "gallery" ? (
+        <GalleryGrid control={control} emit={onEmit} />
       ) : control.kind === "select" || control.kind === "menu" ? (
         <div className="spectra-workbar-control-row-options" role="listbox" aria-label={action.label}>
           {control.options.map((option) => (

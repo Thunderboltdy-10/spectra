@@ -744,6 +744,21 @@ describe("replica truth machine", () => {
     expect((await t.run(ctx => ctx.db.get(fixture.workId)))?.content).toEqual(content);
   });
 
+  it("lets a document made in Spectra take its Word file as its own, and only such a document", async () => {
+    const t = setupTest();
+    const fixture = await seedWork(t);
+    const projection = { blocks: [{ id: "p1", text: "from Word" }] };
+    const adopt = () => t.withIdentity(identity).mutation(api.replicas.activateLens, {
+      workId: fixture.workId, payloadHash: baseHash, content: projection, fidelityMap: {},
+      semanticDigest: baseHash, nativeFormat: "docx", adoptsSpectraDocument: true,
+    });
+    await t.run(ctx => ctx.db.patch(fixture.workId, { blueprintKey: "document", nativeFormat: undefined, content: { tiptap: { type: "doc" } }, liveStateVectorHash: "durable-head" }));
+    expect(await adopt()).toMatchObject({ activated: true });
+    expect(await t.run(ctx => ctx.db.get(fixture.workId))).toMatchObject({ content: projection, nativeFormat: "docx" });
+    // Now Word-backed: a second adoption is refused.
+    await expect(adopt()).rejects.toThrow("LENS_ADOPTION_UNSAFE");
+  });
+
   it("commits cloud native bytes once and fences stale materializations without replacing authored content", async () => {
     const t = setupTest();
     const fixture = await seedWork(t);

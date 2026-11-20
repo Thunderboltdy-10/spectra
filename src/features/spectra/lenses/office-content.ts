@@ -793,7 +793,14 @@ function stripPresentationObjectsForActivation(content: unknown) {
  * response so a 200k-cell book or 120-slide deck cannot blow the document cap.
  */
 export function convexSafeFidelityMap(map: unknown) {
-  return storedFidelityMap(map);
+  const stored = storedFidelityMap(map);
+  if (jsonBytes(stored) <= 80_000) return stored;
+  // A shape the compact form does not know (a bare list, say) still never overflows.
+  return {
+    truncated: true,
+    message:
+      "Native features Spectra cannot edit remain in the original package.",
+  };
 }
 
 export function convexSafeOfficeActivationContent(

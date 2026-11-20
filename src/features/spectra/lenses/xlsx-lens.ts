@@ -1,7 +1,7 @@
 import { canonicalJsonValue } from "../../../../shared/canonical-json";
 import { Workbook, parseCellRef, type CellStyleUpdate } from "@ariadng/office/xlsx";
 import { dateToSerial } from "../sheets/excel-serial";
-import { comparePackages } from "@ariadng/office/preservation";
+import { comparePackageVerdicts as comparePackages } from "./package-verdicts";
 import { XmlElement } from "@ariadng/office/xml";
 import { OFFICE_ARCHIVE_LIMITS, prepareBoundedArchiveBytes } from "../../../../shared/parser-limits";
 import { sha256Payload } from "./docx-lens";

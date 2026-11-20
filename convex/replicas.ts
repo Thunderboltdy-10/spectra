@@ -1,5 +1,6 @@
 import { externalReconciliationArgs, recordExternalConflict } from "./nativeReconciliation";
 import { insertWriteRequest } from "./bridgeWriteBase";
+import { enqueueNativeOutbox } from "./nativeOutbox";
 import { deleteUnboundDurableStorage } from "./durableStorageBindings";
 import { v } from "convex/values";
 import { query } from "./functions";
@@ -816,6 +817,8 @@ export const activateLens = mutation({
     nativeFormat: v.string(),
     blueprintKey: v.optional(v.union(v.literal("document"), v.literal("sheets"), v.literal("presentation"))),
     textIndex: v.optional(v.string()),
+    /** A document made in Spectra takes the Word file written from it as its own. */
+    adoptsSpectraDocument: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const actor = await getAuthenticatedActor(ctx);
@@ -838,8 +841,13 @@ export const activateLens = mutation({
       throw new Error("LENS_BASE_PAYLOAD_CHANGED");
     const now = Date.now();
     const nextBlueprintKey = input.blueprintKey ?? "document";
-    const changesArtifactType = work.blueprintKey !== nextBlueprintKey;
-    if (changesArtifactType && work.blueprintKey !== "resource")
+    const adopts = args.adoptsSpectraDocument === true;
+    if (adopts && (work.blueprintKey !== "document" || work.nativeFormat))
+      throw new Error("LENS_ADOPTION_UNSAFE");
+    // A type change, or a Spectra document becoming Word-backed, starts the
+    // live head again from the Word file's projection.
+    const changesArtifactType = work.blueprintKey !== nextBlueprintKey || adopts;
+    if (changesArtifactType && work.blueprintKey !== "resource" && !adopts)
       throw new Error("LENS_TYPE_TRANSITION_UNSAFE");
     // Opening a retained package must not reset an already-live authored head.
     // External revisions use recordExternalReconciliation before reaching here.
@@ -1556,6 +1564,9 @@ async function failWriteRequest(
   if (operation) await ctx.db.patch(operation._id, { state: "failed", errorCode, updatedAt: now });
   const replica = await ctx.db.get(request.replicaId);
   if (replica?.state === "pending") await ctx.db.patch(replica._id, { state: "error", errorCode, errorAt: now, updatedAt: now });
+  // A save that waited out its week (computer off, Bridge gone) is rebuilt
+  // from what Spectra holds now, against the file as it is now.
+  if (errorCode === "write-expired") await enqueueNativeOutbox(ctx, request.workId, "materialize");
 }
 
 /** Indexed compensation for actor death, expired transitions and unreferenced bytes.

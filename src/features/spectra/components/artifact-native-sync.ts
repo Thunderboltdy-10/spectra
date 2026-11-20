@@ -43,8 +43,13 @@ export type NativeConflict = {
     regionId: string;
     spectra: string;
     external: string;
+    /** Word's whole paragraph, when it can be shown in place. */
+    externalBlock?: { text?: string; inlineContent?: Array<Record<string, unknown>> };
   }>;
 };
+
+/** One side for the whole document, or a choice per clashing paragraph. */
+export type NativeResolution = "word" | "spectra" | { regions: Record<string, "word" | "spectra" | "both"> };
 
 type NativeLive = {
   liveValue: ArtifactLiveValue;
@@ -598,7 +603,7 @@ export function useArtifactNativeSync({
   ]);
 
   const reconcileNativeRevision = useCallback(
-    async (resolution?: "word" | "spectra") => {
+    async (resolution?: NativeResolution) => {
       const response = await fetch(
         nativeWordDocument
           ? "/api/spectra/lenses/docx"

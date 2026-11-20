@@ -1,6 +1,6 @@
 import { Presentation, DRAWINGML_NAMESPACE, PML_NAMESPACE } from "@ariadng/office/pptx";
 import { resolveRelationshipTarget, type OpcPart } from "@ariadng/office/opc";
-import { comparePackages } from "@ariadng/office/preservation";
+import { comparePackageVerdicts as comparePackages } from "./package-verdicts";
 import { XmlElement, XmlText } from "@ariadng/office/xml";
 import { Workbook } from "@ariadng/office/xlsx";
 import { OFFICE_ARCHIVE_LIMITS, prepareBoundedArchiveBytes } from "../../../../shared/parser-limits";

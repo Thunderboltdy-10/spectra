@@ -1905,6 +1905,7 @@ export const claimWrite = mutation({
         const expiredReplica = await ctx.db.get(request.replicaId);
         if (expiredReplica) await ctx.db.patch(expiredReplica._id, { state: "error", errorCode: "write-expired", errorAt: now, retryAt: undefined, updatedAt: now });
         await failStorageTransitionForRequest(ctx, request, "write-expired", now);
+        await enqueueNativeOutbox(ctx, request.workId, "materialize");
         continue;
       }
       const payloadId = ctx.db.normalizeId("payloadObjects", request.payloadRef);
@@ -2738,7 +2739,8 @@ export const waitingForDisk = query({
       if (summary.status !== "active" && summary.status !== "draft") continue;
       const projection = (summary.projection ?? {}) as { nativeFormat?: string; storageHome?: string; resourceClass?: string };
       if (projection.storageHome === "device" || projection.resourceClass === "resource") continue;
-      if (!PACKAGE_TYPES.has(summary.blueprintKey) && !isOfficeFormat(projection.nativeFormat ?? "")) continue;
+      // A document made in Spectra goes to disk as a Word file (/api/spectra/native).
+      if (!PACKAGE_TYPES.has(summary.blueprintKey) && summary.blueprintKey !== "document" && !isOfficeFormat(projection.nativeFormat ?? "")) continue;
       const locals = await ctx.db.query("workReplicas").withIndex("by_work_kind", (q) => q.eq("workId", summary.artifactId).eq("kind", "local")).take(20);
       if (locals.some((replica) => replica.deviceId === device._id)) continue;
       const node = await findPrimaryNode(ctx, actor.accountId, "work", String(summary.artifactId));

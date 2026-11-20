@@ -10,13 +10,23 @@
 export type EquationNode =
   | { kind: "text"; value: string }
   | { kind: "sequence"; children: EquationNode[] }
-  | { kind: "fraction"; numerator: EquationNode; denominator: EquationNode }
+  /** `bar: false` is a stacked pair with no line, as a binomial coefficient is set. */
+  | { kind: "fraction"; numerator: EquationNode; denominator: EquationNode; bar?: false }
   | { kind: "root"; degree?: EquationNode; body: EquationNode }
   | { kind: "script"; base: EquationNode; sub?: EquationNode; sup?: EquationNode }
   | { kind: "operator"; value: string; sub?: EquationNode; sup?: EquationNode; body?: EquationNode }
-  | { kind: "function"; name: string; argument?: EquationNode }
+  /** A named function; `sub`/`sup` dress its name (log₂, sin²); a limit-like name sets `sub` under it. */
+  | { kind: "function"; name: string; argument?: EquationNode; sub?: EquationNode; sup?: EquationNode }
   | { kind: "delimiter"; left: string; right: string; body: EquationNode }
   | { kind: "matrix"; rows: EquationNode[][]; aligned: boolean; delimiter?: { left: string; right: string } }
+  /** One character set over or under an expression: Word's group character. */
+  | { kind: "group"; char: string; position: "top" | "bot"; base: EquationNode }
+  /** A mark set over an expression: Word's accent (x̂, ẋ, a⃗). */
+  | { kind: "accent"; char: string; base: EquationNode }
+  /** A line over or under an expression: Word's bar. */
+  | { kind: "bar"; position: "top" | "bot"; base: EquationNode }
+  /** A box drawn around an expression: Word's border box. */
+  | { kind: "box"; body: EquationNode }
   | { kind: "raw"; latex: string };
 
 export type EquationInterchange = {
@@ -49,6 +59,15 @@ const operators: Readonly<Record<string, string>> = {
   coprod: "∐",
   bigcup: "⋃",
   bigcap: "⋂",
+  bigvee: "⋁",
+  bigwedge: "⋀",
+  bigoplus: "⨁",
+  bigotimes: "⨂",
+  bigodot: "⨀",
+  biguplus: "⨄",
+  bigsqcup: "⨆",
+  oiint: "∯",
+  oiiint: "∰",
 };
 
 const operatorNames = new Map(Object.entries(operators).map(([name, value]) => [value, name]));
@@ -56,8 +75,11 @@ const operatorNames = new Map(Object.entries(operators).map(([name, value]) => [
 const functions = new Set([
   "sin", "cos", "tan", "cot", "sec", "csc", "sinh", "cosh", "tanh",
   "log", "ln", "exp", "min", "max", "det", "gcd", "lim", "arcsin", "arccos", "arctan",
-  "coth", "sup", "inf", "arg", "deg", "dim", "ker", "Pr",
+  "coth", "sup", "inf", "arg", "deg", "dim", "ker", "Pr", "csch", "sech", "lg", "hom", "limsup", "liminf",
 ]);
+
+/** Names whose subscript Word sets under the name, as a limit is: lim over x→0. */
+const LIMIT_FUNCTIONS = new Set(["lim", "max", "min", "sup", "inf", "limsup", "liminf", "det", "gcd", "Pr"]);
 
 const symbols: Readonly<Record<string, string>> = {
   alpha: "α", beta: "β", gamma: "γ", delta: "δ", epsilon: "ϵ", varepsilon: "ε",
@@ -78,6 +100,26 @@ const symbols: Readonly<Record<string, string>> = {
   rightleftharpoons: "⇌", ast: "∗", star: "⋆", bullet: "∙", prime: "′", hbar: "ℏ", ell: "ℓ",
   Re: "ℜ", Im: "ℑ", aleph: "ℵ", wedge: "∧", vee: "∨", oplus: "⊕", otimes: "⊗", setminus: "∖",
   cdots: "⋯", vdots: "⋮", ddots: "⋱", lt: "<", gt: ">", degree: "°", dagger: "†",
+  backslash: "\\",
+  // Relations, negated relations and arrows.
+  nless: "≮", ngtr: "≯", nleq: "≰", ngeq: "≱", nsubseteq: "⊈", nsupseteq: "⊉", nsim: "≁", ncong: "≇",
+  nparallel: "∦", nmid: "∤", mid: "∣", prec: "≺", succ: "≻", preceq: "⪯", succeq: "⪰",
+  asymp: "≍", doteq: "≐", models: "⊨", vdash: "⊢", dashv: "⊣", bowtie: "⋈", coloneqq: "≔",
+  leqslant: "⩽", geqslant: "⩾", lesssim: "≲", gtrsim: "≳", subsetneq: "⊊", supsetneq: "⊋",
+  Longrightarrow: "⟹", Longleftarrow: "⟸", Longleftrightarrow: "⟺", iff: "⟺", implies: "⟹", impliedby: "⟸",
+  Uparrow: "⇑", Downarrow: "⇓", Updownarrow: "⇕", updownarrow: "↕", nearrow: "↗", searrow: "↘",
+  nwarrow: "↖", swarrow: "↙", hookrightarrow: "↪", hookleftarrow: "↩", leftharpoonup: "↼",
+  rightharpoonup: "⇀", leftharpoondown: "↽", rightharpoondown: "⇁", leftrightharpoons: "⇋",
+  rightleftarrows: "⇄", leftrightarrows: "⇆", longmapsto: "⟼", gets: "←", nrightarrow: "↛", nleftarrow: "↚",
+  // Operators and letter-like symbols.
+  sqcup: "⊔", sqcap: "⊓", uplus: "⊎", ominus: "⊖", odot: "⊙", oslash: "⊘", amalg: "⨿", wr: "≀",
+  diamond: "⋄", bigcirc: "◯", lnot: "¬", top: "⊤", bot: "⊥", complement: "∁", mho: "℧", wp: "℘",
+  beth: "ℶ", gimel: "ℷ", daleth: "ℸ", imath: "ı", jmath: "ȷ", eth: "ð", S: "§", P: "¶",
+  copyright: "©", pounds: "£", euro: "€", checkmark: "✓", varkappa: "ϰ", digamma: "ϝ",
+  // Geometry.
+  measuredangle: "∡", sphericalangle: "∢", square: "□", blacksquare: "■", lozenge: "◊",
+  bigtriangleup: "△", bigtriangledown: "▽", triangleleft: "◁", triangleright: "▷", Box: "□",
+  smile: "⌣", frown: "⌢", cdotp: "⋅", colon: ":", triangleq: "≜",
 };
 
 const escapedSymbols: Readonly<Record<string, string>> = {
@@ -104,6 +146,12 @@ const delimiterCommands: Readonly<Record<string, string>> = {
   rceil: "⌉",
   lfloor: "⌊",
   rfloor: "⌋",
+  lbrack: "[",
+  rbrack: "]",
+  lparen: "(",
+  rparen: ")",
+  lgroup: "(",
+  rgroup: ")",
 };
 
 function escapeXml(value: string) {
@@ -137,7 +185,13 @@ function toOmml(node: EquationNode): string {
     case "sequence":
       return node.children.map(toOmml).join("");
     case "fraction":
-      return `<m:f><m:fPr><m:type m:val="bar"/></m:fPr>${slot("num", node.numerator)}${slot("den", node.denominator)}</m:f>`;
+      return `<m:f><m:fPr><m:type m:val="${node.bar === false ? "noBar" : "bar"}"/></m:fPr>${slot("num", node.numerator)}${slot("den", node.denominator)}</m:f>`;
+    case "accent":
+      return `<m:acc><m:accPr><m:chr m:val="${escapeXml(node.char)}"/></m:accPr>${slot("e", node.base)}</m:acc>`;
+    case "bar":
+      return `<m:bar><m:barPr><m:pos m:val="${node.position}"/></m:barPr>${slot("e", node.base)}</m:bar>`;
+    case "box":
+      return `<m:borderBox><m:borderBoxPr/>${slot("e", node.body)}</m:borderBox>`;
     case "root":
       return `<m:rad><m:radPr><m:degHide m:val="${node.degree ? "0" : "1"}"/></m:radPr>${slot("deg", node.degree)}${slot("e", node.body)}</m:rad>`;
     case "script": {
@@ -149,18 +203,31 @@ function toOmml(node: EquationNode): string {
           : slot("sup", node.sup);
       return `<m:${tag}>${slot("e", node.base)}${scripts}</m:${tag}>`;
     }
-    case "function":
-      return `<m:func><m:funcPr/><m:fName>${text(node.name)}</m:fName>${slot("e", node.argument)}</m:func>`;
+    case "function": {
+      const name = text(node.name);
+      const dressed = node.sub && !node.sup && LIMIT_FUNCTIONS.has(node.name)
+        ? `<m:limLow><m:limLowPr/><m:e>${name}</m:e>${slot("lim", node.sub)}</m:limLow>`
+        : node.sub && node.sup
+          ? `<m:sSubSup><m:e>${name}</m:e>${slot("sub", node.sub)}${slot("sup", node.sup)}</m:sSubSup>`
+          : node.sub
+            ? `<m:sSub><m:e>${name}</m:e>${slot("sub", node.sub)}</m:sSub>`
+            : node.sup
+              ? `<m:sSup><m:e>${name}</m:e>${slot("sup", node.sup)}</m:sSup>`
+              : name;
+      return `<m:func><m:funcPr/><m:fName>${dressed}</m:fName>${slot("e", node.argument)}</m:func>`;
+    }
     case "operator":
       return `<m:nary><m:naryPr><m:chr m:val="${escapeXml(node.value)}"/><m:limLoc m:val="undOvr"/></m:naryPr>${slot("sub", node.sub)}${slot("sup", node.sup)}${slot("e", node.body)}</m:nary>`;
     case "delimiter":
-      return `<m:d><m:dPr><m:begChr m:val="${escapeXml(node.left || ".")}"/><m:endChr m:val="${escapeXml(node.right || ".")}"/></m:dPr>${slot("e", node.body)}</m:d>`;
+      return `<m:d><m:dPr><m:begChr m:val="${escapeXml(node.left)}"/><m:endChr m:val="${escapeXml(node.right)}"/></m:dPr>${slot("e", node.body)}</m:d>`;
+    case "group":
+      return `<m:groupChr><m:groupChrPr><m:chr m:val="${escapeXml(node.char)}"/><m:pos m:val="${node.position}"/><m:vertJc m:val="${node.position === "top" ? "bot" : "top"}"/></m:groupChrPr>${slot("e", node.base)}</m:groupChr>`;
     case "matrix": {
       const matrix = node.aligned
         ? `<m:eqArr><m:eqArrPr/>${node.rows.map((row) => `<m:e>${alignedRowToOmml(row)}</m:e>`).join("")}</m:eqArr>`
         : `<m:m><m:mPr/>${node.rows.map((row) => `<m:mr>${row.map((cell) => slot("e", cell)).join("")}</m:mr>`).join("")}</m:m>`;
       if (!node.delimiter) return matrix;
-      return `<m:d><m:dPr><m:begChr m:val="${escapeXml(node.delimiter.left || ".")}"/><m:endChr m:val="${escapeXml(node.delimiter.right || ".")}"/></m:dPr><m:e>${matrix}</m:e></m:d>`;
+      return `<m:d><m:dPr><m:begChr m:val="${escapeXml(node.delimiter.left)}"/><m:endChr m:val="${escapeXml(node.delimiter.right)}"/></m:dPr><m:e>${matrix}</m:e></m:d>`;
     }
   }
 }
@@ -171,16 +238,50 @@ type Stop = "group" | "degree" | "cell" | "row" | "right" | "environment";
 const ACCENTS: Readonly<Record<string, string>> = {
   hat: "\u0302", widehat: "\u0302", bar: "\u0304", overline: "\u0305", underline: "\u0332", vec: "\u20D7",
   overrightarrow: "\u20D7", dot: "\u0307", ddot: "\u0308", tilde: "\u0303", widetilde: "\u0303", acute: "\u0301", grave: "\u0300",
+  check: "\u030C", breve: "\u0306", dddot: "\u20DB", mathring: "\u030A", overleftarrow: "\u20D6", overleftrightarrow: "\u20E1",
 };
 
-function accented(node: EquationNode, mark: string): EquationNode {
-  if (node.kind === "text") return { kind: "text", value: [...node.value].map((char) => (/\s/u.test(char) ? char : char + mark)).join("") };
-  if (node.kind === "sequence") return { kind: "sequence", children: node.children.map((child) => accented(child, mark)) };
-  return node;
-}
+
+/** The command that writes each accent mark, for the way back to LaTeX. */
+const ACCENT_COMMANDS: Readonly<Record<string, string>> = {
+  "\u0302": "hat", "\u0304": "bar", "\u0305": "bar", "\u20D7": "vec", "\u0307": "dot", "\u0308": "ddot", "\u0303": "tilde",
+  "\u0301": "acute", "\u0300": "grave", "\u030C": "check", "\u0306": "breve", "\u20DB": "dddot", "\u030A": "mathring",
+  "\u20D6": "overleftarrow", "\u20E1": "overleftrightarrow",
+};
 
 const NO_EFFECT_COMMANDS = new Set(["displaystyle", "textstyle", "scriptstyle", "scriptscriptstyle", "limits", "nolimits", "displaylimits", "big", "Big", "bigg", "Bigg", "bigl", "bigr", "Bigl", "Bigr", "biggl", "biggr", "Biggl", "Biggr", "mathstrut", "strut", "nonumber"]);
-const STYLE_COMMANDS = new Set(["mathbf", "mathit", "mathsf", "mathtt", "mathbb", "mathcal", "mathfrak", "mathscr", "boldsymbol", "bm", "textbf", "textit", "textsf", "texttt", "boxed"]);
+const STYLE_COMMANDS = new Set(["mathbin", "mathrel", "mathord", "mathop", "mathpunct", "mathopen", "mathclose", "mathbf", "mathit", "mathsf", "mathtt", "mathbb", "mathcal", "mathfrak", "mathscr", "boldsymbol", "bm", "textbf", "textit", "textsf", "texttt"]);
+
+const DOUBLE_STRUCK: Readonly<Record<string, string>> = {
+  C: "ℂ", H: "ℍ", N: "ℕ", P: "ℙ", Q: "ℚ", R: "ℝ", Z: "ℤ", ...Object.fromEntries(
+    [..."ABDEFGIJKLMOSTUVWXY"].map((letter) => [letter, String.fromCodePoint(0x1d538 + letter.charCodeAt(0) - 65)]),
+  ),
+};
+
+const OPERATOR_NAME = /^[A-Za-z]{1,12}$/u;
+
+/** The text a node spells when it holds nothing but text. */
+function plainText(node: EquationNode): string | undefined {
+  if (node.kind === "text") return node.value;
+  if (node.kind !== "sequence") return undefined;
+  let value = "";
+  for (const child of node.children) {
+    const part = plainText(child);
+    if (part === undefined) return undefined;
+    value += part;
+  }
+  return value;
+}
+
+/** The bracket each matrix environment draws; cases opens a brace and closes none. */
+const MATRIX_DELIMITERS: Readonly<Record<string, { left: string; right: string }>> = {
+  pmatrix: { left: "(", right: ")" },
+  bmatrix: { left: "[", right: "]" },
+  Bmatrix: { left: "{", right: "}" },
+  vmatrix: { left: "|", right: "|" },
+  Vmatrix: { left: "‖", right: "‖" },
+  cases: { left: "{", right: "" },
+};
 
 class EquationParseError extends Error {
   constructor(message: string) {
@@ -268,7 +369,12 @@ class LatexParser {
       this.skipWhitespace();
       if (this.atEnd() || this.isStop(stops, environment)) break;
       if (this.peek() === "}") this.fail(`unexpected } at offset ${this.index}`);
-      if (this.peek() === "]") this.fail(`unexpected ] at offset ${this.index}`);
+      // A bracket outside a root's degree is the bracket itself, as in [a,b].
+      if (this.peek() === "]") {
+        this.consume();
+        children.push({ kind: "text", value: "]" });
+        continue;
+      }
       if (this.peek() === "&") this.fail(`unexpected & at offset ${this.index}`);
       if (this.starts(String.raw`\\`)) this.fail(`unexpected row break at offset ${this.index}`);
       children.push(this.atom());
@@ -280,6 +386,21 @@ class LatexParser {
     if (this.peek() !== "\\") return "";
     const rest = this.source.slice(this.index + 1);
     return rest.match(/^[A-Za-z]+/u)?.[0] ?? rest[0] ?? "";
+  }
+
+  /**
+   * A command's argument: a braced group, or (as TeX allows and MathLive
+   * writes, `\frac12`) a single character or command.
+   */
+  private argument(): EquationNode {
+    this.skipWhitespace();
+    if (this.peek() === "{") return this.group();
+    if (this.atEnd() || "}]&^_".includes(this.peek())) this.fail(`missing argument at offset ${this.index}`);
+    this.bump();
+    if (this.peek() === "\\") return this.command();
+    const value = this.peek();
+    this.consume();
+    return { kind: "text", value };
   }
 
   private group(): EquationNode {
@@ -341,7 +462,7 @@ class LatexParser {
       return value;
     }
     const value = this.peek();
-    if (!"()[]{}|‖⟨⟩⌈⌉⌊⌋".includes(value))
+    if (!"()[]{}|‖⟨⟩〈〉〈〉⌈⌉⌊⌋".includes(value))
       this.fail(`unsupported ${side} delimiter ${JSON.stringify(value)}`);
     this.consume();
     return value;
@@ -362,7 +483,7 @@ class LatexParser {
   }
 
   private parseEnvironment(environment: string): EquationNode {
-    const supported = new Set(["matrix", "pmatrix", "bmatrix", "aligned", "align"]);
+    const supported = new Set(["matrix", "pmatrix", "bmatrix", "Bmatrix", "vmatrix", "Vmatrix", "aligned", "align", "cases", "gathered"]);
     if (!supported.has(environment)) {
       const end = `\\end{${environment}}`;
       const start = this.index;
@@ -411,15 +532,11 @@ class LatexParser {
       while (rows.length > 1 && rows.at(-1)!.length === 0) rows.pop();
       if (!sawContent)
         this.fail(`empty ${environment} environment at offset ${this.index}`);
-      const delimiter = environment === "pmatrix"
-        ? { left: "(", right: ")" }
-        : environment === "bmatrix"
-          ? { left: "[", right: "]" }
-          : undefined;
+      const delimiter = MATRIX_DELIMITERS[environment];
       return {
         kind: "matrix",
         rows,
-        aligned: environment === "aligned" || environment === "align",
+        aligned: ["aligned", "align", "cases", "gathered"].includes(environment),
         ...(delimiter ? { delimiter } : {}),
       };
     } finally {
@@ -456,7 +573,14 @@ class LatexParser {
   private command(): EquationNode {
     const commandStart = this.index;
     const name = this.readCommandName();
-    if (name === "frac") return { kind: "fraction", numerator: this.group(), denominator: this.group() };
+    if (name === "frac") return { kind: "fraction", numerator: this.argument(), denominator: this.argument() };
+    if (name === "binom" || name === "dbinom" || name === "tbinom")
+      return { kind: "delimiter", left: "(", right: ")", body: { kind: "fraction", numerator: this.argument(), denominator: this.argument(), bar: false } };
+    if (name === "boxed") return { kind: "box", body: this.peek() === "{" ? this.group() : this.atom() };
+    if (name === "overbrace" || name === "underbrace") {
+      const base = this.peek() === "{" ? this.group() : this.atom();
+      return { kind: "group", char: name === "overbrace" ? "⏞" : "⏟", position: name === "overbrace" ? "top" : "bot", base };
+    }
     if (name === "sqrt") {
       const degree = this.optionalDegree();
       const body = this.peek() === "{" ? this.group() : this.atom();
@@ -481,37 +605,76 @@ class LatexParser {
     }
     if (name === "right") this.fail(`unexpected \\right at offset ${commandStart}`);
     if (name === "begin") return this.parseEnvironment(this.groupText());
+    if (name === "underset" || name === "overset") {
+      const mark = this.argument();
+      const base = this.argument();
+      const char = plainText(mark);
+      if (char === undefined || [...char].length !== 1) {
+        this.diagnostics.push(`unsupported command \\${name}`);
+        return { kind: "raw", latex: this.source.slice(commandStart, this.index) };
+      }
+      return { kind: "group", char, position: name === "overset" ? "top" : "bot", base };
+    }
     if (name === "text" || name === "mathrm") {
       const value = this.groupTextLiteral();
       return { kind: "text", value };
     }
     if (name === "operatorname") {
       const value = this.groupTextLiteral();
-      if (!functions.has(value)) {
+      // Any short name is an operator Word sets upright (Var, rank, ker L).
+      if (!functions.has(value) && !OPERATOR_NAME.test(value)) {
         this.diagnostics.push(`unsupported function \\operatorname{${value}}`);
         return { kind: "raw", latex: `\\operatorname{${value}}` };
       }
-      return { kind: "function", name: value };
+      return this.functionNode(value);
     }
-    if (functions.has(name)) {
-      const argument = this.canStartFunctionArgument()
-        ? (this.peek() === "{" ? this.group() : this.atom())
-        : undefined;
-      return { kind: "function", name, ...(argument ? { argument } : {}) };
-    }
+    if (functions.has(name)) return this.functionNode(name);
     if (name === "," || name === ";" || name === ":" || name === "!" || name === " ")
       return { kind: "text", value: " " };
     if (name === "quad") return { kind: "text", value: "\u2003" };
     if (name === "qquad") return { kind: "text", value: "\u2003\u2003" };
     // Word sets these itself or has no equal: the symbols they dress still read true.
     if (NO_EFFECT_COMMANDS.has(name)) return { kind: "text", value: "" };
+    if (name === "mathbb" && this.peek() === "{") {
+      // Blackboard letters are characters of their own, which Word draws as such.
+      const start = this.index;
+      const value = this.groupTextLiteral();
+      if ([...value].every((character) => DOUBLE_STRUCK[character])) return { kind: "text", value: [...value].map((character) => DOUBLE_STRUCK[character]).join("") };
+      this.index = start;
+    }
     if (STYLE_COMMANDS.has(name)) return this.peek() === "{" ? this.group() : this.atom();
-    if (ACCENTS[name]) return accented(this.peek() === "{" ? this.group() : this.atom(), ACCENTS[name]!);
-    if (name === "dfrac" || name === "tfrac") return { kind: "fraction", numerator: this.group(), denominator: this.group() };
+    if (name === "overline" || name === "underline")
+      return { kind: "bar", position: name === "overline" ? "top" : "bot", base: this.peek() === "{" ? this.group() : this.atom() };
+    if (ACCENTS[name]) return { kind: "accent", char: ACCENTS[name]!, base: this.peek() === "{" ? this.group() : this.atom() };
+    if (name === "dfrac" || name === "tfrac") return { kind: "fraction", numerator: this.argument(), denominator: this.argument() };
     if (escapedSymbols[name] !== undefined) return { kind: "text", value: escapedSymbols[name]! };
     if (symbols[name]) return { kind: "text", value: symbols[name]! };
     this.diagnostics.push(`unsupported command \\${name}`);
     return { kind: "raw", latex: this.source.slice(commandStart, this.index) };
+  }
+
+  /** A function name, the scripts that dress it, then what it applies to. */
+  private functionNode(name: string): EquationNode {
+    let sub: EquationNode | undefined;
+    let sup: EquationNode | undefined;
+    this.skipMathSpacing();
+    while (this.peek() === "_" || this.peek() === "^") {
+      const marker = this.peek();
+      this.consume();
+      const value = this.peek() === "{" ? this.group() : this.atom();
+      if (marker === "_") {
+        if (sub) this.fail(`duplicate subscript at offset ${this.index}`);
+        sub = value;
+      } else {
+        if (sup) this.fail(`duplicate superscript at offset ${this.index}`);
+        sup = value;
+      }
+      this.skipMathSpacing();
+    }
+    const argument = this.canStartFunctionArgument()
+      ? (this.peek() === "{" ? this.group() : this.atom())
+      : undefined;
+    return { kind: "function", name, ...(sub ? { sub } : {}), ...(sup ? { sup } : {}), ...(argument ? { argument } : {}) };
   }
 
   private groupTextLiteral() {
@@ -540,10 +703,9 @@ class LatexParser {
     if (this.peek() === "{") node = this.group();
     else if (this.peek() === "\\") node = this.command();
     else {
-      if (this.peek() === "[") this.fail(`unexpected [ at offset ${this.index}`);
       const value = this.peek();
       this.consume();
-      node = { kind: "text", value };
+      node = { kind: "text", value: value === "'" ? "′" : value };
     }
     this.bump();
     node = this.peek() === "_" || this.peek() === "^" ? this.script(node) : node;
@@ -622,20 +784,38 @@ export function isEquationLatexSupported(latex: string) {
   return latexToEquation(latex).supported;
 }
 
+/** Characters LaTeX reads as syntax, written so they read as themselves. */
+function latexText(value: string) {
+  return value.replace(/[\\{}%#&]/gu, (character) => (character === "\\" ? String.raw`\backslash{}` : `\\${character}`));
+}
+
 /** Stable source form for parser/OMML corpus assertions and diagnostics. */
+
 export function equationNodeToLatex(node: EquationNode): string {
   switch (node.kind) {
-    case "text": return node.value;
+    case "text": return latexText(node.value);
     case "raw": return node.latex;
     case "sequence": return node.children.map(equationNodeToLatex).join("");
-    case "fraction": return `\\frac{${equationNodeToLatex(node.numerator)}}{${equationNodeToLatex(node.denominator)}}`;
+    case "fraction": return `\\${node.bar === false ? "binom" : "frac"}{${equationNodeToLatex(node.numerator)}}{${equationNodeToLatex(node.denominator)}}`;
+    case "accent": return `\\${ACCENT_COMMANDS[node.char] ?? "hat"}{${equationNodeToLatex(node.base)}}`;
+    case "bar": return `\\${node.position === "top" ? "overline" : "underline"}{${equationNodeToLatex(node.base)}}`;
+    case "box": return `\\boxed{${equationNodeToLatex(node.body)}}`;
     case "root": return node.degree ? `\\sqrt[${equationNodeToLatex(node.degree)}]{${equationNodeToLatex(node.body)}}` : `\\sqrt{${equationNodeToLatex(node.body)}}`;
     case "script": return `{${equationNodeToLatex(node.base)}}${node.sub ? `_{${equationNodeToLatex(node.sub)}}` : ""}${node.sup ? `^{${equationNodeToLatex(node.sup)}}` : ""}`;
     case "operator": return `${operatorNames.has(node.value) ? `\\${operatorNames.get(node.value)}${node.sub || node.sup ? "" : " "}` : node.value}${node.sub ? `_{${equationNodeToLatex(node.sub)}}` : ""}${node.sup ? `^{${equationNodeToLatex(node.sup)}}` : ""}${node.body ? `{${equationNodeToLatex(node.body)}}` : ""}`;
-    case "function": return `\\${node.name}${node.argument ? `{${equationNodeToLatex(node.argument)}}` : " "}`;
-    case "delimiter": return `\\left${latexDelimiterToken(node.left || ".")}${equationNodeToLatex(node.body)}\\right${latexDelimiterToken(node.right || ".")}`;
+    case "function": return `${functions.has(node.name) ? `\\${node.name}` : `\\operatorname{${node.name}}`}${node.sub ? `_{${equationNodeToLatex(node.sub)}}` : ""}${node.sup ? `^{${equationNodeToLatex(node.sup)}}` : ""}${node.argument ? `{${equationNodeToLatex(node.argument)}}` : " "}`;
+    case "delimiter":
+      if (node.left === "(" && node.right === ")" && node.body.kind === "fraction" && node.body.bar === false)
+        return `\\binom{${equationNodeToLatex(node.body.numerator)}}{${equationNodeToLatex(node.body.denominator)}}`;
+      return `\\left${latexDelimiterToken(node.left || ".")}${equationNodeToLatex(node.body)}\\right${latexDelimiterToken(node.right || ".")}`;
+    case "group":
+      if (node.char === "⏞" && node.position === "top") return `\\overbrace{${equationNodeToLatex(node.base)}}`;
+      if (node.char === "⏟" && node.position === "bot") return `\\underbrace{${equationNodeToLatex(node.base)}}`;
+      return `\\${node.position === "top" ? "overset" : "underset"}{${latexText(node.char)}}{${equationNodeToLatex(node.base)}}`;
     case "matrix": {
-      const environment = node.aligned ? "aligned" : node.delimiter?.left === "(" ? "pmatrix" : node.delimiter?.left === "[" ? "bmatrix" : "matrix";
+      const environment = node.aligned
+        ? (node.delimiter?.left === "{" && !node.delimiter.right ? "cases" : "aligned")
+        : Object.entries(MATRIX_DELIMITERS).find(([name, pair]) => name !== "cases" && pair.left === node.delimiter?.left && pair.right === node.delimiter?.right)?.[0] ?? "matrix";
       return `\\begin{${environment}}${node.rows.map((row) => row.map(equationNodeToLatex).join(" & ")).join(String.raw` \\ `)}\\end{${environment}}`;
     }
   }

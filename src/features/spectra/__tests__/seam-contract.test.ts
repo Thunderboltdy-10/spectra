@@ -153,10 +153,14 @@ describe("L1 production seam — Part III–V CRITICAL", () => {
         Boolean(block.attrs?.format),
     )!;
     const previous = target.attrs?.format as DocxRunFormat;
+    // The paragraph's style may already be bold: toggle what the reader sees.
+    const styles = opened.projection.styles;
+    const style = styles?.paragraph[String(target.attrs?.nativeStyleId ?? target.attrs?.styleId ?? styles.defaultStyleId)];
+    const bold = !(previous.bold ?? style?.bold ?? false);
     const formatted = await docxLens.mutate(opened.preservedCarry, {
       kind: "format-runs",
       regionId: target.id,
-      format: { ...previous, bold: !previous.bold },
+      format: { ...previous, bold },
     });
     const diff = await docxLens.diffExternal(source, formatted);
     expect(diff.changes).toEqual(
@@ -171,9 +175,9 @@ describe("L1 production seam — Part III–V CRITICAL", () => {
       external.projection,
     );
     expect(merged.conflicts).toEqual([]);
-    const mergedFormat = merged.projection.blocks.find((block) => block.id === target.id)
-      ?.attrs?.format as DocxRunFormat;
-    expect(mergedFormat.bold).toBe(!previous.bold);
+    const mergedBlock = merged.projection.blocks.find((block) => block.id === target.id);
+    expect(mergedBlock).toEqual(external.projection.blocks.find((block) => block.id === target.id));
+    expect((mergedBlock?.attrs?.format as DocxRunFormat).bold ?? style?.bold ?? false).toBe(bold);
   });
 
   it("DOC-3 stale-base overwrite is a merge, not a silent clobber", async () => {

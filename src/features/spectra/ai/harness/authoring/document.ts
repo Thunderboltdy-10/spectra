@@ -5,6 +5,7 @@ import {
 import {
   KEEP_MARKER,
   expressibleInMarkdown,
+  isWrittenMark,
   keepMarker,
   parseBlocks,
   serializeBlock,
@@ -67,8 +68,19 @@ export function documentOutline(doc: PmNode) {
   );
 }
 
-/** Marks Markdown writes itself; anything else (a font, a colour) it cannot say. */
-const WRITTEN_MARKS = new Set(["link", "bold", "italic", "strike", "highlight", "underline", "code"]);
+/**
+ * Marks that sit together on a run: a colour the Markdown wrote and a Word font
+ * the words already had share one text-style mark, as the editor keeps them.
+ */
+function combineMarks(written: readonly PmMark[], kept: readonly PmMark[]): PmMark[] {
+  const out = [...written];
+  for (const mark of kept) {
+    const same = out.findIndex((other) => other.type === mark.type);
+    if (same < 0) out.push(mark);
+    else if (mark.type === "textStyle") out[same] = { ...mark, attrs: { ...(mark.attrs ?? {}), ...(out[same]!.attrs ?? {}) } };
+  }
+  return out;
+}
 
 function textNodes(node: PmNode): PmNode[] {
   return node.type === "text" ? [node] : (node.content ?? []).flatMap(textNodes);
@@ -80,7 +92,7 @@ function wholeUnwrittenMarks(node: PmNode) {
   if (!texts.length) return [];
   return (texts[0]!.marks ?? []).filter(
     (mark) =>
-      !WRITTEN_MARKS.has(mark.type) &&
+      !isWrittenMark(mark) &&
       texts.every((text) => text.marks?.some((other) => JSON.stringify(other) === JSON.stringify(mark))),
   );
 }
@@ -90,14 +102,14 @@ function withWholeMarks(node: PmNode, marks: readonly PmMark[]): PmNode {
   if (!marks.length) return node;
   if (node.type === "text") {
     const own = node.marks ?? [];
-    const added = marks.filter((mark) => !own.some((other) => other.type === mark.type));
-    return added.length ? { ...node, marks: [...own, ...added] } : node;
+    const combined = combineMarks(own, marks);
+    return JSON.stringify(combined) === JSON.stringify(own) ? node : { ...node, marks: combined };
   }
   return node.content ? { ...node, content: node.content.map((child) => withWholeMarks(child, marks)) } : node;
 }
 
 const unwrittenMarks = (marks: readonly PmMark[] | undefined) =>
-  (marks ?? []).filter((mark) => !WRITTEN_MARKS.has(mark.type));
+  (marks ?? []).filter((mark) => !isWrittenMark(mark));
 
 /**
  * A small edit to a block with several looks, like a heading in two colours.
@@ -127,9 +139,9 @@ function withLookOfOldWords(next: PmNode, old: PmNode): PmNode {
   const content: PmNode[] = [];
   let at = 0;
   for (const run of next.content) {
-    const written = (run.marks ?? []).filter((mark) => WRITTEN_MARKS.has(mark.type));
+    const written = (run.marks ?? []).filter(isWrittenMark);
     for (const char of Array.from(run.text ?? "")) {
-      const marks = [...written, ...lookAt(at)];
+      const marks = combineMarks(written, lookAt(at));
       at += 1;
       const last = content[content.length - 1];
       if (last && JSON.stringify(last.marks ?? []) === JSON.stringify(marks)) last.text = `${last.text}${char}`;
@@ -139,11 +151,68 @@ function withLookOfOldWords(next: PmNode, old: PmNode): PmNode {
   return { ...next, content };
 }
 
+/**
+ * What the Markdown shows of a block (its alignment, being a caption) is what
+ * it is: a rewrite that leaves {.center} out makes the block left-aligned again.
+ */
+function shownAttributesCleared(old: PmNode, next: PmNode): Record<string, unknown> {
+  const cleared: Record<string, unknown> = {};
+  const align = old.attrs?.textAlign;
+  if (typeof align === "string" && ["center", "right", "justify"].includes(align) && !next.attrs?.textAlign) cleared.textAlign = null;
+  if (next.type === "paragraph" && !next.attrs?.blockStyle) {
+    if (old.attrs?.blockStyle === "caption") cleared.blockStyle = null;
+    if (old.attrs?.styleId === "Caption") cleared.styleId = null;
+  }
+  return cleared;
+}
+
+/** [[toc]] becomes a contents list of the headings written after it, as the Contents button makes one. */
+function withContents(nodes: PmNode[]): PmNode[] {
+  const at = nodes.findIndex((node) => node.type === "__toc");
+  if (at < 0) return nodes;
+  const headings = nodes.slice(at + 1).filter((node) => node.type === "heading");
+  const contents: PmNode[] = [
+    { type: "heading", attrs: { level: 2 }, content: [{ type: "text", text: "Contents" }] },
+    ...headings.map((heading) => {
+      const level = Number(heading.attrs?.level) || 1;
+      const title = headingText(heading);
+      return {
+        type: "paragraph",
+        ...(level > 1 ? { attrs: { indentLevel: level - 1 } } : {}),
+        ...(title ? { content: [{ type: "text", text: title }] } : {}),
+      };
+    }),
+  ];
+  return [...nodes.slice(0, at), ...contents, ...nodes.slice(at + 1).filter((node) => node.type !== "__toc")];
+}
+
+/** The paragraph style a document's Word styles call "caption", if it has one. */
+function captionStyleId(styles: unknown) {
+  const paragraph = record(record(styles).paragraph);
+  return Object.entries(paragraph).find(([, style]) => record(style).role === "caption")?.[0];
+}
+
+/**
+ * A caption written in a document with Word styles is a paragraph in its
+ * Caption style, so Word lists it as a caption; otherwise Spectra's own one.
+ */
+export function withCatalogueCaptions(nodes: PmNode[], styles: unknown): PmNode[] {
+  const id = captionStyleId(styles);
+  if (!id) return nodes;
+  return nodes.map((node) =>
+    node.type === "paragraph" && node.attrs?.blockStyle === "caption"
+      ? { ...node, attrs: { ...node.attrs, blockStyle: null, styleId: id } }
+      : node,
+  );
+}
+
 /** Builds document content from Markdown, reusing unchanged nodes of `previous`. */
 export function documentFromMarkdown(
   markdown: string,
   previous?: unknown,
   ids: IdFactory = defaultIdFactory(),
+  /** The Word styles a new document is created with. */
+  styles?: unknown,
 ) {
   const before = previous ? documentChunks(previous) : [];
   // Markdown does not always read back as it was written: a trailing line break
@@ -167,7 +236,7 @@ export function documentFromMarkdown(
   const used = new Set<string>();
   // Unchanged blocks are reused whole; the rest are written fresh for now.
   const entries: Array<{ node: PmNode; reused?: string }> = [];
-  const parsedBlocks = parseBlocks(markdown);
+  const parsedBlocks = withContents(parseBlocks(markdown));
   for (let at = 0; at < parsedBlocks.length; at += 1) {
     const parsed = parsedBlocks[at]!;
     if (parsed.type === "__keep") {
@@ -218,7 +287,7 @@ export function documentFromMarkdown(
     if (replaced) {
       used.add(replaced.id);
       lastAnchor = oldIndex.get(replaced.id) ?? lastAnchor;
-      const rewritten = { ...entry.node, attrs: { ...(replaced.node.attrs ?? {}), ...(entry.node.attrs ?? {}), blockId: replaced.id } };
+      const rewritten = { ...entry.node, attrs: { ...(replaced.node.attrs ?? {}), ...shownAttributesCleared(replaced.node, entry.node), ...(entry.node.attrs ?? {}), blockId: replaced.id } };
       nodes.push(withWholeMarks(withLookOfOldWords(rewritten, replaced.node), wholeUnwrittenMarks(replaced.node)));
       return;
     }
@@ -228,8 +297,8 @@ export function documentFromMarkdown(
     nodes.push({ ...entry.node, attrs: { ...(entry.node.attrs ?? {}), blockId: id } });
   });
   if (!nodes.length) nodes.push({ type: "paragraph", attrs: { blockId: ids("block") } });
-  const doc: PmNode & { content: PmNode[] } = { type: "doc", content: nodes };
   const base = record(previous);
+  const doc: PmNode & { content: PmNode[] } = { type: "doc", content: withCatalogueCaptions(nodes, base.styles ?? styles) };
   const { tiptap: _tiptap, blocks: _blocks, outline: _outline, ...rest } = base;
   return {
     ...rest,

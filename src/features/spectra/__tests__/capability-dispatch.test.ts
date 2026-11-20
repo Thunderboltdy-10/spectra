@@ -18,22 +18,22 @@ import {
 
 describe("P3.I3 dispatch and gate wiring", () => {
   it("refuses a no-delta native write even when the region reads NATIVE", () => {
-    const human = capabilityForLocalId("document", "insert.link")!.availability(
+    const human = capabilityForLocalId("document", "format.namedStyle.create")!.availability(
       commandContext("document", () => true, "edit", undefined, {
         compatibilityProfile: "strict-native",
-        fidelity: { hyperlinks: "NATIVE" },
+        fidelity: { styles: "NATIVE" },
       }),
     );
     expect(human.state).toBe("disabled");
     const reason =
       human.state === "disabled" ? human.reason : "";
-    expect(reason).toBe(DOCUMENT_NATIVE_REASONS.hyperlink);
+    expect(reason).toBe(DOCUMENT_NATIVE_REASONS.styleCreate);
 
     const gate = gateOperation({
       type: "document",
-      operation: "document.insert.link",
+      operation: "document.format.namedStyle.create",
       compatibilityProfile: "strict-native",
-      fidelity: { hyperlinks: "NATIVE" },
+      fidelity: { styles: "NATIVE" },
     });
     expect(gate).toEqual({ allowed: false, reason });
   });

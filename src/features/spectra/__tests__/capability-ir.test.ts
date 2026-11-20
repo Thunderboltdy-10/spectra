@@ -327,19 +327,18 @@ describe("Office formatting capability IR", () => {
     }
   });
 
-  it("refuses DOC-10 hyperlinks in strict-native even when the region reads native", () => {
+  it("writes DOC-10 hyperlinks in strict-native when the region reads native, and not otherwise", () => {
     const binding = SETS.find((entry) => entry.type === "document")!.bindings.find(
       (candidate) => candidate.id === "insert.link",
     )!;
-    const ctx = {
+    const context = (hyperlinks: "NATIVE" | "PRESERVED") => ({
       ...commandContext("document", () => true, "edit"),
       compatibilityProfile: "strict-native" as const,
-      fidelity: { hyperlinks: "NATIVE" as const, body: "NATIVE" as const },
-    };
-    expect(commandForBinding("document", binding, 0).availability(ctx)).toMatchObject({
-      state: "disabled",
-      reason: expect.stringContaining("hyperlinks"),
+      fidelity: { hyperlinks, body: "NATIVE" as const },
     });
+    expect(binding.nativeDelta).toBe("replace-paragraph");
+    expect(commandForBinding("document", binding, 0).availability(context("NATIVE")).state).toBe("enabled");
+    expect(commandForBinding("document", binding, 0).availability(context("PRESERVED")).state).toBe("disabled");
   });
 
   it("claims remaining Office lens deltas from the IR", () => {

@@ -2,6 +2,10 @@ import { z } from "zod";
 import { wordNoteContentSchema, wordNoteOperationSchemas, wordCommentBoundarySchema, wordRevisionInlineSchema, wordReviewOperationSchemas } from "./docx-academic-schema";
 import { wordCitationInlineSchema, wordBibliographyInlineSchema, wordCitationOperationSchemas, wordSourceSchema } from "./docx-citation-schema";
 
+/** How a table's lines are drawn: every line, the rows only, the outside only, or none. */
+export const DOCX_TABLE_LINES = ["grid", "horizontal", "outer", "none"] as const;
+export type DocxTableLines = (typeof DOCX_TABLE_LINES)[number];
+
 const compatibilityProfileSchema = z.enum([
   "strict-native",
   "enhanced",
@@ -155,6 +159,24 @@ export const docxRichInlineSchema = z.discriminatedUnion("kind", [
     .strict(),
   z
     .object({
+      /**
+       * A Word field Spectra does not model (a page number, a date, a
+       * cross-reference, a caption number…). It reads as what Word last showed
+       * and is written back exactly as it was, so the paragraph around it stays
+       * editable and Word keeps updating the field.
+       */
+      kind: z.literal("field"),
+      fieldId: z.string().min(1).max(300),
+      /** The field code, such as `PAGE`, `DATE \@ "d MMMM yyyy"` or `REF _Ref1 \h`. */
+      instruction: z.string().max(10_000),
+      /** The result Word last showed. */
+      text: z.string().max(100_000),
+      /** The field's own runs, begin to end, as Word wrote them. */
+      xml: z.string().max(64_000),
+    })
+    .strict(),
+  z
+    .object({
       kind: z.literal("noteRef"),
       noteType: z.enum(["footnote", "endnote"]),
       noteId: z.string().min(1).max(64),
@@ -264,6 +286,8 @@ export const docxProjectionSchema = z
           footer: z.string().max(4_000).optional(),
           firstHeader: z.string().max(4_000).optional(),
           firstFooter: z.string().max(4_000).optional(),
+          evenHeader: z.string().max(4_000).optional(),
+          evenFooter: z.string().max(4_000).optional(),
         }).strict().optional(),
         sectionIndex: z.number().int().nonnegative().optional(),
       })
@@ -355,6 +379,14 @@ export const docxOperationSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("delete-table-row"), regionId: z.string(), row: z.number().int().nonnegative() }).strict(),
   z.object({ kind: z.literal("insert-table-column"), regionId: z.string(), column: z.number().int().nonnegative().optional() }).strict(),
   z.object({ kind: z.literal("delete-table-column"), regionId: z.string(), column: z.number().int().nonnegative() }).strict(),
+  // A table's look: its lines, their colour and each cell's fill (one entry per Word cell, null for none).
+  z.object({
+    kind: z.literal("set-table-look"),
+    regionId: z.string(),
+    borders: z.enum(DOCX_TABLE_LINES).optional(),
+    borderColor: z.string().regex(/^[0-9A-F]{6}$/u).nullable().optional(),
+    cellShading: z.array(z.array(z.string().regex(/^[0-9A-F]{6}$/u).nullable()).max(64)).max(4_000).optional(),
+  }).strict(),
   z.object({
     kind: z.literal("update-image"),
     regionId: z.string(),

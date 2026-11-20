@@ -83,7 +83,7 @@ export function richInlineText(content) {
       if (item.kind === "noteRef") return "";
       if (item.kind === "commentBoundary") return "";
       if (item.kind === "revision") return item.revisionKind === "ins" ? item.text : "";
-      if (item.kind === "citation" || item.kind === "bibliography") return item.text;
+      if (item.kind === "citation" || item.kind === "bibliography" || item.kind === "field") return item.text;
       return item.altText;
     })
     .join("");
@@ -189,7 +189,10 @@ export function authoredSemanticValue(value, parentKey) {
         return [];
       if (key === "ommlXml" || key === "ommlSourceLatex" || key === "ommlRef") return [];
       if (source.kind === "citation" && key === "instruction") return [];
-      if (key === "nativePath" || key === "nativeReadOnly" || key === "nativeStyleId" || key === "readOnlyReason" || key === "number" || key === "cellStyles" || key === "cellShading" || key === "borders" || key === "cellPadding")
+      // A carried field's XML is how it is written back, not what it means.
+      // Its id is where Word reopens it, so a field added in Spectra reopens under a new one.
+      if (source.kind === "field" && (key === "xml" || key === "fieldId")) return [];
+      if (key === "nativePath" || key === "nativeReadOnly" || key === "wordCharts" || key === "nativeStyleId" || key === "readOnlyReason" || key === "number" || key === "cellStyles" || key === "cellShading" || key === "borders" || key === "cellPadding")
         return [];
       // Inline runs are the authored formatting source. attrs.format is a
       // resolved native convenience value and would otherwise disagree with a
@@ -309,6 +312,44 @@ export function docxNativeMediaUrl(binding, image) {
   return `/api/spectra/lenses/docx/media?${query.toString()}`;
 }
 
+/** A Word chart drawn as SVG from its part in the linked file, at its size in the document. */
+export function docxNativeChartUrl(binding, chart) {
+  const source = record(binding);
+  const artifactId =
+    typeof source.sourceArtifactId === "string" ? source.sourceArtifactId : "";
+  const payloadHash =
+    typeof source.sourcePayloadHash === "string"
+      ? source.sourcePayloadHash
+      : "";
+  if (!artifactId || !/^[a-f0-9]{64}$/.test(payloadHash)) return "";
+  const query = new URLSearchParams({
+    artifactId,
+    payloadHash,
+    partName: chart.partName,
+    width: String(Math.round(chart.widthEmu / 9525)),
+    height: String(Math.round(chart.heightEmu / 9525)),
+  });
+  return `/api/spectra/lenses/docx/chart?${query.toString()}`;
+}
+
+const WORD_OBJECT_KINDS = new Set(["textBox", "smartArt", "object"]);
+
+/**
+ * Word's charts, text boxes, SmartArt and embedded objects in a block, as
+ * read-only nodes the editor shows at the start of the paragraph. A chart is
+ * drawn from its part; the others show as a frame at their size.
+ */
+function wordChartNodes(attrs, nativeBinding) {
+  if (!Array.isArray(attrs.wordCharts)) return [];
+  return attrs.wordCharts.flatMap((chart) => {
+    if (!chart || !Number.isFinite(chart.widthEmu) || !Number.isFinite(chart.heightEmu)) return [];
+    if (typeof chart.partName === "string")
+      return [{ type: "wordChart", attrs: { partName: chart.partName, widthEmu: chart.widthEmu, heightEmu: chart.heightEmu, src: docxNativeChartUrl(nativeBinding, chart) } }];
+    if (!WORD_OBJECT_KINDS.has(chart.kind)) return [];
+    return [{ type: "wordChart", attrs: { kind: chart.kind, text: typeof chart.text === "string" ? chart.text : "", widthEmu: chart.widthEmu, heightEmu: chart.heightEmu, src: "" } }];
+  });
+}
+
 function docxAssetMediaUrl(assetId) {
   return `/api/spectra/assets/content?assetId=${encodeURIComponent(assetId)}`;
 }
@@ -344,6 +385,8 @@ export function docxRichInlineToJson(content, binding, nativeReadOnly = false) {
       return [{ type: "spectraCitation", attrs: { native: item, id: item.kind === "citation" ? item.citationId : null, sourceId: item.kind === "citation" ? item.sourceRef?.sourceId : null, label: item.text } }];
     if (item.kind === "commentBoundary" || item.kind === "revision")
       return [{ type: item.kind === "revision" ? "wordRevision" : "wordCommentBoundary", attrs: { native: item } }];
+    if (item.kind === "field")
+      return [{ type: "wordField", attrs: { native: item } }];
     if (item.kind === "noteRef")
       return [
         {
@@ -598,7 +641,32 @@ function tableLook(attrs) {
     attrs.cellPadding.every((value) => typeof value === "number" && value >= 0 && value <= 72)
     ? { cellPadding: attrs.cellPadding.map((value) => `${value}pt`).join(" ") }
     : {};
-  return { ...(attrs.borders === "none" ? { borderless: true } : {}), ...padding };
+  return {
+    ...(attrs.borders === "none" ? { borderless: true } : TABLE_LINES.includes(attrs.borders) ? { lines: attrs.borders } : {}),
+    ...(typeof attrs.borderColor === "string" && /^[0-9A-F]{6}$/i.test(attrs.borderColor) ? { lineColor: `#${attrs.borderColor.toUpperCase()}` } : {}),
+    ...padding,
+  };
+}
+
+const TABLE_LINES = ["grid", "horizontal", "outer", "none"];
+
+/**
+ * A table's look as Word holds it: its lines, their colour and each Word
+ * cell's fill (a cell a merge covers takes no fill of its own here).
+ */
+function tableLookAttrs(node) {
+  const attrs = node.attrs ?? {};
+  const lines = TABLE_LINES.includes(attrs.lines) ? attrs.lines : attrs.borderless === true ? "none" : undefined;
+  const colour = typeof attrs.lineColor === "string" && /^#[0-9a-f]{6}$/i.test(attrs.lineColor) ? attrs.lineColor.slice(1).toUpperCase() : undefined;
+  const shading = (physicalTableSlots(node) ?? tableGrid(node)).map((row) => row.map((cell) => {
+    const fill = cell?.attrs?.background;
+    return typeof fill === "string" && /^#[0-9a-f]{6}$/i.test(fill) ? fill.slice(1).toUpperCase() : null;
+  }));
+  return {
+    ...(lines ? { borders: lines } : {}),
+    ...(colour ? { borderColor: colour } : {}),
+    ...(shading.some((row) => row.some(Boolean)) || attrs.fillsSet === true || TABLE_LINES.includes(attrs.lines) ? { cellShading: shading } : {}),
+  };
 }
 
 function withCellAlignment(rowIndex, columnIndex, content, alignments) {
@@ -774,7 +842,11 @@ function blockToJson(blockValue, index, nativeBinding) {
     const id = record(blockValue).id;
     return { type: breakType, attrs: { blockId: typeof id === "string" && id ? id : `block-${index + 1}` } };
   }
-  const node = plainOrRichBlockToJson(blockValue, index, nativeBinding);
+  const built = plainOrRichBlockToJson(blockValue, index, nativeBinding);
+  const charts = wordChartNodes(attrs, nativeBinding);
+  const node = charts.length && (built.type === "paragraph" || built.type === "heading")
+    ? { ...built, content: [...charts, ...(built.content ?? [])] }
+    : built;
   const formatted = withBlockFormatting(node, attrs);
   // Runs that came through as plain text still have the block's own format to wear.
   const marks = record(blockValue).inlineContent ? [] : marksFromRunFormat(attrs.format);
@@ -895,6 +967,7 @@ function plainOrRichBlockToJson(blockValue, index, nativeBinding) {
 export function documentNodeText(node) {
   if (node?.type === "spectraCitation" && node.attrs?.native) return node.attrs.native.text;
   if (node?.type === "wordCommentBoundary") return "";
+  if (node?.type === "wordField") return typeof node.attrs?.native?.text === "string" ? node.attrs.native.text : "";
   if (node?.type === "wordRevision") return node.attrs?.native?.revisionKind === "ins" ? node.attrs.native.text : "";
   if (!node) return "";
   if (typeof node.text === "string") return node.text;
@@ -1070,7 +1143,7 @@ export function documentRichInlineFromJson(node, paragraphBreak = "\n") {
       return;
     }
     if (current?.type === "spectraCitation" && current.attrs?.native) { appendRichInline(output, current.attrs.native); return; }
-    if (current?.type === "wordRevision" || current?.type === "wordCommentBoundary") {
+    if (current?.type === "wordRevision" || current?.type === "wordCommentBoundary" || current?.type === "wordField") {
       if (current.attrs?.native) appendRichInline(output, current.attrs.native);
       return;
     }
@@ -1296,6 +1369,7 @@ export function documentBlocksFromJson(json) {
           headerRow: Boolean(node.content?.[0]?.content?.length && node.content[0].content.every((cell) => cell.type === "tableHeader")),
           ...tableColumnWidths(node),
           ...tableCellSpans(node),
+          ...tableLookAttrs(node),
           ...(node.attrs?.nativeReadOnly === true ? { nativeReadOnly: true } : {}),
           ...(unsupportedTableStructure(node) ? { unsupportedTableStructure: true } : {}),
         },

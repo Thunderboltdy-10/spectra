@@ -151,9 +151,9 @@ const document: WorkbarPlan = {
       ...fold("Bibliography"),
       ...more("group:Review"),
     ],
-    Table: [...fold("Cells", "Columns", "Rows"), ...more("group:Cells")],
+    Table: [...fold("Look", "Cells", "Columns", "Rows"), ...more("group:Look", "group:Cells")],
     Image: [...fold("Accessibility"), ...more("image.replace"), ...fold("Arrange"), ...more("group:Accessibility")],
-    Equation: [...fold("Math")],
+    Equation: [...fold("Math", "Symbols"), ...fold("Structures", "Tools"), ...more("group:Math", "group:Symbols")],
   },
 };
 
@@ -550,6 +550,10 @@ export function estimateCommandWidths(command: {
   if (kind === "select" || kind === "menu") return { full: 132, icon: 132 };
   if (kind === "numeric") return { full: 92, icon: 92 };
   if (kind === "color") return { full: 44, icon: 44 };
+  if (kind === "gallery") {
+    const text = Math.ceil(command.label.length * CHARACTER);
+    return { full: 62 + text, icon: 48 };
+  }
   if (kind === "segmented") {
     const width = 6 + Math.max(2, command.control?.options?.length ?? 2) * 28;
     return { full: width, icon: width };

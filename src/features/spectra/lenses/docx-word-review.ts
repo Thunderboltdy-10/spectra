@@ -49,9 +49,13 @@ function wmlAttr(element: XmlElement, localName: string) {
 
 function descendants(element: XmlElement): XmlElement[] {
   const found: XmlElement[] = [];
-  for (const child of element.elements()) {
-    found.push(child, ...descendants(child));
-  }
+  const walk = (parent: XmlElement) => {
+    for (const child of parent.elements()) {
+      found.push(child);
+      walk(child);
+    }
+  };
+  walk(element);
   return found;
 }
 
@@ -82,8 +86,8 @@ export function collectWordRevisions(root: XmlElement): WordRevisionMark[] {
   const marks: WordRevisionMark[] = [];
   const seen = new Set<string>();
   for (const element of [root, ...descendants(root)]) {
-    if (element.namespaceUri() !== WML_NAMESPACE) continue;
     if (!REVISION_KINDS.has(element.localName)) continue;
+    if (element.namespaceUri() !== WML_NAMESPACE) continue;
     const kind = element.localName as WordRevisionKind;
     const rawId = wmlAttr(element, "id") ?? `${kind}-${marks.length + 1}`;
     const id = `docx:revision:${kind}:${rawId}`;
@@ -116,7 +120,7 @@ async function loadNotesFromPart(
   const local = type === "footnote" ? "footnote" : "endnote";
   const notes: WordNote[] = [];
   for (const element of [xml.root, ...descendants(xml.root)]) {
-    if (element.namespaceUri() !== WML_NAMESPACE || element.localName !== local)
+    if (element.localName !== local || element.namespaceUri() !== WML_NAMESPACE)
       continue;
     const noteType = wmlAttr(element, "type");
     if (noteType === "separator" || noteType === "continuationSeparator")
@@ -152,8 +156,8 @@ export async function collectWordComments(
   const comments: WordComment[] = [];
   for (const element of [xml.root, ...descendants(xml.root)]) {
     if (
-      element.namespaceUri() !== WML_NAMESPACE ||
-      element.localName !== "comment"
+      element.localName !== "comment" ||
+      element.namespaceUri() !== WML_NAMESPACE
     )
       continue;
     const id = wmlAttr(element, "id");

@@ -29,7 +29,7 @@ function visible(item: DocxRichInline): string {
   if (item.kind === "revision") return item.revisionKind === "ins" ? item.text : "";
   if (item.kind === "equation") return item.latex;
   if (item.kind === "image") return item.altText;
-  if (item.kind === "citation" || item.kind === "bibliography") return item.text;
+  if (item.kind === "citation" || item.kind === "bibliography" || item.kind === "field") return item.text;
   return "";
 }
 

@@ -5,6 +5,7 @@ import { StudioToolPane } from "./studio-pane";
 import { describeFailure } from "@/components/ui/truthful-state";
 import { uniqueToken } from "@/lib/unique-token";
 import type { Editor, JSONContent } from "@tiptap/core";
+import type { EditorState } from "@tiptap/pm/state";
 import Collaboration from "@tiptap/extension-collaboration";
 import { LocalTrailingParagraph } from "../editor/local-trailing-paragraph";
 import { documentSchemaExtensions } from "../editor/document-extensions";
@@ -57,6 +58,11 @@ import {
   type CommandParam,
 } from "../commands";
 import { DOCUMENT_EXPORT_COPIES } from "../capabilities";
+import { activeWordStyle, wordStyleOptions } from "../editor/word-style-options";
+import { linkAddress } from "../editor/link-address";
+import { crossReferenceAnchor } from "../lenses/word-bookmarks";
+import { captionLabelAt, nextCaptionNumber, documentHeadings, nextSpectraCaptionNumber, wordSeqField, wordTocField } from "../editor/word-fields";
+import { spectraLookCatalogue } from "../lenses/spectra-document-looks";
 import { DOCUMENT_STYLE_OPTIONS, documentCommandBindings, type DocumentCommandHandlers } from "../commands/office/document-commands";
 import {
   abortArtifactImportUpload,
@@ -67,6 +73,7 @@ import {
 } from "../data/api";
 import { AiRegionDecoration, aiRegionDecorationKey, type AiRegionDecorationTarget } from "../editor/ai-region-decoration";
 import { AiSpeculationDecoration, aiSpeculationKey, type SpeculativeBlockText } from "../editor/ai-speculation-decoration";
+import { WordConflictDecoration, wordConflictKey, type InPlaceConflict, type WordConflictChoice } from "../editor/word-conflict-decoration";
 import { AiTextResolve } from "../editor/ai-text-resolve";
 import { TEXT_COLUMN_EMU, resizedImageAttrs } from "../editor/document-image";
 import {
@@ -77,10 +84,13 @@ import {
   outlineEntryAt,
   type BibliographyStyle,
   type DocumentCitationUse,
-  type DocumentMatch,
   type DocumentOutlineEntry,
   type FindOptions,
 } from "../editor/document-navigation";
+import { insertEquationAtCaret } from "../editor/equation-node";
+import { activeMathEditor, setMathSourceMode, templateAsLatex, useMathSourceMode } from "../editor/math-field";
+import { applyTableStyle, selectedCellFill, setCellFill, setTableLines, tableAtSelection, tableLines, type TableLines } from "../editor/table-look";
+import { findInEditor, replaceMatches, replacementFor, type EditorMatch } from "../editor/document-find";
 import { academicSelection, executeAcademicEditorOperations } from "../editor/document-academic-commands";
 import type { DocumentAcademicOperation } from "../commands/office/document-academic-operations";
 import { documentBlocksFromJson, paragraphAttrsFromFormat, paragraphFormatFromAttrs } from "../lenses/document-projection";
@@ -476,6 +486,24 @@ function DocumentSelectionToolbar({
   );
 }
 
+// The floating format bar's settings stay the same objects across renders:
+// TipTap re-sends them to its plugin whenever one changes, and that
+// transaction rebuilds every React node view in the document.
+const FORMAT_BAR_OPTIONS = { placement: "top", offset: 10, flip: true, shift: true } as const;
+const formatBarHost = () => document.body;
+function formatBarShows({ editor: current, state }: { editor: Editor; state: EditorState }) {
+  // The bar is only mounted while the document can be edited.
+  if (!current.isEditable || !formatMenuOpen(state)) return false;
+  if (document.querySelector(".slash-command-portal")) return false;
+  const selectedNode = (state.selection as { node?: { type: { name: string } } }).node;
+  // A selected atom gets its own contextual tab in the bar; only the
+  // ones that have something to offer here open the floating bar.
+  return (
+    !selectedNode ||
+    ["table", "tableRow", "image", "nativeDocxImage", "equation", "inlineEquation"].includes(selectedNode.type.name)
+  );
+}
+
 /**
  * One small editor for the one thing a command needs a word for: a link's
  * address, a picture's alternative text, a header line, a style's name.
@@ -716,6 +744,7 @@ export function DocumentStudio({
   onLocalCollaborativeChange,
   header,
   mode = "tab",
+  wordConflicts,
 }: {
   artifactId: string;
   title: string;
@@ -734,6 +763,12 @@ export function DocumentStudio({
   onLocalCollaborativeChange?: (userInitiated?: boolean) => void;
   header: ReactNode;
   mode?: "split" | "tab";
+  /** Paragraphs Word and Spectra both changed, shown where they are with a choice on each. */
+  wordConflicts?: {
+    conflicts: readonly InPlaceConflict[];
+    application: string;
+    onChoose: (regionId: string, choice: WordConflictChoice) => void;
+  };
 }) {
   const studioContract = useStudioContract();
   const strictNative = studioContract.compatibilityProfile === "strict-native";
@@ -775,6 +810,8 @@ export function DocumentStudio({
   );
   const [importing, setImporting] = useState(false);
   const [outlineOpen, setOutlineOpen] = useState(false);
+  // Choosing the heading a cross-reference points at, from the outline.
+  const [referencePick, setReferencePick] = useState<{ at: number } | null>(null);
   const [findOpen, setFindOpen] = useState(false);
   const [findDraft, setFindDraft] = useState("");
   const [findOptions, setFindOptions] = useState<FindOptions>({});
@@ -864,6 +901,11 @@ export function DocumentStudio({
     const parsed = docxStyleCatalogueSchema.safeParse(record(content).styles);
     return parsed.success ? parsed.data : undefined;
   }, [content]);
+  const wordStyleChoices = useMemo(() => wordStyleOptions(wordCatalogue), [wordCatalogue]);
+  const captionStyleId = useMemo(
+    () => (wordCatalogue ? Object.entries(wordCatalogue.paragraph).find(([, style]) => style.role === "caption")?.[0] : undefined),
+    [wordCatalogue],
+  );
   const wordStyles = useMemo(
     () => wordStyleSheet(wordCatalogue, `.document-page[data-word-styles="${wordStyleScope}"] .ProseMirror`),
     [wordCatalogue, wordStyleScope],
@@ -969,6 +1011,8 @@ export function DocumentStudio({
   const editorReadyForUserChanges = useRef(false);
   const lastDecorationKeyRef = useRef<string>("");
   const editorJsonKeyRef = useRef(JSON.stringify(initialContent));
+  /** The content this editor last handed to onChange: when it comes straight back, there is nothing to apply. */
+  const emittedContentRef = useRef<unknown>(null);
   const lastBoundJsonRef = useRef<JSONContent | null>(null);
   /** Filled once the command set exists; the slash menu reads it on each open. */
   const slashDispatchRef = useRef<SlashCommandDispatcher>({
@@ -1022,6 +1066,8 @@ export function DocumentStudio({
       footer: own.footer ?? (pageSetup.footer ? pageSetup.footer.split("\n").map((line) => `\t${line}`).join("\n") : undefined),
       ...(own.firstHeader !== undefined ? { firstHeader: own.firstHeader } : {}),
       ...(own.firstFooter !== undefined ? { firstFooter: own.firstFooter } : {}),
+      ...(own.evenHeader !== undefined ? { evenHeader: own.evenHeader } : {}),
+      ...(own.evenFooter !== undefined ? { evenFooter: own.evenFooter } : {}),
     };
   }, [pageSetup]);
   /** Named styles this document defines, over and above the built-in six. */
@@ -1058,6 +1104,12 @@ export function DocumentStudio({
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [artifactId, focusMode]);
 
+  // The extension holds this box for the editor's life; the handler in it is replaced each render.
+  const [wordConflictChoose] = useState<{ current: ((regionId: string, choice: WordConflictChoice) => void) | null }>(() => ({ current: null }));
+  const onWordConflictChoose = wordConflicts?.onChoose;
+  useEffect(() => {
+    wordConflictChoose.current = onWordConflictChoose ?? null;
+  }, [onWordConflictChoose, wordConflictChoose]);
   const editor = useEditor(
     {
       extensions: [
@@ -1081,6 +1133,7 @@ export function DocumentStudio({
         PageFlow,
         AiRegionDecoration,
         AiSpeculationDecoration,
+        WordConflictDecoration.configure({ choose: wordConflictChoose }),
         AiTextResolve,
         SpectraTiptapAutocomplete.configure({
           enabled:
@@ -1230,12 +1283,12 @@ export function DocumentStudio({
         }
         const nextJson = editor.getJSON();
         editorJsonKeyRef.current = JSON.stringify(nextJson);
-        onChange(
-          withDocumentFormatting(
-            documentContentFromJson(nextJson, contentRef.current),
-            nextJson,
-          ),
+        const nextContent = withDocumentFormatting(
+          documentContentFromJson(nextJson, contentRef.current),
+          nextJson,
         );
+        emittedContentRef.current = nextContent;
+        onChange(nextContent);
       },
       onSelectionUpdate: ({ editor }) => {
         const { from, to, empty } = editor.state.selection;
@@ -1311,8 +1364,10 @@ export function DocumentStudio({
   const [, setSelectionTick] = useState(0);
   // Enter after a styled Word paragraph follows the style's own "next".
   useEffect(() => {
-    const storage = (editor?.storage as unknown as Record<string, { nextStyle?: Map<string, string | null> }> | undefined)?.spectraParagraphFrame;
-    if (!storage || !wordCatalogue) return;
+    const storage = (editor?.storage as unknown as Record<string, { nextStyle?: Map<string, string | null>; defaultStyle?: string | null }> | undefined)?.spectraParagraphFrame;
+    if (!storage) return;
+    storage.defaultStyle = wordCatalogue?.defaultStyleId ?? null;
+    if (!wordCatalogue) return;
     storage.nextStyle = new Map(
       Object.entries(wordCatalogue.paragraph).map(([id, style]) => {
         const next = style.next ?? id;
@@ -1646,8 +1701,12 @@ export function DocumentStudio({
     if (!editor || editor.isDestroyed || !editor.isInitialized || !editor.view)
       return;
     const incomingKey = JSON.stringify(incomingEditorJson);
-    const contentChanged = incomingKey !== editorJsonKeyRef.current;
-    if (contentChanged) editorJsonKeyRef.current = incomingKey;
+    // The editor's own change coming back is already on screen. Its stored
+    // form does not always read back as the same JSON, and applying it again
+    // would replace the whole document and throw the caret to the end.
+    const ownEcho = content === emittedContentRef.current;
+    const contentChanged = !ownEcho && incomingKey !== editorJsonKeyRef.current;
+    editorJsonKeyRef.current = incomingKey;
     const lineTargets = aiChangedPaths.flatMap<
       NonNullable<AiRegionDecorationTarget["lines"]>[number]
     >((path) => {
@@ -1720,7 +1779,7 @@ export function DocumentStudio({
         .setMeta(aiRegionDecorationKey, target)
         .setMeta("addToHistory", false),
     );
-  }, [aiChangedPaths, collaborationDocument, contentIsProvisional, editor, incomingEditorJson, nativeBinding.format]);
+  }, [aiChangedPaths, collaborationDocument, content, contentIsProvisional, editor, incomingEditorJson, nativeBinding.format]);
 
   // A shared document is bound to the room; a collaborator's in-flight words
   // are drawn over it instead (ai-speculation-decoration).
@@ -1737,6 +1796,18 @@ export function DocumentStudio({
     // speculationKey stands for speculation's contents.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [collaborationDocument, editor, speculationKey]);
+
+  const wordConflictKeyText = JSON.stringify([wordConflicts?.application, wordConflicts?.conflicts]);
+  useEffect(() => {
+    if (!editor || editor.isDestroyed || !editor.isInitialized || !editor.view) return;
+    editor.view.dispatch(
+      editor.state.tr
+        .setMeta(wordConflictKey, { conflicts: wordConflicts?.conflicts ?? [], application: wordConflicts?.application ?? "Word" })
+        .setMeta("addToHistory", false),
+    );
+    // wordConflictKeyText stands for the conflicts' contents.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editor, editor?.isInitialized, wordConflictKeyText]);
 
   const editorText = editor?.getText({ blockSeparator: "\n" }) ?? "";
   const wordCount = editorText.trim()
@@ -1775,37 +1846,12 @@ export function DocumentStudio({
   const activeOutlineEntry = editor
     ? outlineEntryAt(outlineEntries, editor.state.selection.from)
     : undefined;
-  const findMatches = (() => {
-    const matches: DocumentMatch[] = [];
-    const query = findDraft.trim();
-    if (!findOpen || !editor || !query) return matches;
-    const pattern = documentFindPattern(query, findOptions);
-    if (!pattern) return matches;
-    editor.state.doc.descendants((node, position) => {
-      if (!node.isText || !node.text) return;
-      const text = node.text;
-      pattern.lastIndex = 0;
-      let match = pattern.exec(text);
-      while (match) {
-        if (match[0].length === 0) {
-          pattern.lastIndex += 1;
-        } else {
-          matches.push({
-            from: position + match.index,
-            to: position + match.index + match[0].length,
-            preview: text
-              .slice(
-                Math.max(0, match.index - 24),
-                Math.min(text.length, match.index + match[0].length + 24),
-              )
-              .trim(),
-          });
-        }
-        match = pattern.exec(text);
-      }
-    });
-    return matches;
-  })();
+  const findMatches: EditorMatch[] = findOpen && editor && findDraft.trim()
+    ? findInEditor(editor.state.doc, findDraft.trim(), findOptions, (node) =>
+        node.attrs.nativeReadOnly === true ||
+        (typeof node.attrs.blockId === "string" && nativeReadOnlyRegionIds.includes(node.attrs.blockId)))
+    : [];
+  const findReadOnlyCount = findMatches.filter((match) => match.readOnly).length;
   const documentCitationUses = (() => {
     const uses: DocumentCitationUse[] = [];
     if (!sourcesOpen) return uses;
@@ -1877,18 +1923,39 @@ export function DocumentStudio({
     if (!editor || !findDraft || readOnly || !findMatches.length) return false;
     editorReadyForUserChanges.current = true;
     const transaction = editor.state.tr;
-    for (const match of [...findMatches].reverse()) {
-      if (replaceDraft)
-        transaction.replaceWith(
-          match.from,
-          match.to,
-          editor.state.schema.text(replaceDraft),
-        );
-      else transaction.delete(match.from, match.to);
-    }
+    const replaced = replaceMatches(transaction, findMatches, (match) =>
+      replacementFor(match.text, findDraft.trim(), replaceDraft, findOptions));
+    if (!replaced) return false;
     editor.view.dispatch(transaction);
     setFindCursor(0);
     return true;
+  }
+
+  /** Replaces the current match and moves on to the next one. */
+  function replaceCurrentMatch() {
+    if (!editor || readOnly || !findMatches.length) return;
+    const index = Math.min(findCursor, findMatches.length - 1);
+    const match = findMatches[index]!;
+    if (match.readOnly) {
+      selectFindMatch(1);
+      return;
+    }
+    editorReadyForUserChanges.current = true;
+    const transaction = editor.state.tr;
+    replaceMatches(transaction, [match], () => replacementFor(match.text, findDraft.trim(), replaceDraft, findOptions));
+    editor.view.dispatch(transaction);
+    // The next match now sits at the same index, unless this was the last.
+    const remaining = findInEditor(editor.state.doc, findDraft.trim(), findOptions, (node) =>
+      node.attrs.nativeReadOnly === true ||
+      (typeof node.attrs.blockId === "string" && nativeReadOnlyRegionIds.includes(node.attrs.blockId)));
+    const after = transaction.mapping.map(match.from);
+    const next = remaining.findIndex((candidate) => candidate.from >= after);
+    const nextIndex = next < 0 ? 0 : next;
+    setFindCursor(nextIndex);
+    if (remaining[nextIndex]) {
+      editor.chain().setTextSelection(remaining[nextIndex]).run();
+      revealDocumentRange(editor, remaining[nextIndex]);
+    }
   }
 
   /**
@@ -1935,13 +2002,23 @@ export function DocumentStudio({
 
   function applyDocumentTemplate(kind: "notes" | "essay" | "lab") {
     if (!editor || readOnly) return;
+    // Each template brings its look: Word styles the page draws, the style
+    // menu offers and the Word copy writes. A Word file keeps its own.
+    const look = nativeBinding.format ? undefined : spectraLookCatalogue(kind === "essay" ? "essay" : kind === "lab" ? "worksheet" : "notes");
+    const title = (text: string) => (look ? `<p data-style="Title">${text}</p>` : `<h1>${text}</h1>`);
     const template =
       kind === "notes"
-        ? `<h1>Study notes</h1><aside data-spectra-callout="true" data-callout-type="info"><p>Key idea</p></aside><h2>Core concepts</h2><ul><li>Add the first important concept</li><li>Connect it to prior knowledge</li></ul><h2>Questions</h2><ul data-type="taskList"><li data-type="taskItem" data-checked="false"><p>What still needs clarification?</p></li></ul>`
+        ? `${title("Study notes")}<aside data-spectra-callout="true" data-callout-type="info"><p>Key idea</p></aside><h2>Core concepts</h2><ul><li>Add the first important concept</li><li>Connect it to prior knowledge</li></ul><h2>Questions</h2><ul data-type="taskList"><li data-type="taskItem" data-checked="false"><p>What still needs clarification?</p></li></ul>`
         : kind === "essay"
-          ? `<h1>Essay title</h1><p><em>State the central argument in one precise sentence.</em></p><h2>Introduction</h2><p>Establish context and your thesis.</p><h2>Argument</h2><p>Develop evidence and analysis.</p><h2>Counterargument</h2><p>Address the strongest alternative interpretation.</p><h2>Conclusion</h2><p>Synthesize the argument without repeating it.</p>`
-          : `<h1>Lab report</h1><h2>Research question</h2><p>What are you investigating?</p><h2>Hypothesis</h2><p>State a testable prediction.</p><h2>Method</h2><ol><li>Describe the procedure.</li></ol><h2>Results</h2><table><tbody><tr><th><p>Variable</p></th><th><p>Observation</p></th></tr><tr><td><p></p></td><td><p></p></td></tr></tbody></table><h2>Conclusion</h2><p>Interpret the evidence and limitations.</p>`;
+          ? `${title("Essay title")}${look ? `<p data-style="Subtitle">State the central argument in one precise sentence.</p>` : `<p><em>State the central argument in one precise sentence.</em></p>`}<h2>Introduction</h2><p>Establish context and your thesis.</p><h2>Argument</h2><p>Develop evidence and analysis.</p><h2>Counterargument</h2><p>Address the strongest alternative interpretation.</p><h2>Conclusion</h2><p>Synthesize the argument without repeating it.</p>`
+          : `${title("Lab report")}<h2>Research question</h2><p>What are you investigating?</p><h2>Hypothesis</h2><p>State a testable prediction.</p><h2>Method</h2><ol><li>Describe the procedure.</li></ol><h2>Results</h2><table><tbody><tr><th><p>Variable</p></th><th><p>Observation</p></th></tr><tr><td><p></p></td><td><p></p></td></tr></tbody></table><h2>Conclusion</h2><p>Interpret the evidence and limitations.</p>`;
     editorReadyForUserChanges.current = true;
+    if (look) {
+      // Set before the editor reports its new content, which is read against this.
+      contentRef.current = { ...record(contentRef.current), styles: look } as typeof contentRef.current;
+      onChange(record(contentRef.current));
+      onLocalCollaborativeChangeRef.current?.(true);
+    }
     editor.commands.setContent(template);
   }
 
@@ -2017,7 +2094,7 @@ export function DocumentStudio({
           throw new Error("The image asset is unavailable or revoked. Restore or upload it before exporting.");
         return new Uint8Array(await response.arrayBuffer());
       };
-      const copy = await exportDocxCopy(editorJson, { pageSetup, resolveAsset });
+      const copy = await exportDocxCopy(editorJson, { pageSetup, resolveAsset, ...(wordCatalogue ? { styles: wordCatalogue } : {}) });
       const blob = new Blob([new Uint8Array(copy.bytes).buffer as ArrayBuffer], {
         type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
       });
@@ -2414,13 +2491,22 @@ export function DocumentStudio({
   const textStyleAttrs = editor?.getAttributes("textStyle") ?? {};
   const activeImage = activeNode(["image", "nativeDocxImage"]);
   const activeEquation = activeNode(["equation", "inlineEquation"]);
+  const mathSource = useMathSourceMode();
   const inTable = Boolean(editor?.isActive("table"));
   const inList = Boolean(
     editor?.isActive("bulletList") ||
     editor?.isActive("orderedList") ||
     editor?.isActive("taskList"),
   );
-  const activeStyle = !editor
+  const cursorBlock = editor?.state.selection.$from.parent;
+  const activeWordStyleValue = wordStyleChoices.length && cursorBlock
+    ? activeWordStyle(wordStyleChoices, {
+        type: cursorBlock.type.name,
+        level: Number(cursorBlock.attrs.level) || undefined,
+        styleId: typeof cursorBlock.attrs.styleId === "string" ? cursorBlock.attrs.styleId : null,
+      })
+    : undefined;
+  const activeStyle = activeWordStyleValue ?? (!editor
     ? "paragraph"
     : editor.isActive("heading", { level: 1 })
       ? "h1"
@@ -2432,7 +2518,7 @@ export function DocumentStudio({
             ? "quote"
             : editor.isActive("codeBlock")
               ? "code"
-              : "paragraph";
+              : "paragraph");
   const trackedPlaceholders = wordRevisions.length
     ? wordRevisions.map((mark) => {
         const kindLabel =
@@ -2458,6 +2544,15 @@ export function DocumentStudio({
       );
 
   function applyStyle(style: string) {
+    const wordStyle = wordStyleChoices.find((option) => option.value === style);
+    if (wordStyle) {
+      withEdit(() => {
+        const chain = editor!.chain().focus();
+        if (wordStyle.level) chain.setNode("heading", { level: wordStyle.level }).run();
+        else chain.setParagraph().setWordStyle(wordStyle.styleId).run();
+      });
+      return;
+    }
     withEdit(() => {
       const chain = editor!.chain().focus();
       if (style === "h1" || style === "h2" || style === "h3")
@@ -2483,7 +2578,21 @@ export function DocumentStudio({
 
   function insertTableOfContents() {
     withEdit(() => {
-      const items = outlineEntries.map((entry) => ({
+      const headings = documentHeadings(editor!.state.doc);
+      if (nativeBinding.format === "docx") {
+        // Word's own contents: a TOC field Word rebuilds with page numbers.
+        const tocHeading = Object.entries(wordCatalogue?.paragraph ?? {}).find(([, style]) => style.name.trim().toLowerCase() === "toc heading")?.[0];
+        editor!
+          .chain()
+          .focus()
+          .insertContent([
+            { type: "paragraph", ...(tocHeading ? { attrs: { styleId: tocHeading } } : {}), content: [{ type: "text", text: "Contents" }] },
+            { type: "paragraph", content: [{ type: "wordField", attrs: { native: wordTocField(headings, `toc-${crypto.randomUUID()}`) } }] },
+          ])
+          .run();
+        return;
+      }
+      const items = headings.map((entry) => ({
         type: "paragraph",
         attrs: { indentLevel: entry.level > 1 ? entry.level - 1 : null },
         content: [{ type: "text", text: entry.title }],
@@ -2515,23 +2624,28 @@ export function DocumentStudio({
     });
   }
 
+  /** Opens the outline to choose the heading; the reference goes where the cursor was. */
   function insertCrossReference() {
+    if (!editor) return;
+    setReferencePick({ at: editor.state.selection.from });
+    setOutlineOpen(true);
+  }
+
+  /** The heading's title, linked to its Word bookmark: Word follows it, and Spectra writes the bookmark. */
+  function referToHeading(entry: DocumentOutlineEntry) {
+    const at = referencePick?.at;
+    setReferencePick(null);
+    if (at === undefined || !entry.blockId) return;
     withEdit(() => {
-      const target = outlineEntries[0];
-      if (!target) return;
       editor!
         .chain()
         .focus()
+        .setTextSelection(Math.min(at, editor!.state.doc.content.size))
         .insertContent([
           {
             type: "text",
-            text: target.title,
-            marks: [
-              {
-                type: "link",
-                attrs: { href: `#${target.blockId ?? target.position}` },
-              },
-            ],
+            text: entry.title,
+            marks: [{ type: "link", attrs: { href: `#${crossReferenceAnchor(entry.blockId!)}` } }],
           },
         ])
         .run();
@@ -2653,7 +2767,8 @@ export function DocumentStudio({
       style: {
         value: activeStyle,
         set: applyStyle,
-        options: DOCUMENT_STYLE_OPTIONS,
+        // A Word document offers its own styles, so Word reopens each paragraph under the name chosen here.
+        options: wordStyleChoices.length ? wordStyleChoices : DOCUMENT_STYLE_OPTIONS,
       },
       fontFamily: {
         ...(typeof textStyleAttrs.fontFamily === "string"
@@ -2884,25 +2999,9 @@ export function DocumentStudio({
         ),
       linkActive: editor?.isActive("link"),
       unlink: () => withEdit(() => editor!.chain().focus().unsetLink().run()),
-      equationBlock: () =>
-        withEdit(() =>
-          editor!
-            .chain()
-            .focus()
-            .insertContent({
-              type: "equation",
-              attrs: { latex: "", display: "block", alignment: "center" },
-            })
-            .run(),
-        ),
-      equationInline: () =>
-        withEdit(() =>
-          editor!
-            .chain()
-            .focus()
-            .insertContent({ type: "inlineEquation", attrs: { latex: "" } })
-            .run(),
-        ),
+      // A new equation opens for typing where it lands, as Alt+= does.
+      equationBlock: () => withEdit(() => insertEquationAtCaret(editor!, "block")),
+      equationInline: () => withEdit(() => insertEquationAtCaret(editor!, "inline")),
       callout: (kind) =>
         withEdit(() =>
           editor!.chain().focus().setCallout({ type: kind }).run(),
@@ -2931,19 +3030,30 @@ export function DocumentStudio({
       sectionBreak: () =>
         withEdit(() => editor!.chain().focus().insertSectionBreak().run()),
       caption: () =>
-        withEdit(() =>
-          editor!
+        withEdit(() => {
+          const { doc, selection } = editor!.state;
+          const label = captionLabelAt(doc, selection.from);
+          const number = nextCaptionNumber(doc, selection.from, label);
+          // In a Word document the number is Word's own SEQ field, so Word
+          // keeps counting; a Spectra document writes the number it has now.
+          const numberNode = nativeBinding.format === "docx"
+            ? { type: "wordField", attrs: { native: wordSeqField(label, number, `caption-${crypto.randomUUID()}`) } }
+            : { type: "text", text: String(nextSpectraCaptionNumber(doc, selection.from, label, captionStyleId)) };
+          return editor!
             .chain()
             .focus()
             .insertContent({
               type: "paragraph",
-              attrs: { blockStyle: "caption" },
+              // A document with Word styles captions with Word's own Caption style.
+              attrs: captionStyleId ? { styleId: captionStyleId } : { blockStyle: "caption" },
               content: [
-                { type: "text", text: "Figure — describe what this shows" },
+                { type: "text", text: `${label} ` },
+                numberNode,
+                { type: "text", text: ": describe what this shows" },
               ],
             })
-            .run(),
-        ),
+            .run();
+        }),
       tableOfContents: insertTableOfContents,
     },
     table: {
@@ -2971,13 +3081,36 @@ export function DocumentStudio({
       headerRowActive: Boolean(editor?.isActive("tableHeader")),
       deleteTable: () =>
         withEdit(() => editor!.chain().focus().deleteTable().run()),
+      applyStyle: (style: string) => withEdit(() => applyTableStyle(editor!, style)),
+      lines: (() => {
+        const current = editor && inTable ? tableAtSelection(editor) : undefined;
+        return current ? tableLines(current.node) : undefined;
+      })(),
+      setLines: (lines: string) =>
+        withEdit(() => setTableLines(editor!, { lines: lines as TableLines })),
+      lineColor: (() => {
+        const current = editor && inTable ? tableAtSelection(editor) : undefined;
+        return typeof current?.node.attrs.lineColor === "string" ? current.node.attrs.lineColor : undefined;
+      })(),
+      setLineColor: (color: string | null) => withEdit(() => setTableLines(editor!, { lineColor: color })),
+      cellFill: editor && inTable ? selectedCellFill(editor) : undefined,
+      setCellFill: (color: string | null) => withEdit(() => setCellFill(editor!, color)),
       ...(() => {
-        const currentTable = activeNode(["table"]);
+        // Rows and columns of a plain Word table are written as Word's own; a
+        // table with merged or nested cells keeps its shape as Word has it.
+        const currentTable = editor && inTable ? tableAtSelection(editor)?.node : undefined;
         const authoredHere = currentTable?.attrs.spectraAuthored === true;
-        return strictNative && inTable && !authoredHere
+        let irregular = false;
+        currentTable?.descendants((node) => {
+          if (irregular) return false;
+          if (node.type.name === "table") irregular = true;
+          if (Number(node.attrs.colspan) > 1 || Number(node.attrs.rowspan) > 1) irregular = true;
+          return !irregular;
+        });
+        return strictNative && inTable && !authoredHere && irregular
           ? {
               nativeStructureReason:
-                "This table came from the Word file. Spectra can edit the text in its cells; changing rows or columns would rewrite the table definition, so that stays in Word.",
+                "This table has merged or nested cells from the Word file. Spectra edits the text in its cells; its rows and columns stay as Word has them.",
             }
           : {};
       })(),
@@ -3027,6 +3160,27 @@ export function DocumentStudio({
     },
     equation: {
       active: Boolean(activeEquation),
+      readOnly: activeEquation?.attrs.nativeReadOnly === true,
+      source: mathSource,
+      setSource: setMathSourceMode,
+      insertMath: (latex) =>
+        withEdit(() => {
+          const open = activeMathEditor();
+          if (open) {
+            open.insert(latex);
+            return true;
+          }
+          // Nothing open to type into (still loading): add it at the end.
+          if (!activeEquation) return false;
+          const current = typeof activeEquation.attrs.latex === "string" ? activeEquation.attrs.latex : "";
+          return editor!
+            .chain()
+            .command(({ tr }) => {
+              tr.setNodeAttribute(activeEquation.pos, "latex", `${current}${templateAsLatex(latex)}`);
+              return true;
+            })
+            .run();
+        }),
       ...(activeEquation
         ? {
             display:
@@ -3493,23 +3647,9 @@ export function DocumentStudio({
         <BubbleMenu
           editor={editor}
           pluginKey={FORMAT_BAR_KEY}
-          appendTo={() => document.body}
-          options={{ placement: "top", offset: 10, flip: true, shift: true }}
-          shouldShow={({ editor: current, state }) => {
-            if (!current.isEditable || readOnly || !formatMenuOpen(state)) return false;
-            if (document.querySelector(".slash-command-portal")) return false;
-            const selectedNode = (
-              state.selection as { node?: { type: { name: string } } }
-            ).node;
-            // A selected atom gets its own contextual tab in the bar; only the
-            // ones that have something to offer here open the floating bar.
-            return (
-              !selectedNode ||
-              ["table", "tableRow", "image", "nativeDocxImage", "equation", "inlineEquation"].includes(
-                selectedNode.type.name,
-              )
-            );
-          }}
+          appendTo={formatBarHost}
+          options={FORMAT_BAR_OPTIONS}
+          shouldShow={formatBarShows}
           className="spectra-document-selection-toolbar"
         >
           <DocumentSelectionToolbar
@@ -3600,7 +3740,7 @@ export function DocumentStudio({
               />
               <small>
                 {findMatches.length
-                  ? `${Math.min(findCursor + 1, findMatches.length)} of ${findMatches.length}`
+                  ? `${Math.min(findCursor + 1, findMatches.length)} of ${findMatches.length}${findMatches[Math.min(findCursor, findMatches.length - 1)]?.readOnly ? ", kept as Word has it" : ""}`
                   : findDraft
                     ? findOptions.regex &&
                       !documentFindPattern(findDraft, findOptions)
@@ -3663,13 +3803,30 @@ export function DocumentStudio({
                   value={replaceDraft}
                   disabled={readOnly}
                   onChange={(event) => setReplaceDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") closeFind();
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      if (event.metaKey || event.ctrlKey) runDocumentCommand("document.navigate.replace", true);
+                      else replaceCurrentMatch();
+                    }
+                  }}
                   placeholder="Replace with"
                   aria-label="Replacement text"
                 />
                 <button
                   type="button"
                   data-find-replace=""
-                  disabled={!findMatches.length || readOnly}
+                  disabled={!findMatches.length || readOnly || findMatches[Math.min(findCursor, findMatches.length - 1)]?.readOnly}
+                  onClick={replaceCurrentMatch}
+                >
+                  Replace
+                </button>
+                <button
+                  type="button"
+                  data-find-replace=""
+                  disabled={findMatches.length === findReadOnlyCount || readOnly}
+                  title={findReadOnlyCount ? `${findReadOnlyCount} ${findReadOnlyCount === 1 ? "match is" : "matches are"} in a part Word keeps as it is, and stays.` : undefined}
                   onClick={() =>
                     runDocumentCommand("document.navigate.replace", true)
                   }
@@ -3690,14 +3847,19 @@ export function DocumentStudio({
         {linkDraft !== null ? (
           <DocumentInlinePanel
             label={editor?.isActive("link") ? "Edit link" : "Add link"}
-            detail="The selected text becomes the link. Clear the address to remove it."
+            detail={
+              linkDraft.trim() && !linkAddress(linkDraft)
+                ? "Use a web address, an email address, or # and a heading's bookmark."
+                : "The selected text becomes the link. Clear the address to remove it."
+            }
             value={linkDraft}
             placeholder="https://example.com"
             confirmLabel="Apply"
             onChange={setLinkDraft}
             onCancel={() => setLinkDraft(null)}
             onConfirm={() => {
-              const href = linkDraft.trim();
+              const href = linkDraft.trim() ? linkAddress(linkDraft) : "";
+              if (href === undefined) return;
               withEdit(() =>
                 href
                   ? editor!
@@ -3868,13 +4030,23 @@ export function DocumentStudio({
         ) : null}
         <div className="spectra-document-canvas-shell">
           {outlineOpen ? (
-            <aside className="spectra-document-outline">
+            <aside className="spectra-document-outline" data-picking={referencePick ? "true" : undefined}>
               <header>
-                <strong>Outline</strong>
-                <button type="button" aria-label="Close outline" onClick={() => setOutlineOpen(false)}>
+                <strong>{referencePick ? "Refer to a heading" : "Outline"}</strong>
+                <button
+                  type="button"
+                  aria-label={referencePick ? "Cancel cross-reference" : "Close outline"}
+                  onClick={() => {
+                    if (referencePick) setReferencePick(null);
+                    else setOutlineOpen(false);
+                  }}
+                >
                   <X className="h-4 w-4" />
                 </button>
               </header>
+              {referencePick && outlineEntries.length ? (
+                <p className="spectra-document-outline-hint">Choose the heading. Its title goes in as a link Word can follow.</p>
+              ) : null}
               {outlineEntries.map((entry, index) => (
                 <button
                   key={`${entry.position}:${index}`}
@@ -3884,13 +4056,15 @@ export function DocumentStudio({
                   }
                   style={{ paddingLeft: 11 + (entry.level - 1) * 12 }}
                   onClick={() =>
-                    editor
-                      ?.chain()
-                      .focus()
-                      // A heading's content starts one past the node itself.
-                      .setTextSelection(entry.position + 1)
-                      .scrollIntoView()
-                      .run()
+                    referencePick
+                      ? referToHeading(entry)
+                      : editor
+                          ?.chain()
+                          .focus()
+                          // A heading's content starts one past the node itself.
+                          .setTextSelection(entry.position + 1)
+                          .scrollIntoView()
+                          .run()
                   }
                 >
                   <span>{index + 1}</span>

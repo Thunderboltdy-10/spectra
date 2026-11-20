@@ -4,7 +4,7 @@ import { pptxMediaWriteOptions } from "@/features/spectra/lenses/pptx-media-serv
 import { hydrateContentForWrite } from "@/lib/convex-server";
 import { reconcileNativeRevision } from "@/lib/native-reconciliation-server";
 import { NextResponse } from "next/server";
-import { comparePackages } from "@ariadng/office/preservation";
+import { comparePackageVerdicts as comparePackages } from "@/features/spectra/lenses/package-verdicts";
 import { assertNativePreservationKept } from "@/features/spectra/lenses/preservation-proof";
 import { z } from "zod";
 import type { Id } from "../../../../../../convex/_generated/dataModel";

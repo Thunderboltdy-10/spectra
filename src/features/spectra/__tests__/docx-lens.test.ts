@@ -890,9 +890,11 @@ describe("DOCX preservation lens", () => {
     const opened = await docxLens.open(zipSync(files));
     const linked = opened.projection.blocks.find((block) => block.attrs?.nativeReadOnly === true)!;
     const hyperlinks = opened.fidelityMap.entries.find((entry) => entry.feature === "hyperlinks");
-    expect(hyperlinks).toMatchObject({ class: "PRESERVED", readOnly: true });
-    expect(hyperlinks?.reason ?? "").toMatch(/preserves hyperlinks/i);
-    expect(hyperlinks?.reason ?? "").not.toMatch(/editable when/i);
+    // Plain links are written natively; a link around a picture keeps its paragraph read-only.
+    expect(hyperlinks).toMatchObject({ class: "NATIVE" });
+    expect(hyperlinks?.readOnly).toBeUndefined();
+    expect(hyperlinks?.reason ?? "").toMatch(/stays as Word has it/i);
+    expect(linked.attrs?.nativeReadOnly).toBe(true);
     await expect(docxLens.mutate(opened.preservedCarry, {
       kind: "replace-paragraph",
       regionId: linked.id,

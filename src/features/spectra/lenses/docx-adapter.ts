@@ -1,7 +1,10 @@
 import { Document, WML_NAMESPACE } from "@ariadng/office/docx";
 import { parseXml, serializeNode, XmlElement, XmlText } from "@ariadng/office/xml";
 import { latexToEquation } from "./equation-interchange";
-import { applyParagraphFormat, applyTableColumnWidths, docxLens, resolveParagraphStyleId, type DocxProjection } from "./docx-lens";
+import { internalAnchor } from "./word-bookmarks";
+import { writeStyleCatalogue } from "./spectra-word-styles";
+import type { DocxStyleCatalogue } from "./projection-contracts";
+import { appendNativeField, applyParagraphFormat, declareWordml2010, markCrossReferenceTargets, applyTableColumnWidths, docxLens, resolveParagraphStyleId, type DocxProjection } from "./docx-lens";
 import { TEXT_COLUMN_EMU, embedOmmlInJson, paragraphFormatForNode } from "../../../../shared/document-projection.mjs";
 import { compactDocxProjectionForStorage, documentContentToProseMirrorJson, type DocumentJsonNode } from "./document-projection";
 import { docxRichInlineSchema, type DocxParagraphFormat } from "./projection-contracts";
@@ -60,6 +63,14 @@ export type DocxPageSetup = {
   header?: string;
   footer?: string;
 };
+
+/** A note made in Spectra has no Word id yet: each export numbers them past any Word ever uses for its own. */
+const noteIds = new WeakMap<object, number>();
+function newNoteId(document: object) {
+  const next = (noteIds.get(document) ?? 1000) + 1;
+  noteIds.set(document, next);
+  return String(next);
+}
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -408,7 +419,11 @@ function appendTextRun(
   const href = record(mark("link")?.attrs).href;
   if (typeof href === "string" && href) {
     const link = new XmlElement("hyperlink", "w");
-    link.setAttributeNs(RELATIONSHIP_NAMESPACE, "id", relationshipForHref(document, href));
+    const anchor = internalAnchor(href);
+    if (anchor) {
+      link.setAttribute("w:anchor", anchor);
+      link.setAttribute("w:history", "1");
+    } else link.setAttributeNs(RELATIONSHIP_NAMESPACE, "id", relationshipForHref(document, href));
     link.appendChild(run);
     paragraph.appendChild(link);
   } else paragraph.appendChild(run);
@@ -467,16 +482,17 @@ async function appendInlineContent(
   resolver: DocxAssetResolver | undefined,
 ) {
   for (const node of content) {
-    if (["wordRevision", "wordCommentBoundary", "spectraCitation"].includes(node.type ?? "") && node.attrs?.native) {
+    if (["wordRevision", "wordCommentBoundary", "spectraCitation", "wordField"].includes(node.type ?? "") && node.attrs?.native) {
       const item = docxRichInlineSchema.parse(node.attrs.native);
       if (item.kind === "revision") appendRevision(paragraph, item, undefined, document);
       if (item.kind === "commentBoundary") { if (item.comment) await upsertNativeComment(document, item.commentId, item.comment); appendCommentBoundary(paragraph, item.commentId, item.boundary); }
       if (item.kind === "citation") await appendWordCitation(document, paragraph, item);
       if (item.kind === "bibliography") await appendWordBibliography(document, paragraph, item);
+      if (item.kind === "field") appendNativeField(paragraph, item.xml);
       continue;
     }
     if (node.type === "footnote" || node.type === "endnote") {
-      const item = docxRichInlineSchema.parse({ kind: "noteRef", noteType: node.type, noteId: node.attrs?.nativeNoteId, text: node.attrs?.text ?? "", ...(node.attrs?.noteContent ? { content: node.attrs.noteContent } : {}) });
+      const item = docxRichInlineSchema.parse({ kind: "noteRef", noteType: node.type, noteId: node.attrs?.nativeNoteId ?? newNoteId(document), text: node.attrs?.text ?? "", ...(node.attrs?.noteContent ? { content: node.attrs.noteContent } : {}) });
       if (item.kind === "noteRef") { await upsertNativeNote(document, item); appendNoteReference(paragraph, item.noteType, item.noteId); }
       continue;
     }
@@ -623,12 +639,29 @@ function cellInline(cell: DocumentJsonNode) {
 
 function writeCopyTableShape(document: Document, table: XmlElement, node: DocumentJsonNode) {
   const properties = table.find(WML_NAMESPACE, "tblPr");
-  // `TableGrid` is not defined in a fresh package, so the borders are direct.
-  if (properties && !properties.find(WML_NAMESPACE, "tblBorders")) {
+  // `TableGrid` is not defined in a fresh package, so the borders are direct:
+  // the lines the table was given, in their colour.
+  if (properties) {
+    const previous = properties.find(WML_NAMESPACE, "tblBorders");
+    if (previous) properties.removeChild(previous);
+    const lines = ["grid", "horizontal", "outer", "none"].includes(String(node.attrs?.lines))
+      ? String(node.attrs!.lines)
+      : node.attrs?.borderless ? "none" : "grid";
+    const drawn: Record<string, readonly string[]> = {
+      grid: ["top", "left", "bottom", "right", "insideH", "insideV"],
+      horizontal: ["top", "bottom", "insideH"],
+      outer: ["top", "left", "bottom", "right"],
+      none: [],
+    };
+    const colour = typeof node.attrs?.lineColor === "string" && /^#[0-9a-f]{6}$/i.test(node.attrs.lineColor)
+      ? node.attrs.lineColor.slice(1).toUpperCase()
+      : "auto";
     const borders = parseXml(
       `<w:tblBorders xmlns:w="${WML_NAMESPACE}">` +
         ["top", "left", "bottom", "right", "insideH", "insideV"]
-          .map((side) => `<w:${side} w:val="single" w:sz="4" w:space="0" w:color="auto"/>`)
+          .map((side) => drawn[lines]!.includes(side)
+            ? `<w:${side} w:val="single" w:sz="4" w:space="0" w:color="${colour}"/>`
+            : `<w:${side} w:val="nil"/>`)
           .join("") +
         "</w:tblBorders>",
     ).root;
@@ -815,10 +848,19 @@ function shapeListLevels(document: Document, first: XmlElement | undefined, sour
  */
 export async function exportDocxCopy(
   json: DocumentJsonNode,
-  options: { resolveAsset?: DocxAssetResolver; pageSetup?: DocxPageSetup } = {},
+  options: { resolveAsset?: DocxAssetResolver; pageSetup?: DocxPageSetup; styles?: DocxStyleCatalogue } = {},
 ) {
   const document = Document.create();
   setPageSetup(document, options.pageSetup);
+  // The document's own look becomes real Word styles, so Word lists Title,
+  // Heading 1 and Caption in its gallery and the text keeps its typeface.
+  const catalogue = options.styles;
+  const writtenStyles = catalogue ? (await writeStyleCatalogue(document, catalogue)) ?? new Set<string>() : new Set<string>();
+  const styleIdFor = (id: unknown) =>
+    typeof id !== "string" || !id ? undefined : id === catalogue?.defaultStyleId ? undefined : writtenStyles.has(id) ? id : undefined;
+  const quoteStyle = catalogue
+    ? Object.entries(catalogue.paragraph).find(([id, style]) => style.role === "quote" && writtenStyles.has(id))?.[0]
+    : undefined;
   copyColumnEmu = textColumnEmu(options.pageSetup);
   const notes: DocxFidelityNote[] = [];
   for (const node of json.content ?? []) {
@@ -842,6 +884,26 @@ export async function exportDocxCopy(
               }
             }
           }
+        // A cell's fill, on every Word cell its merge covers.
+        for (const { row: rowIndex, column: columnIndex, rowspan, cell } of placements) {
+          const fill = typeof cell.attrs?.background === "string" && /^#[0-9a-f]{6}$/i.test(cell.attrs.background)
+            ? cell.attrs.background.slice(1).toUpperCase()
+            : undefined;
+          if (!fill) continue;
+          for (let r = rowIndex; r < rowIndex + rowspan; r += 1) {
+            const element = table.cell(r, columnIndex).element;
+            let properties = element.find(WML_NAMESPACE, "tcPr");
+            if (!properties) {
+              properties = new XmlElement("tcPr", element.prefix);
+              element.insertBefore(properties, element.children[0] ?? null);
+            }
+            const shading = new XmlElement("shd", element.prefix);
+            shading.setAttribute("w:val", "clear");
+            shading.setAttribute("w:color", "auto");
+            shading.setAttribute("w:fill", fill);
+            properties.appendChild(shading);
+          }
+        }
         mergeTableCells(table.element, placements);
         writeCopyTableShape(document, table.element, node);
         continue;
@@ -909,8 +971,15 @@ export async function exportDocxCopy(
         const children = node.content?.some((child) => child.type === "paragraph" || child.type === "heading")
           ? node.content
           : [{ type: "paragraph", content: node.content ?? [] } as DocumentJsonNode];
+        const quoted = node.type === "blockquote" ? quoteStyle : undefined;
         for (const child of children)
-          await appendParagraph(document, child, child.type === "heading" ? `Heading${Math.min(6, Math.max(1, Number(record(child.attrs).level) || 2))}` : undefined, options.resolveAsset, look);
+          await appendParagraph(
+            document,
+            child,
+            child.type === "heading" ? `Heading${Math.min(6, Math.max(1, Number(record(child.attrs).level) || 2))}` : quoted,
+            options.resolveAsset,
+            quoted && child.type !== "heading" ? undefined : look,
+          );
         continue;
       }
       if (node.type === "codeBlock") {
@@ -954,12 +1023,12 @@ export async function exportDocxCopy(
         ].includes(node.type ?? "")
       )
         throw new Error(`The ${node.type ?? "unknown"} node has no shared Word copy writer.`);
-      await appendParagraph(document, node, undefined, options.resolveAsset);
+      await appendParagraph(document, node, node.type === "paragraph" ? styleIdFor(record(node.attrs).styleId) : undefined, options.resolveAsset);
     } catch (error) {
       // A missing/revoked durable image is a failed export, not an unsupported
       // node. Replacing it with a text placeholder would silently drop user
       // media while reporting a successful Word copy.
-      const hasAcademicNode = (value: DocumentJsonNode): boolean => ["footnote", "endnote", "wordRevision", "wordCommentBoundary"].includes(value.type ?? "") || Boolean(value.type === "spectraCitation" && value.attrs?.native) || Boolean(value.content?.some(hasAcademicNode));
+      const hasAcademicNode = (value: DocumentJsonNode): boolean => ["footnote", "endnote", "wordRevision", "wordCommentBoundary", "wordField"].includes(value.type ?? "") || Boolean(value.type === "spectraCitation" && value.attrs?.native) || Boolean(value.content?.some(hasAcademicNode));
       if (node.type === "image" || hasAcademicNode(node)) throw error;
       await appendParagraph(document, {
         type: "paragraph",
@@ -979,6 +1048,19 @@ export async function exportDocxCopy(
       });
     }
   }
+  // A cross-reference finds its heading by the heading's block id, which named its paragraph.
+  const blockByParaId = new Map<string, string>();
+  const collectBlockIds = (node: DocumentJsonNode) => {
+    const blockId = record(node.attrs).blockId;
+    if (typeof blockId === "string" && blockId) blockByParaId.set(stableParaId(blockId), blockId);
+    node.content?.forEach(collectBlockIds);
+  };
+  collectBlockIds(json);
+  markCrossReferenceTargets(document, (paragraph) => {
+    const blockId = blockByParaId.get(paragraph.getAttributeNs(W14_NAMESPACE, "paraId") ?? "");
+    return blockId ? [blockId] : [];
+  });
+  declareWordml2010(document);
   const bytes = await document.save();
   notes.unshift({
     scope: "Word structure, rich runs, links, lists, tables, and supported media",

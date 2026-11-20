@@ -2,7 +2,7 @@
 
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { getFunctionName } from "convex/server";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   data: {} as Record<string, unknown>,
@@ -146,8 +146,12 @@ describe("School page", () => {
 
   it("keeps students' conflict review in School without opening administration", async () => {
     mocks.data["school:syncStatus"] = connected({ problem: { code: "INTEGRATION_REVIEW_REQUIRED", message: "Review a school change.", fixBy: "student", fixHint: "Choose which version to keep." } });
-    mocks.overview.mockResolvedValueOnce({ data: { conflicts: [{ _id: "conflict-1", kind: "source_changed", projectionType: "timetable_event", oldSource: { title: "Old lesson" }, newSource: { title: "Updated lesson" }, suggestedActions: ["rebase"], affectedLinks: [], status: "open", createdAt: NOW }] } }).mockResolvedValue({ data: { conflicts: [] } });
-    mocks.resolveConflict.mockResolvedValue({});
+    // The review lists the conflict until it is resolved, however often it
+    // reloads: a slow run may load it more than once before the click.
+    let resolved = false;
+    mocks.overview.mockImplementation(async () => ({ data: { conflicts: resolved ? [] : [{ _id: "conflict-1", kind: "source_changed", projectionType: "timetable_event", oldSource: { title: "Old lesson" }, newSource: { title: "Updated lesson" }, suggestedActions: ["rebase"], affectedLinks: [], status: "open", createdAt: NOW }] } }));
+    mocks.resolveConflict.mockImplementation(async () => { resolved = true; return {}; });
+    onTestFinished(() => { mocks.overview.mockReset(); mocks.resolveConflict.mockReset(); });
     render(<SchoolPage />);
     fireEvent.click(screen.getByRole("button", { name: "Review changes" }));
     expect(await screen.findByRole("dialog", { name: "Review your school changes" })).toBeTruthy();

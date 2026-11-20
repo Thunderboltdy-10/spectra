@@ -1,3 +1,4 @@
+import { spectraLookCatalogue } from "../../../lenses/spectra-document-looks";
 import type { ArtifactTypeKey } from "../../../artifacts/types";
 import { agentFromSpec, agentOutline, agentProblems, applyAgentEdits, type AgentEditOp, type AgentFields } from "./agent";
 import { applyCodeEdits, codeFromSpec, codeOutline, codeReadback, type CodeEditOp, type CodeSpec } from "./code";
@@ -186,7 +187,10 @@ export function authorNew(type: AuthoredType, spec: unknown, context: AuthoringC
     case "document": {
       const markdown = typeof input.markdown === "string" ? input.markdown : "";
       if (!markdown.trim()) throw new AuthoringError("markdown is required: the whole document in Markdown.");
-      content = documentFromMarkdown(markdown, undefined, ids);
+      const styles = input.look === undefined ? undefined : spectraLookCatalogue(input.look);
+      if (input.look !== undefined && !styles) throw new AuthoringError('look must be "essay", "notes" or "worksheet".');
+      content = documentFromMarkdown(markdown, undefined, ids, styles);
+      if (styles) content = { ...content, styles };
       readback = documentReadback(content);
       listed = false;
       break;

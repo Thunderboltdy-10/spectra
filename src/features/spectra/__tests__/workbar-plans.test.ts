@@ -335,7 +335,7 @@ describe("arranging a tab", () => {
 
   it("raises a contextual tab only for its own commands", () => {
     const table = arrangeWorkbar({ type, tab: "Table", actions });
-    expect(table.groups.map((group) => group.name)).toEqual(["Rows", "Columns", "Cells", "Structure"]);
+    expect(table.groups.map((group) => group.name)).toEqual(["Rows", "Columns", "Cells", "Look", "Structure"]);
     expect(table.groups.flatMap((group) => group.actions).every((action) => action.id.startsWith("document.table."))).toBe(true);
   });
 });

@@ -169,7 +169,9 @@ export function DocumentLab() {
   }, [fixtures]);
   const pageWidth = 640;
   const onWordPages = useCallback((pages: number | null) => setWordPages(pages), []);
-  const noop = useCallback(() => undefined, []);
+  // Edits stay in the lab's copy, as an artifact's content would: the studio
+  // takes its content back from here, so a copy that ignored them would undo them.
+  const keepEdit = useCallback((value: unknown) => setContent((current) => (current ? { ...current, value } : current)), []);
   const pageDelta = spectraPages !== null && wordPages !== null ? spectraPages - wordPages : null;
 
   return <main className="flex h-dvh flex-col bg-[var(--bg-desk)] text-[var(--text-primary)]">
@@ -213,7 +215,7 @@ export function DocumentLab() {
       <section ref={setSpectraHost} aria-label="Spectra" className="relative min-h-0 overflow-auto">
         {content && content.key === key ? <StudioContractProvider value={contract}>
           <DocumentStudio key={content.key} artifactId={LAB_ARTIFACT} title={selected.name.replace(/\.docx$/iu, "")}
-            content={content.value} onChange={noop} header={null} mode="tab" />
+            content={content.value} onChange={keepEdit} header={null} mode="tab" />
         </StudioContractProvider> : !problem ? <p className="m-6 text-[var(--text-secondary)]">Opening {selected.name}…</p> : null}
         {view === "overlay" ? <div className="pointer-events-none absolute inset-x-0 top-0 mix-blend-multiply" style={{ opacity }}>
           <WordPages fixture={selected} width={pageWidth} onPages={onWordPages} />

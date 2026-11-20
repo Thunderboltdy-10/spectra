@@ -24,6 +24,8 @@ import {
   docxRichInlineSchema,
   docxSemanticDeltaSchema,
   docxInsertTableOperationSchema,
+  DOCX_TABLE_LINES,
+  type DocxTableLines,
   type DocxOperation,
   type DocxRunFormat,
   type DocxParagraphFormat,
@@ -661,6 +663,39 @@ function wordListLevelOf(block: DocxProjection["blocks"][number] | undefined) {
   return typeof list?.numId === "string" ? Math.max(0, Math.min(8, Number(list.level) || 0)) : undefined;
 }
 
+type TableLook = { borders?: DocxTableLines; borderColor?: string | null; cellShading?: (string | null)[][] };
+
+/**
+ * What changed in a table's look: its lines and their colour, and its cell
+ * fills. Fills count only when the table states them (it has a fill, or its
+ * lines or fills were set in Spectra), so content saved before fills were
+ * shown never clears Word's. A cell a merge covers keeps the fill Word gave it.
+ */
+function tableLookChange(old: DocxProjection["blocks"][number] | undefined, block: DocxProjection["blocks"][number]): TableLook | undefined {
+  const before = (old?.attrs ?? {}) as Record<string, unknown>;
+  const after = (block.attrs ?? {}) as Record<string, unknown>;
+  const lines = (value: unknown) => (DOCX_TABLE_LINES as readonly unknown[]).includes(value) ? value as DocxTableLines : undefined;
+  const colour = (value: unknown) => typeof value === "string" && /^[0-9A-F]{6}$/u.test(value) ? value : null;
+  const change: TableLook = {};
+  const linesSet = lines(after.borders) !== undefined;
+  if ((linesSet && lines(after.borders) !== lines(before.borders)) || (linesSet && colour(after.borderColor) !== colour(before.borderColor))) {
+    change.borders = lines(after.borders)!;
+    change.borderColor = colour(after.borderColor);
+  }
+  const grid = (value: unknown) => Array.isArray(value) ? value.map((row) => Array.isArray(row) ? row.map(colour) : []) : undefined;
+  const oldShading = grid(before.cellShading);
+  const newShading = grid(after.cellShading);
+  if (newShading) {
+    const spans = Array.isArray(after.cellSpans) ? after.cellSpans as Array<Array<{ covered?: boolean } | undefined>> : [];
+    const shape = rowsFor(block).map((row, rowIndex) => (newShading?.[rowIndex] ?? row.map(() => null)).map((fill, columnIndex) =>
+      spans[rowIndex]?.[columnIndex]?.covered ? oldShading?.[rowIndex]?.[columnIndex] ?? null : fill ?? null));
+    const same = shape.every((row, rowIndex) => row.every((fill, columnIndex) => fill === (oldShading?.[rowIndex]?.[columnIndex] ?? null))) &&
+      (oldShading ?? []).every((row, rowIndex) => row.every((fill, columnIndex) => !fill || shape[rowIndex]?.[columnIndex] === fill));
+    if (!same) change.cellShading = shape;
+  }
+  return Object.keys(change).length ? change : undefined;
+}
+
 export function docxOperationsBetween(
   before: DocxProjection,
   after: DocxProjection,
@@ -675,7 +710,12 @@ export function docxOperationsBetween(
     const recovered = restoreDocxBlockCarryMetadata(old, block);
     const attrs = { ...recovered.attrs };
     for (const key of ["paragraphIndex", "tableIndex", "rowCount", "columnCount"]) delete attrs[key];
-    return { ...recovered, attrs: { ...old.attrs, ...attrs } };
+    const merged: Record<string, unknown> = { ...old.attrs, ...attrs };
+    // A paragraph given another style keeps none of what the old one implied.
+    if (typeof attrs.styleId === "string" && attrs.styleId !== old.attrs?.styleId) {
+      for (const key of ["nativeStyleId", "level", "number"]) if (!(key in attrs)) delete merged[key];
+    }
+    return { ...recovered, attrs: merged };
   }) };
   const operations: DocxOperation[] = [];
   const beforePage = before.pageSetup ?? {};
@@ -726,6 +766,8 @@ export function docxOperationsBetween(
             ? { columnWidths: block.attrs.columnWidths }
             : {}),
         }));
+        const look = tableLookChange(undefined, block);
+        if (look) operations.push({ kind: "set-table-look", regionId: block.id, ...look });
         return;
       }
       operations.push({
@@ -816,6 +858,8 @@ export function docxOperationsBetween(
           operations.push(...otherImageOperations);
         }),
       );
+      const look = tableLookChange(old, block);
+      if (look) operations.push({ kind: "set-table-look", regionId: block.id, ...look });
     } else if (
       block.type !== "table" &&
       (block.text !== old.text ||
@@ -981,7 +1025,7 @@ function expandNewDocxListBlocks<T extends { id: string; type: string; text: str
   });
 }
 
-const WORD_ONLY_DETAIL = new Set(["nativePath", "ommlXml", "ommlSourceLatex"]);
+const WORD_ONLY_DETAIL = new Set(["nativePath", "ommlXml", "ommlSourceLatex", "wordCharts"]);
 
 function comparableBlock(block: unknown) {
   const walk = (value: unknown): unknown => {
@@ -989,7 +1033,9 @@ function comparableBlock(block: unknown) {
     if (!value || typeof value !== "object") return value;
     return Object.fromEntries(
       Object.entries(value as Record<string, unknown>)
-        .filter(([key, item]) => item !== undefined && !WORD_ONLY_DETAIL.has(key))
+        // An in-document link (`#bookmark`) that content written before Spectra
+        // read them lacks does not, alone, make a paragraph Word has edited.
+        .filter(([key, item]) => item !== undefined && !WORD_ONLY_DETAIL.has(key) && !(key === "href" && typeof item === "string" && item.startsWith("#")))
         .sort(([left], [right]) => left.localeCompare(right))
         .map(([key, item]) => [key, key === "text" && typeof item === "string" ? item.trimEnd() : walk(item)]),
     );
@@ -1168,6 +1214,21 @@ export function docxProjectionFromContent(
     const staleInline = Boolean(previous?.inlineContent && !recovered.inlineContent &&
       recovered.text.trimEnd() !== previous.text.trimEnd());
     const { inlineContent: _previousInline, ...previousWithoutInline } = previous ?? ({} as Partial<DocxProjection["blocks"][number]>);
+    const attrs = previous?.attrs || incoming.attrs ? { ...(previous?.attrs ?? {}), ...(incoming.attrs ?? {}) } : undefined;
+    if (attrs && previous) {
+      const defaultStyle = catalogue?.defaultStyleId ?? "Normal";
+      // A heading made body text in the editor takes the document's own body
+      // style; the heading's style must not ride along on the old attributes.
+      if (previous.type === "heading" && incoming.type === "paragraph" && incoming.attrs?.styleId === undefined) {
+        attrs.styleId = defaultStyle;
+        delete attrs.level;
+        delete attrs.number;
+      }
+      // Body text asked for where Word never named a style is what it already is.
+      if (attrs.styleId === defaultStyle && previous.attrs?.styleId === undefined) delete attrs.styleId;
+      // Runs are read against the style the paragraph now has.
+      if (attrs.styleId !== previous.attrs?.styleId) delete attrs.nativeStyleId;
+    }
     return docxProjectionBlockSchema.parse({
       ...(staleInline ? previousWithoutInline : previous ?? {}),
       ...recovered,
@@ -1186,14 +1247,7 @@ export function docxProjectionFromContent(
         : normalizedRichRows
           ? { richRows: normalizedRichRows }
           : {}),
-      ...(previous?.attrs || incoming.attrs
-        ? {
-            attrs: {
-              ...(previous?.attrs ?? {}),
-              ...(incoming.attrs ?? {}),
-            },
-          }
-        : {}),
+      ...(attrs ? { attrs } : {}),
     });
   };
   const blocks = parsed.nativeProjectionComplete
@@ -1203,15 +1257,32 @@ export function docxProjectionFromContent(
           parsed.blocks.map((block) => [block.id, block]),
         );
         const baseIds = new Set(base.blocks.map((block) => block.id));
+        // A new block goes where the editor put it: after the last block before
+        // it that Word already has, or first when none comes before it. New
+        // blocks after the last known one are added at the end: this content
+        // shows only part of the document, so its end is the document's end.
+        const START = Symbol("start");
+        const END = Symbol("end");
+        const added = new Map<string | typeof START | typeof END, DocxProjection["blocks"]>();
+        let anchor: string | typeof START = START;
+        let pending: DocxProjection["blocks"] = [];
+        for (const block of parsed.blocks) {
+          if (!baseIds.has(block.id)) { pending.push(block); continue; }
+          if (pending.length) added.set(anchor, [...(added.get(anchor) ?? []), ...pending]);
+          pending = [];
+          anchor = block.id;
+        }
+        if (pending.length) added.set(END, pending);
+        const place = (key: string | typeof START | typeof END) => (added.get(key) ?? []).map(mergeBlock);
         return [
-          ...base.blocks.map((block) =>
+          ...place(START),
+          ...base.blocks.flatMap((block) => [
             incomingById.has(block.id)
               ? mergeBlock(incomingById.get(block.id)!)
               : block,
-          ),
-          ...parsed.blocks
-            .filter((block) => !baseIds.has(block.id))
-            .map(mergeBlock),
+            ...place(block.id),
+          ]),
+          ...place(END),
         ];
       })();
   const projection = docxProjectionSchema.parse({

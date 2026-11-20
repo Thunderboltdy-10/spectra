@@ -36,6 +36,8 @@ declare module "@tiptap/core" {
       setParagraphLineSpacing: (multiple: number) => ReturnType;
       /** The named paragraph style — Word's `w:pStyle` by another name. */
       setParagraphStyle: (style: string | null) => ReturnType;
+      /** Gives the paragraphs in the selection one of the document's Word styles. */
+      setWordStyle: (styleId: string) => ReturnType;
       /** Moves the whole block one place up (-1) or down (+1). */
       moveBlock: (direction: number) => ReturnType;
       /** Moves the left indent by one step, clamped to 0–8. */
@@ -138,17 +140,23 @@ export const SectionBreak = Node.create({
 
 const FRAMED_TYPES = ["paragraph", "heading", "blockquote"] as const;
 
+/** A style Spectra names itself: the built-in caption, or one a writer saved ("style:…"). */
+const isSpectraNamedStyle = (value: string) => value === "caption" || value.startsWith("style:");
+
 /** The paragraph format a Word style decides; a paragraph that changes style starts without it. */
 const STYLE_DECIDED_ATTRIBUTES = [
   "textAlign", "lineSpacing", "spacingAfter", "spacingBefore", "firstLineIndent", "indentLevel", "frameBorder", "frameShading",
 ] as const;
 
-export const ParagraphFrame = Extension.create<Record<string, never>, { nextStyle: Map<string, string | null> }>({
+export const ParagraphFrame = Extension.create<Record<string, never>, { nextStyle: Map<string, string | null>; defaultStyle: string | null }>({
   name: "spectraParagraphFrame",
+  // Ahead of the paragraph node's own Mod-Alt-0, which knows no Word styles.
+  priority: 110,
   addStorage() {
     // Filled by the page from the document's Word styles: the style Enter
-    // gives the next paragraph (`w:next`), null for the default style.
-    return { nextStyle: new Map<string, string | null>() };
+    // gives the next paragraph (`w:next`), null for the default style, and
+    // the document's body style.
+    return { nextStyle: new Map<string, string | null>(), defaultStyle: null };
   },
   addGlobalAttributes() {
     return [
@@ -191,7 +199,11 @@ export const ParagraphFrame = Extension.create<Record<string, never>, { nextStyl
         attributes: {
           styleId: {
             default: null,
-            parseHTML: (element) => element.getAttribute("data-style") || null,
+            // Spectra's own named styles share the attribute ("caption", "style:…"); they are not Word's.
+            parseHTML: (element) => {
+              const value = element.getAttribute("data-style");
+              return value && !isSpectraNamedStyle(value) ? value : null;
+            },
             renderHTML: (attributes) =>
               typeof attributes.styleId === "string" && attributes.styleId
                 ? { "data-style": attributes.styleId }
@@ -323,7 +335,10 @@ export const ParagraphFrame = Extension.create<Record<string, never>, { nextStyl
           // again. It is the same idea as `w:pStyle`.
           blockStyle: {
             default: null,
-            parseHTML: (element) => element.getAttribute("data-style"),
+            parseHTML: (element) => {
+              const value = element.getAttribute("data-style");
+              return value && isSpectraNamedStyle(value) ? value : null;
+            },
             renderHTML: (attributes) =>
               attributes.blockStyle ? { "data-style": attributes.blockStyle } : {},
           },
@@ -355,6 +370,24 @@ export const ParagraphFrame = Extension.create<Record<string, never>, { nextStyl
       setParagraphLineSpacing: (multiple: number) =>
         patch({ lineSpacing: multiple > 0 && multiple !== 1 ? multiple : null }),
       setParagraphStyle: (style: string | null) => patch({ blockStyle: style }),
+      // A paragraph that takes a Word style takes all of it: the spacing and
+      // alignment the old style or a direct format decided are dropped, as
+      // Word does when a style is chosen from its gallery.
+      setWordStyle:
+        (styleId: string) =>
+        ({ state, tr, dispatch }: CommandProps) => {
+          const { from, to } = state.selection;
+          let touched = false;
+          state.doc.nodesBetween(from, to, (node, position) => {
+            if (node.type.name !== "paragraph") return;
+            const attrs: Record<string, unknown> = { ...node.attrs, styleId };
+            for (const name of STYLE_DECIDED_ATTRIBUTES) if (name in attrs) attrs[name] = null;
+            tr.setNodeMarkup(position, undefined, attrs);
+            touched = true;
+          });
+          if (touched && dispatch) dispatch(tr);
+          return touched;
+        },
       shiftParagraphIndent:
         (steps: number) =>
         ({ state, tr, dispatch }: CommandProps) => {
@@ -436,6 +469,13 @@ export const ParagraphFrame = Extension.create<Record<string, never>, { nextStyl
             return true;
           })
           .run();
+      },
+      // Word's "Normal" from the keyboard: in a Word document the paragraph
+      // takes the body style itself, not just the shape of a paragraph.
+      "Mod-Alt-0": () => {
+        const body = this.storage.defaultStyle;
+        if (!body) return false;
+        return this.editor.chain().setParagraph().setWordStyle(body).run();
       },
       "Alt-Shift-ArrowUp": () => this.editor.commands.moveBlock(-1),
       "Alt-Shift-ArrowDown": () => this.editor.commands.moveBlock(1),

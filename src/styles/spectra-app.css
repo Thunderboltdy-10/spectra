@@ -2802,49 +2802,123 @@ button:disabled {
   cursor: grabbing;
 }
 
-.spectra-equation.is-selected {
-  background: transparent;
+/* An equation is typed where it sits. While the caret is in it, the page
+   marks its extent with a faint wash, as Word does, and nothing floats over
+   the text around it. */
+.spectra-equation.is-editing {
+  border-radius: 4px;
+  background: color-mix(in oklab, var(--accent-cyan) 7%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent-cyan) 22%, transparent);
 }
 
+.spectra-equation-block.is-editing {
+  padding: 0.15em 0.4em;
+}
+
+.spectra-equation-empty {
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+
+.spectra-math-host {
+  display: block;
+}
+
+.spectra-math-host.is-inline {
+  display: inline-block;
+  vertical-align: baseline;
+}
+
+.spectra-math-host:empty {
+  display: none;
+}
+
+math-field.spectra-math-field {
+  display: block;
+  width: 100%;
+  min-width: 2em;
+  border: 0;
+  outline: none;
+  background: transparent;
+  padding: 0;
+  color: inherit;
+  font-size: 1.1em;
+  --caret-color: var(--accent-cyan);
+  --selection-background-color: color-mix(in oklab, var(--accent-cyan) 24%, transparent);
+  --selection-color: inherit;
+  --contains-highlight-background-color: color-mix(in oklab, var(--accent-cyan) 9%, transparent);
+  --placeholder-color: var(--text-tertiary);
+  --smart-fence-color: var(--text-tertiary);
+  --primary: var(--accent-cyan);
+}
+
+.spectra-math-host.is-inline math-field.spectra-math-field {
+  display: inline-block;
+  width: auto;
+}
+
+.spectra-equation.is-center math-field.spectra-math-field {
+  text-align: center;
+}
+
+.spectra-equation.is-right math-field.spectra-math-field {
+  text-align: right;
+}
+
+math-field.spectra-math-field::part(container) {
+  justify-content: inherit;
+}
+
+.spectra-equation.is-center math-field.spectra-math-field::part(content) {
+  justify-content: center;
+}
+
+.spectra-equation.is-right math-field.spectra-math-field::part(content) {
+  justify-content: flex-end;
+}
+
+math-field.spectra-math-field::part(menu-toggle),
+math-field.spectra-math-field::part(virtual-keyboard-toggle) {
+  display: none;
+}
+
+/* LaTeX source mode: the same spot, as source, in the page's own flow. */
 .spectra-equation-source {
   display: block;
   width: 100%;
-  margin-top: 0.8rem;
-  resize: vertical;
-  border: 1px solid var(--border-default);
-  border-radius: var(--control-radius);
-  background: var(--bg-primary);
-  padding: 0.55rem 0.7rem;
+  resize: none;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  padding: 0.1em 0;
   color: var(--text-primary);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 13px;
+  font-size: 0.86em;
   line-height: 1.55;
+  text-align: inherit;
+  outline: none;
 }
 
-.spectra-equation-align {
-  display: flex;
-  justify-content: flex-end;
-  gap: 2px;
-  margin-top: 0.45rem;
+.spectra-equation-source.is-inline {
+  display: inline-block;
+  width: auto;
+  max-width: 100%;
+  padding: 0 0.2em;
 }
 
-.spectra-equation-align button {
-  height: 24px;
-  padding: 0 8px;
-  border-radius: var(--chip-radius);
-  color: var(--text-secondary);
+.spectra-equation-source-preview {
+  display: block;
+  margin-top: 0.2em;
+  opacity: 0.72;
+}
+
+.spectra-equation-note {
+  display: block;
+  margin-top: 0.25em;
+  color: var(--text-tertiary);
+  font-family: var(--font-ui, inherit);
   font-size: var(--text-micro);
-  font-weight: 620;
-}
-
-.spectra-equation-align button:hover {
-  background: color-mix(in oklab, var(--bg-primary) 70%, transparent);
-  color: var(--text-primary);
-}
-
-.spectra-equation-align button[data-active] {
-  background: color-mix(in oklab, var(--bg-primary) 88%, transparent);
-  color: var(--text-primary);
+  text-align: left;
 }
 
 /* The settle: a whisper of tint that fades to nothing. Once an operation is
@@ -11323,6 +11397,9 @@ html[data-spectra-motion="none"] .spectra-anchor-landing {
   align-items: center;
   gap: 3px;
   overflow: hidden;
+  /* Not a scroll box: nothing (find-in-page, scrollIntoView on the hidden
+     measuring copy) can slide the commands out of sight. */
+  overflow: clip;
 }
 
 .spectra-workbar-measure {
@@ -12058,6 +12135,99 @@ html[data-spectra-motion="none"] .spectra-anchor-landing {
 .spectra-workbar-control:disabled,
 .spectra-workbar-control[aria-disabled="true"] {
   opacity: 0.45;
+}
+
+.spectra-workbar-control-gallery {
+  min-width: 0;
+  max-width: 12rem;
+  gap: 6px;
+}
+
+.spectra-workbar-gallery-glyph {
+  display: inline-grid;
+  min-width: 1.4rem;
+  place-items: center;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.spectra-gallery-popover {
+  display: block;
+  padding: 6px 8px 8px;
+}
+
+.spectra-gallery-section + .spectra-gallery-section {
+  margin-top: 6px;
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 6px;
+}
+
+.spectra-gallery-heading {
+  padding: 2px 2px 5px;
+  color: var(--text-tertiary);
+  font-size: var(--text-micro);
+  font-weight: 600;
+}
+
+.spectra-gallery-grid {
+  display: grid;
+  gap: 2px;
+}
+
+.spectra-gallery-tile {
+  display: grid;
+  min-width: 0;
+  min-height: 40px;
+  place-items: center;
+  overflow: hidden;
+  border-radius: var(--chip-radius);
+  padding: 4px;
+  color: var(--text-primary);
+}
+
+.spectra-gallery-tile:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.spectra-gallery-tile:focus-visible {
+  outline: 2px solid var(--focus-ring-color);
+  outline-offset: -2px;
+}
+
+.spectra-gallery-grid:not([data-wide]) .spectra-gallery-tile {
+  height: 52px;
+}
+
+.spectra-gallery-grid:not([data-wide]) .spectra-gallery-tile .katex {
+  font-size: 1.5em;
+}
+
+/* Symbols sit ten to a row: a compact, even grid. */
+.spectra-gallery-popover[data-columns="10"] .spectra-gallery-tile {
+  height: 34px;
+}
+
+.spectra-gallery-popover[data-columns="10"] .spectra-gallery-tile .katex {
+  font-size: 1.2em;
+}
+
+.spectra-gallery-grid[data-wide] .spectra-gallery-tile {
+  place-items: start;
+  gap: 2px;
+  padding: 6px 8px;
+  text-align: left;
+}
+
+.spectra-gallery-grid[data-wide] .katex-display {
+  margin: 0;
+  text-align: left;
+}
+
+.spectra-gallery-tile-label {
+  color: var(--text-secondary);
+  font-size: var(--text-micro);
+  font-weight: 600;
 }
 
 .spectra-workbar-control-select {

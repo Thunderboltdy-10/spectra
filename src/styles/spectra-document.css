@@ -173,6 +173,12 @@
 /* Word's cell fills. A dark page keeps the hue but lets the words read. */
 .spectra-document-studio .ProseMirror :is(td, th)[data-background] { background-color: var(--cell-fill); }
 .dark .spectra-document-studio .ProseMirror :is(td, th)[data-background] { background-color: color-mix(in oklab, var(--cell-fill) 30%, var(--card-paper, transparent)); }
+/* A table's chosen lines: every line, the rows only, or the outside only, in their colour. */
+.spectra-document-studio .ProseMirror table[data-lines] :is(td, th) { border-color: var(--table-line, var(--prose-line)); }
+.spectra-document-studio .ProseMirror table:is([data-lines], [data-fills-set]) th:not([data-background]) { background: transparent; }
+.spectra-document-studio .ProseMirror table[data-lines="horizontal"] :is(td, th) { border-left-color: transparent; border-right-color: transparent; }
+.spectra-document-studio .ProseMirror table[data-lines="outer"] :is(td, th) { border-color: transparent; }
+.spectra-document-studio .ProseMirror table[data-lines="outer"] { border: 1px solid var(--table-line, var(--prose-line)); }
 /* A table Word draws without lines keeps faint guides while it is edited, as Word's gridlines do. */
 .spectra-document-studio .ProseMirror table[data-borderless] :is(td, th) { border-color: transparent; outline: 1px dashed color-mix(in oklab, var(--text-primary) 12%, transparent); outline-offset: -1px; }
 

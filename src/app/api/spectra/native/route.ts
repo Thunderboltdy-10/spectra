@@ -6,6 +6,13 @@ import { sha256Payload } from "@/features/spectra/lenses/docx-lens";
 import { fetchVerifiedNativePayload, uploadNativePayload, ensureImportedNativePayload } from "@/features/spectra/lenses/native-payload-server";
 import { createSpectraPackage, SPECTRA_PACKAGE_TYPES } from "@/features/spectra/lenses/spectra-package";
 import { resolveRequestedMount } from "@/features/spectra/bridge/mount-selection";
+import { checkpointArtifactDurableContent } from "@/lib/convex-server";
+import { exportDocxCopy, type DocxPageSetup } from "@/features/spectra/lenses/docx-adapter";
+import { docxLens } from "@/features/spectra/lenses/docx-lens";
+import { bindDocxProjectionSource, compactDocxProjectionForStorage, documentContentToProseMirrorJson } from "@/features/spectra/lenses/document-projection";
+import { docxStyleCatalogueSchema } from "@/features/spectra/lenses/projection-contracts";
+import { resolveArtifactAssetBytes } from "@/features/spectra/lenses/asset-resolver-server";
+import { storedFidelityMap } from "../../../../../shared/fidelity-map-storage";
 
 export const runtime = "nodejs";
 
@@ -59,6 +66,52 @@ async function verifiedPayload(workId: Id<"spectraArtifacts">) {
   }
 }
 
+const record = (value: unknown): Record<string, unknown> =>
+  value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+
+/**
+ * A document made in Spectra gets a Word file: its export becomes the retained
+ * original, and the document takes that file's projection as its own, so from
+ * here on it is Word-backed like any document opened from Word.
+ */
+async function adoptSpectraDocument(workId: Id<"spectraArtifacts">) {
+  // The latest words from the live log, not the last checkpoint.
+  await checkpointArtifactDurableContent(String(workId));
+  const artifact = await convexQuery<{ artifactId: Id<"spectraArtifacts"> }, ArtifactTruth>("spectraArtifacts:get", { artifactId: workId });
+  const content = record(artifact.content);
+  const styles = docxStyleCatalogueSchema.safeParse(content.styles);
+  const stored = record(content.pageSetup);
+  const pageSetup: DocxPageSetup = {
+    ...(typeof stored.size === "string" ? { size: stored.size } : {}),
+    ...(stored.orientation === "landscape" ? { orientation: "landscape" as const } : {}),
+    ...(typeof stored.margins === "string" ? { margins: stored.margins } : {}),
+    ...(Number(stored.columns) > 0 ? { columns: Math.min(3, Number(stored.columns)) } : {}),
+    ...(typeof stored.header === "string" ? { header: stored.header } : {}),
+    ...(typeof stored.footer === "string" ? { footer: stored.footer } : {}),
+  };
+  const copy = await exportDocxCopy(documentContentToProseMirrorJson(content), {
+    pageSetup,
+    ...(styles.success ? { styles: styles.data } : {}),
+    resolveAsset: async ({ assetId }) => (assetId ? (await resolveArtifactAssetBytes(assetId as Id<"artifactAssets">)).bytes : undefined),
+  });
+  const payload = copy.bytes;
+  const hash = await sha256Payload(payload);
+  const uploaded = await uploadNativePayload(workId, payload, hash, "docx");
+  await convexMutation("replicas:attachPortablePayload", { workId, payloadRef: uploaded.payloadRef, contentHash: hash, nativeFormat: "docx" });
+  const opened = await docxLens.open(payload, "strict-native");
+  const projection = bindDocxProjectionSource(opened.projection, String(workId), hash);
+  await convexMutation("replicas:activateLens", {
+    workId,
+    payloadHash: hash,
+    content: compactDocxProjectionForStorage(projection),
+    fidelityMap: storedFidelityMap(opened.fidelityMap),
+    semanticDigest: projection.nativeBinding.semanticDigest,
+    nativeFormat: "docx",
+    adoptsSpectraDocument: true,
+  });
+  return { truth: { url: null, bytes: payload.byteLength, hash, mediaType: mediaTypes.docx!, payloadRef: uploaded.payloadRef, nativeFormat: "docx" }, payload };
+}
+
 async function ensurePortablePayload(
   workId: Id<"spectraArtifacts">,
   artifactPromise?: Promise<ArtifactTruth>,
@@ -67,6 +120,8 @@ async function ensurePortablePayload(
   const existing = await verifiedPayload(workId);
   if (existing) return existing;
   const artifact = await (artifactPromise ?? convexQuery<{ artifactId: Id<"spectraArtifacts"> }, ArtifactTruth>("spectraArtifacts:get", { artifactId: workId }));
+  // Only a document made in Spectra: one opened from Word keeps waiting for its own file.
+  if (artifact.blueprintKey === "document" && !record(record(artifact.content).nativeBinding).format) return adoptSpectraDocument(workId);
   if (!SPECTRA_PACKAGE_TYPES.includes(artifact.blueprintKey as (typeof SPECTRA_PACKAGE_TYPES)[number])) throw new Error("NATIVE_PAYLOAD_UNAVAILABLE");
   const payload = createSpectraPackage({ artifactType: artifact.blueprintKey as (typeof SPECTRA_PACKAGE_TYPES)[number], schemaVersion: 1, createdByVersion: "spectra-n5", content: artifact.content ?? {} });
   const hash = await sha256Payload(payload);

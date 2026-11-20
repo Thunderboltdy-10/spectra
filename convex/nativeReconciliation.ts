@@ -28,7 +28,7 @@ export const externalReconciliationArgs = {
   regionIds: v.array(v.string()),
   partNames: v.array(v.string()),
   conflictRegionIds: v.array(v.string()),
-  previews: v.optional(v.array(v.object({ regionId: v.string(), spectra: v.string(), external: v.string() }))),
+  previews: v.optional(v.array(v.object({ regionId: v.string(), spectra: v.string(), external: v.string(), externalBlock: v.optional(v.any()) }))),
   resolution: v.optional(v.union(v.literal("local"), v.literal("merged"))),
 };
 type ExternalReconciliation = ObjectType<typeof externalReconciliationArgs>;

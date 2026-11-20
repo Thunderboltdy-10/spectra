@@ -6,8 +6,15 @@ const REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships
 const CONTENT = "application/vnd.openxmlformats-officedocument.wordprocessingml.";
 type WordRunFormatting = { bold: boolean; italic: boolean; underline: boolean };
 
+/** The element and every element under it, in document order. */
 export function wordElements(root: XmlElement): XmlElement[] {
-  return [root, ...root.elements().flatMap(wordElements)];
+  const found: XmlElement[] = [];
+  const visit = (element: XmlElement) => {
+    found.push(element);
+    for (const child of element.children) if (child.kind === "element") visit(child as XmlElement);
+  };
+  visit(root);
+  return found;
 }
 
 export function wordAttr(element: XmlElement, name: string) {

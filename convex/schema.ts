@@ -2144,7 +2144,7 @@ export default defineSchema({
     .index("by_account_store", ["accountId", "storeId", "createdAt"]),
 
   spectraArtifacts: defineTable({
-    /** Kept on a computer through Spectra Bridge rather than here. */
+    /** Kept on a computer through Bridge rather than here. */
     storageHome: v.optional(v.literal("device")),
     /** Which computer's store has it. */
     storageStoreId: v.optional(v.string()),
@@ -2440,6 +2440,18 @@ export default defineSchema({
     .index("by_account_state", ["accountId", "state"])
     .index("by_credential_hash", ["credentialHash"]),
 
+  /** A desktop sign-in passed from the person's own browser: the Clerk
+   * sign-in ticket sealed with a key only the desktop window and that browser
+   * know. Taken once, gone within minutes. */
+  desktopSignIns: defineTable({
+    handoffId: v.string(),
+    accountId: v.id("accounts"),
+    sealed: v.string(),
+    expiresAt: v.number(),
+  })
+    .index("by_handoff", ["handoffId"])
+    .index("by_account", ["accountId"]),
+
   bridgePairingChallenges: defineTable({
     accountId: v.id("accounts"),
     challengeHash: v.string(),
@@ -2642,7 +2654,10 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_mount_state", ["mountId", "state"])
-    .index("by_device_resource", ["deviceId", "localResourceId"]),
+    .index("by_device_resource", ["deviceId", "localResourceId"])
+    // A file the person picked inside a synced folder, before Bridge has
+    // reported it: found by its path when Bridge does.
+    .index("by_mount_path", ["mountId", "relativePath"]),
 
   /** A Bridge's last answer for an unchanged discovery page, so an older
    * Bridge rescanning the same files costs one small read, not a pass over

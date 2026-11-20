@@ -45,7 +45,7 @@ const status = {
   ],
 };
 
-describe("Spectra Bridge folder targeting", () => {
+describe("Bridge folder targeting", () => {
   it("does not offer an individual file as a folder for saving new artifacts", () => {
     const file = { ...mounts[0], _id: "file-mount", grantId: "file-grant", selectedFile: "Essay.docx" };
     const local = { ...status, mounts: [...status.mounts, { ...status.mounts[0], id: "file-grant", selectionKind: "file" as const }] };

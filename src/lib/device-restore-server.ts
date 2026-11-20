@@ -51,7 +51,7 @@ export async function deviceUndoPlan(touched: string[], runId: string) {
       if (before) plan.restore.push({ artifactId, versionId: before.id });
     } catch {
       plan.keep.push(artifactId);
-      plan.notes.push("Spectra Bridge isn't answering on this computer, so artifacts kept there stay as they are. Open Bridge and try again.");
+      plan.notes.push("Bridge isn't answering on this computer, so artifacts kept there stay as they are. Open Bridge and try again.");
     }
   }
   return plan;

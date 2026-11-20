@@ -102,6 +102,6 @@ jobs:
             --target ${{ matrix.target }}
             ${{ inputs.distribution == 'friend-test' && '--config tauri.friend-test.conf.json' || '' }}
           uploadWorkflowArtifacts: true
-          workflowArtifactNamePattern: spectra-bridge-${{ inputs.distribution }}-[platform]-[arch]-[bundle]
+          workflowArtifactNamePattern: spectra-desktop-${{ inputs.distribution }}-[platform]-[arch]-[bundle]
           uploadUpdaterJson: ${{ inputs.distribution == 'public-candidate' }}
           uploadUpdaterSignatures: ${{ inputs.distribution == 'public-candidate' }}

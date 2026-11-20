@@ -1003,7 +1003,7 @@ export function SpectraShell({
       const { moveWorkToCloud } = await import("../bridge/device-works");
       await moveWorkToCloud(artifact._id);
     } catch {
-      throw new Error("Open Spectra Bridge on the computer that holds this artifact to share it.");
+      throw new Error("Open Spectra for desktop on the computer that holds this artifact to share it.");
     }
     toast.info("Moved online so the people you share with can open it.");
     spectraBus.emit("workspace.refreshRequested", {});

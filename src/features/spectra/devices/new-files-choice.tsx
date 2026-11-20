@@ -27,8 +27,8 @@ export function NewFilesChoice({
           </h2>
           <p className="device-slip-about">
             {on
-              ? "A file or folder added to a synced folder comes into Spectra by itself, and moving or renaming one on either side does the same on the other."
-              : "New files in a synced folder wait for you to bring them in, so you choose each one. Moves and renames stay on their own side."}
+              ? "A file or folder added to a synced folder comes into Spectra by itself, and moving or renaming one on either side does the same on the other. A folder's Details can set it differently."
+              : "New files in a synced folder wait for you to pick them with Add files, so you choose each one. Moves and renames stay on their own side. A folder's Details can set it differently."}
           </p>
         </div>
         <Switch aria-label="New files sync both ways" checked={on} disabled={disabled} onCheckedChange={onChange} />

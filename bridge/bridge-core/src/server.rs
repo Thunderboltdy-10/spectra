@@ -34,8 +34,8 @@ fn is_local_development_origin(value: &str) -> bool {
 /*
  * The local control API. Spectra's Devices page drives the Bridge through it:
  * pairing, status, folders, pausing, logs, updates and unpairing. The Bridge
- * has no window of its own; the only native surfaces are the tray, the folder
- * picker and the pairing confirmation, and both dialogs are opened from here.
+ * is part of Spectra for desktop; its native surfaces are the app window, the
+ * tray, the folder picker and the confirmations opened from here.
  */
 
 pub struct ServerState {
@@ -61,6 +61,8 @@ pub struct ServerState {
     update_requested_at: AtomicU64,
     /// Disconnected on purpose: pages wait for a person to connect it again.
     disconnected_here: AtomicBool,
+    /// A downloaded update waiting for the app's window to close or a restart.
+    update_ready: RwLock<Option<String>>,
 }
 
 /// One update request per ten minutes.
@@ -101,12 +103,12 @@ pub trait LocalBridgeControl: Send + Sync {
     async fn select_mount(&self) -> Result<Option<String>, String>;
     /// Opens a native picker for one or several individual files.
     async fn select_files(&self) -> Result<FilesSelected, String> {
-        Err("Update Spectra Bridge to sync individual files.".into())
+        Err("Update Spectra to sync individual files.".into())
     }
     /// Brings in a file or folder Spectra AI named, once the person agrees in
     /// a native prompt on this computer. None when they say no.
     async fn sync_named(&self, _path: &str) -> Result<Option<String>, String> {
-        Err("Update Spectra Bridge to sync a file by name.".into())
+        Err("Update Spectra to sync a file by name.".into())
     }
     async fn retry_mount(&self, grant_id: &str) -> Result<(), String>;
     async fn remove_mount(&self, grant_id: &str) -> Result<(), String>;
@@ -120,6 +122,10 @@ pub trait LocalBridgeControl: Send + Sync {
     async fn reveal_file(&self, grant_id: &str, relative_path: &str) -> Result<(), String>;
     /// Forgets this computer's pairing and stops syncing. Files stay.
     async fn unpair(&self) -> Result<(), String>;
+    /// Restarts into an update that is downloaded and waiting (Spectra for desktop).
+    async fn restart_update(&self) -> Result<String, String> {
+        Err("No update is waiting.".into())
+    }
 }
 
 impl ServerState {
@@ -154,7 +160,14 @@ impl ServerState {
             local_development,
             update_requested_at: AtomicU64::new(0),
             disconnected_here: AtomicBool::new(false),
+            update_ready: RwLock::new(None),
         }
+    }
+    pub fn set_update_ready(&self, version: Option<String>) {
+        *self.update_ready.writing() = version;
+    }
+    pub fn update_ready(&self) -> Option<String> {
+        self.update_ready.reading().clone()
     }
     /// The one test for a browser origin: pairing offers, CORS and updates.
     pub fn origin_allowed(&self, origin: &str) -> bool {
@@ -258,6 +271,13 @@ impl ServerState {
         seen > 0 && unix_ms().saturating_sub(seen) <= window_ms
     }
     /// The first configured Spectra origin, for opening the Devices page.
+    /// Every origin this Bridge serves, deployed ones first.
+    pub fn origins(&self) -> Vec<String> {
+        let origins = self.allowed_origins.reading();
+        let mut sorted: Vec<String> = origins.iter().cloned().collect();
+        sorted.sort_by(|left, right| (left.starts_with("http://"), left).cmp(&(right.starts_with("http://"), right)));
+        sorted
+    }
     pub fn primary_origin(&self) -> Option<String> {
         let origins = self.allowed_origins.reading();
         let mut sorted: Vec<&String> = origins.iter().collect();
@@ -510,6 +530,7 @@ pub fn router(state: Arc<ServerState>) -> Router {
         .route("/v1/pair/status", post(pair_status))
         .route("/v1/session/resume", post(resume))
         .route("/v1/update", post(request_update))
+        .route("/v1/update/restart", post(restart_update))
         .merge(protected)
         .layer(
             CorsLayer::new()
@@ -555,6 +576,7 @@ async fn health(State(state): State<Arc<ServerState>>) -> Json<HealthResponse> {
         port: crate::BRIDGE_PORT,
         bind_error: state.bind_error.reading().clone(),
         disconnected_here: state.disconnected_here.load(Ordering::Acquire),
+        update_ready: state.update_ready(),
     })
 }
 
@@ -809,11 +831,10 @@ async fn pair_offer(
 /// and no page may ask more than once in ten minutes. The tray and the native
 /// app call `request_update` directly, without `Origin`.
 async fn request_update(State(state): State<Arc<ServerState>>, headers: HeaderMap) -> Response {
-    if let Some(origin) = headers.get("origin") {
-        if !origin.to_str().is_ok_and(|value| state.origin_allowed(value)) {
+    if let Some(origin) = headers.get("origin")
+        && !origin.to_str().is_ok_and(|value| state.origin_allowed(value)) {
             return (StatusCode::FORBIDDEN, "Not for this page").into_response();
         }
-    }
     let now = unix_ms();
     let last = state.update_requested_at.load(Ordering::Acquire);
     if last > 0 && now.saturating_sub(last) < UPDATE_REQUEST_INTERVAL_MS
@@ -825,6 +846,29 @@ async fn request_update(State(state): State<Arc<ServerState>>, headers: HeaderMa
         Some(control) => match control.request_update().await {
             Ok(message) => Json(serde_json::json!({ "message": message })).into_response(),
             Err(error) => (StatusCode::BAD_REQUEST, error).into_response(),
+        },
+        None => controls_not_ready(),
+    }
+}
+
+/// Restart now into the waiting update: the page's Restart pill. Only a
+/// Spectra page may ask, and only when an update is already downloaded, so it
+/// has no rate limit of its own.
+async fn restart_update(State(state): State<Arc<ServerState>>, headers: HeaderMap) -> Response {
+    let allowed = headers
+        .get("origin")
+        .and_then(|origin| origin.to_str().ok())
+        .is_some_and(|origin| state.origin_allowed(origin));
+    if !allowed {
+        return (StatusCode::FORBIDDEN, "Not for this page").into_response();
+    }
+    if state.update_ready().is_none() {
+        return (StatusCode::CONFLICT, "No update is waiting").into_response();
+    }
+    match state.control() {
+        Some(control) => match control.restart_update().await {
+            Ok(message) => Json(serde_json::json!({ "message": message })).into_response(),
+            Err(error) => (StatusCode::CONFLICT, error).into_response(),
         },
         None => controls_not_ready(),
     }

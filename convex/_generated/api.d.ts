@@ -61,6 +61,7 @@ import type * as collaborationSnapshotVerification from "../collaborationSnapsho
 import type * as crons from "../crons.js";
 import type * as dailyBriefSchema from "../dailyBriefSchema.js";
 import type * as dailyBriefs from "../dailyBriefs.js";
+import type * as desktopSignIn from "../desktopSignIn.js";
 import type * as deviceWorks from "../deviceWorks.js";
 import type * as durableContentDependencies from "../durableContentDependencies.js";
 import type * as durablePayloadIntegrity from "../durablePayloadIntegrity.js";
@@ -224,6 +225,7 @@ declare const fullApi: ApiFromModules<{
   crons: typeof crons;
   dailyBriefSchema: typeof dailyBriefSchema;
   dailyBriefs: typeof dailyBriefs;
+  desktopSignIn: typeof desktopSignIn;
   deviceWorks: typeof deviceWorks;
   durableContentDependencies: typeof durableContentDependencies;
   durablePayloadIntegrity: typeof durablePayloadIntegrity;

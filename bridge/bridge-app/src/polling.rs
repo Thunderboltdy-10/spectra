@@ -327,15 +327,14 @@ mod tests {
                 .get(wake_index)
                 .copied()
                 .filter(|wake| *wake <= window);
-            if let Some(wake) = next_wake {
-                if wake <= due {
+            if let Some(wake) = next_wake
+                && wake <= due {
                     clock.now = wake;
                     while local_wakes.get(wake_index).copied() == Some(wake) {
                         wake_index += 1;
                     }
                     continue;
                 }
-            }
             if due > window {
                 break;
             }
@@ -345,7 +344,7 @@ mod tests {
 
     #[test]
     fn idle_transport_request_count_is_bounded_and_jitter_is_independent() {
-        let outcomes = std::iter::repeat(PollResult::SuccessfulIdle).take(32);
+        let outcomes = std::iter::repeat_n(PollResult::SuccessfulIdle, 32);
         let mut transport = FakeTransport::new(outcomes);
         let mut clock = VirtualClock::default();
         let mut scheduler = PollScheduler::new(7);

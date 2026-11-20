@@ -10,6 +10,7 @@ import { useQuery } from "@/features/spectra/data/use-kept-query";
 import { api } from "../../../../convex/_generated/api";
 import { useAuthedArgs } from "../data/use-authed-args";
 import { DeviceFolderBrowser } from "./device-folder-browser";
+import { FolderDetails } from "./folder-details";
 import { PlaceInMenu } from "./place-in-menu";
 import { useLifeArrival, useLifeDeparture, useLifeJoin } from "../life/use-life";
 import type { LocalDeviceRequest } from "./actions";
@@ -77,7 +78,7 @@ export function DeviceCard({
   const older = !device.updateRequired && bridgeVersionOlder(device.version, latestVersion);
   const facts = [
     device.platformLabel,
-    device.version ? `Spectra Bridge ${device.version}` : null,
+    device.version ? `Spectra for desktop ${device.version}` : null,
     device.lastSyncAt ? `synced ${timeAgo(device.lastSyncAt, now)}` : null,
   ].filter(Boolean);
   const updateNote = updateMessage ?? device.updateNote;
@@ -186,8 +187,8 @@ export function DeviceCard({
           <span>
             {updateNote ??
               (device.isThisComputer
-                ? `Spectra Bridge ${latestVersion} is out. Press Check for update to install it.`
-                : `Spectra Bridge ${latestVersion} is out. On ${device.name}, choose Check for updates in the Spectra Bridge menu ${device.platformLabel.startsWith("Mac") ? "in the menu bar" : "near the clock"}.`)}
+                ? `Spectra for desktop ${latestVersion} is out. Press Check for update to install it.`
+                : `Spectra for desktop ${latestVersion} is out. On ${device.name}, choose Check for updates in the Spectra menu ${device.platformLabel.startsWith("Mac") ? "in the menu bar" : "near the clock"}.`)}
           </span>
         </p>
       ) : null}
@@ -204,7 +205,7 @@ export function DeviceCard({
         ) : null}
         {device.isThisComputer && (local || device.updateRequired) ? (
           <Button variant={device.updateRequired ? "primary" : "ghost"} size="sm" disabled={busy === "update"} onClick={() => onAction({ action: "update" })}>
-            {busy === "update" ? "Checking…" : device.updateRequired ? "Update Bridge" : "Check for update"}
+            {busy === "update" ? "Checking…" : device.updateRequired ? "Update" : "Check for update"}
           </Button>
         ) : null}
         {device.isThisComputer && !local && !device.updateRequired && onReconnect ? (
@@ -296,6 +297,7 @@ function FolderTile({
   const working = busy?.endsWith(`:${folder.id}`) ?? false;
   const progress = folder.progress && folder.progress.synced < folder.progress.total ? folder.progress : null;
   const where = folder.path === folder.name ? null : folder.path.slice(0, folder.path.length - folder.name.length).replace(/\s*›\s*$/, "");
+  const [details, setDetails] = useState(false);
   return (
     <li className="device-folder" data-open={browsing || undefined} data-tone={folder.tone} data-paused={folder.paused || undefined} style={{ "--folder-ink": `var(${ink})` } as CSSProperties}>
       <span aria-hidden className="device-folder-tab" />
@@ -328,11 +330,17 @@ function FolderTile({
         </span>
       ) : null}
       <SyncLanes backlog={backlog} computer={computer} single={isFile} />
-      {folder.rootNodeId && !isFile ? (
-        <button type="button" className="device-folder-browse" aria-expanded={browsing} onClick={onBrowse}>
-          {browsing ? "Hide files" : "See files"}
+      <span className="device-folder-links">
+        {folder.rootNodeId && !isFile ? (
+          <button type="button" className="device-folder-browse" aria-expanded={browsing} onClick={onBrowse}>
+            {browsing ? "Hide files" : "See files"}
+          </button>
+        ) : null}
+        <button type="button" className="device-folder-browse" aria-expanded={details} onClick={() => setDetails((open) => !open)}>
+          {details ? "Hide details" : "Details"}
         </button>
-      ) : null}
+      </span>
+      {details ? <FolderDetails folder={folder} computer={computer} /> : null}
       {act || folder.rootNodeId || isFile ? (
         <span className="device-folder-actions" data-visible={working || undefined}>
           {isFile ? (

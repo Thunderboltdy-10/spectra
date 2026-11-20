@@ -35,18 +35,53 @@ const DONE: Record<LocalDeviceAction, string> = {
   pause_syncing: "Paused syncing on this computer.",
   resume_syncing: "Resumed syncing on this computer.",
   show_logs: "Opened Bridge's logs on this computer.",
-  update: "Updating Spectra Bridge.",
+  update: "Updating Spectra for desktop.",
 };
 
-function filesChosenMessage(files: BridgeFilesSelected) {
+function filesChosenMessage(files: BridgeFilesSelected, joining: BridgeFile[] = []) {
   const name = (file: BridgeFile) => file.relativePath.split("/").pop() ?? file.relativePath;
   const added = files.selected === 1 ? "The selected file is syncing." : `${files.selected} selected files are syncing.`;
-  if (!files.existing.length) return added;
-  const here =
-    files.existing.length === 1
+  const parts = files.selected ? [added] : [];
+  if (joining.length)
+    parts.push(joining.length === 1
+      ? `${name(joining[0]!)} is in a folder that already syncs, and is on its way to Spectra.`
+      : `${joining.length} of them are in folders that already sync, and are on their way to Spectra.`);
+  if (files.existing.length)
+    parts.push(files.existing.length === 1
       ? `${name(files.existing[0]!)} was already synced.`
-      : `${files.existing.length} of them were already synced.`;
-  return files.selected ? `${added} ${here}` : here;
+      : `${files.existing.length} of them were already synced.`);
+  return parts.join(" ");
+}
+
+type PickWithinFolders = (items: BridgeFile[]) => Promise<{
+  results: Array<BridgeFile & { state: "synced" | "approved" | "unknown" }>;
+  rescan: string[];
+}>;
+let pickWithinFolders: PickWithinFolders | null = null;
+
+/**
+ * How a file picked inside a folder that already syncs reaches Spectra even
+ * when that folder's rule leaves new files out. Set while Spectra is signed in.
+ */
+export function setPickWithinFolders(handler: PickWithinFolders | null) {
+  pickWithinFolders = handler;
+}
+
+/** Picked files inside synced folders: those Spectra lacks are approved and their folders looked at again. */
+async function joinPickedWithinFolders(files: BridgeFilesSelected): Promise<{ files: BridgeFilesSelected; joining: BridgeFile[] }> {
+  if (!files.existing.length || !pickWithinFolders) return { files, joining: [] };
+  try {
+    const { results, rescan } = await pickWithinFolders(files.existing.slice(0, 100));
+    await Promise.all(rescan.map((grantId) => retryBridgeFolder(grantId).catch(() => undefined)));
+    const joining = results.filter((item) => item.state === "approved").map(({ grantId, relativePath }) => ({ grantId, relativePath }));
+    const joined = new Set(joining.map((item) => JSON.stringify([item.grantId, item.relativePath])));
+    return {
+      files: { ...files, existing: files.existing.filter((item) => !joined.has(JSON.stringify([item.grantId, item.relativePath]))) },
+      joining,
+    };
+  } catch {
+    return { files, joining: [] };
+  }
 }
 
 /** Whether this browser can reach the paired Bridge on this computer. */
@@ -67,12 +102,13 @@ export async function runLocalDeviceAction(request: LocalDeviceRequest): Promise
     let message = DONE[request.action].replaceAll("folder", noun);
     switch (request.action) {
       case "add_files": {
-        const files = await selectBridgeFiles();
-        const chosen = files.selected + files.existing.length;
+        const picked = await selectBridgeFiles();
+        const chosen = picked.selected + picked.existing.length;
         if (!chosen) return { status: "pending", message: "No files were selected." };
-        message = filesChosenMessage(files);
+        const { files, joining } = await joinPickedWithinFolders(picked);
+        message = filesChosenMessage(files, joining);
         spectraBus.emit("devices.changed", {});
-        return { status: "completed", message, data: files };
+        return { status: "completed", message, data: { ...files, joining } };
       }
       case "sync_path": {
         const path = request.path?.trim();

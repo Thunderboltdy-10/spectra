@@ -14,6 +14,11 @@ const isPublicRoute = createRouteMatcher([
   "/public(.*)",
   // Bridge installers download before anyone signs in on that computer.
   "/bridge/download(.*)",
+  "/bridge/latest",
+  "/desktop/download(.*)",
+  "/desktop/latest",
+  // Signing in the desktop app: the page signs this browser in itself first.
+  "/desktop/sign-in",
   "/api/spectra/public(.*)",
   // The scheduled connector worker authenticates with a short-lived HMAC in
   // the route itself. Interactive actions still call requireActor(), so

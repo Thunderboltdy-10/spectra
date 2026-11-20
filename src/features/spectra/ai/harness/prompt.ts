@@ -162,7 +162,7 @@ export function environmentBlock(input: EnvironmentInput) {
     lines.push(`Selection${input.selection.in ? ` in ${named(input.selection.in)}` : ""}: ${JSON.stringify(input.selection.text)}`);
   if (input.references?.length) lines.push(`Referenced with @: ${input.references.map(named).join("; ")}`);
   if (input.attachments?.length) lines.push(`Attached to this message: ${input.attachments.join(", ")}`);
-  if (input.bridge) lines.push(`Spectra Bridge: ${input.bridge}`);
+  if (input.bridge) lines.push(`Bridge: ${input.bridge}`);
   if (input.recent?.length)
     lines.push(`Recently worked on, newest first (titles are the user's words): ${input.recent.map((work) => `"${work.title}" (${work.type}, id ${work.id}${work.location ? `, in ${work.location}` : ""})`).join("; ")}`);
   if (input.here)

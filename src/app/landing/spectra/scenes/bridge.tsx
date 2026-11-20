@@ -16,6 +16,7 @@ import { dimAll, flash, shine, travel } from "../light/light";
 import { useLoop, type Beat } from "../loop";
 import { BridgePrism, newDrive, pulse } from "../prism/bridge-prism";
 import { Window } from "../window";
+import { DesktopDownloadLink } from "@/features/spectra/desktop/desktop-download-link";
 
 /*
  * The same file twice: Henry's History IA as Word has it on his laptop, and
@@ -287,6 +288,7 @@ export function Bridge({ film = false }: { film?: boolean }) {
           Bridge keeps the folders you choose in step with their class. Write in Word and Spectra has it. Ask Spectra to edit, and the
           change is in the file on your laptop as it is made.
         </p>
+        <DesktopDownloadLink className="sp-desktop-get" />
       </div>
 
       <div ref={stageRef} className="sp-bridge-stage">

@@ -1,8 +1,9 @@
 /*
  * Connecting this computer, as one store the Devices page and Spectra AI
- * share: check for Bridge, offer the download when it is missing and wait for
- * it, then pair through the local control (`auto_pair`) while the same code
- * shows on the page and in Bridge's native dialog.
+ * share: check for Bridge, offer Spectra for desktop when it is missing and
+ * wait for it, then offer the signed-in account's challenge (`POST /v1/pair`)
+ * and follow `/v1/pair/status` until Bridge has joined. Bridge accepts offers
+ * only from Spectra's own origins, so no code needs confirming on the computer.
  */
 import {
   BRIDGE_PROTOCOL_VERSION,
@@ -71,9 +72,9 @@ const browserDeps: PairingDeps = {
 
 export const PAIRING_COPY = {
   portTaken: "Another app is using Bridge's connection. Close it, then try again.",
-  outOfDate: "This Spectra Bridge is out of date. Update it, then connect again.",
-  noBridgeHere: "Spectra Bridge runs on Windows and Mac. Open Spectra on your computer to connect it.",
-  waitedTooLong: "Spectra Bridge didn't start. Open it once it's installed, then try again.",
+  outOfDate: "This version of Spectra for desktop is out of date. Update it, then connect again.",
+  noBridgeHere: "Spectra for desktop runs on Windows and Mac. Open Spectra on your computer to connect it.",
+  waitedTooLong: "Spectra for desktop didn't start. Open it once it's installed, then try again.",
   expired: "The code expired before it was confirmed. Try again.",
 } as const;
 

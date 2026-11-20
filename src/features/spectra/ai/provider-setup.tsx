@@ -45,8 +45,8 @@ export function setupActionFor(state: AgentProviderStatus["state"] | undefined):
 
 const REASON: Record<Exclude<SetupResult, { opened: true }>["reason"], string> = {
   unsupported: "Spectra can't open a terminal on this computer.",
-  "update-bridge": "Update Spectra Bridge to do this in one click.",
-  "no-bridge": "Spectra Bridge isn't running on this computer.",
+  "update-bridge": "Update Spectra for desktop to do this in one click.",
+  "no-bridge": "Spectra for desktop isn't running on this computer.",
   failed: "The terminal didn't open.",
 };
 
@@ -274,7 +274,7 @@ function providerLine(entry: AgentProviderStatus | undefined, checking = false) 
   }
   if (entry.state === "not-installed") return "Not installed";
   if (entry.state === "signed-out") return "Installed, not logged in";
-  if (entry.state === "no-bridge") return "Needs Spectra Bridge";
+  if (entry.state === "no-bridge") return "Needs Spectra for desktop";
   return "Didn't answer. Try again in a moment.";
 }
 
@@ -286,7 +286,7 @@ export function SubscriptionSetup({ compact = false }: { compact?: boolean }) {
   const { status, checking, recheck } = useAgentRuntime();
   const unavailable = bridgeUnavailableReason(useBridgeAvailability());
   const body = unavailable ? (
-    <p className="text-caption leading-5 text-[var(--text-secondary)]">Set up Spectra Bridge first: Codex and Claude Code run through it.</p>
+    <p className="text-caption leading-5 text-[var(--text-secondary)]">Set up Spectra for desktop first: Codex and Claude Code run through it.</p>
   ) : (
     <ul className="grid gap-3">
       {(["codex", "claude"] as const).map((provider) => (

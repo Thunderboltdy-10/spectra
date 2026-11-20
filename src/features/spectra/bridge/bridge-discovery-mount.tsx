@@ -13,6 +13,7 @@ import { backUpNow, backupIsDue, handOverEdits, mergeHandOvers, type BackupServe
 import { deviceStoreSummary, publishDeviceState, retryPendingRemovals, useDeviceState } from "./device-works";
 import { recheckAgentRuntime, useAgentRuntime } from "../ai/use-agent-runtime";
 import { rejoinBridge } from "../devices/pairing";
+import { setPickWithinFolders } from "../devices/device-actions";
 import { publishBridgeAvailability } from "./availability";
 import { useSpectraPreferences } from "../settings/preference-store";
 import { useSetupDue } from "../onboarding/setup-state";
@@ -26,8 +27,10 @@ import {
   bridgePlatform,
   bridgeRemovedHere,
   enableBridgeDiscovery,
+  restartForUpdate,
   setBridgeAgentHub,
 } from "./client";
+import { useDesktop } from "../desktop/desktop";
 
 /*
  * Signed-in accounts can discover an installed Bridge before their first
@@ -100,6 +103,12 @@ export function BridgeConnection() {
   const pathname = usePathname();
   const { isAuthenticated } = useConvexAuth();
   const requestPairing = useMutation(api.bridge.requestPairing);
+  const pickWithinFolders = useMutation(api.bridgeSync.pickWithinFolders);
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    setPickWithinFolders((items) => pickWithinFolders({ items }));
+    return () => setPickWithinFolders(null);
+  }, [isAuthenticated, pickWithinFolders]);
   const { discovery, status, checked, refresh } = useBridgeHealth();
   const { preferences, hydrated, accountReady, update } = useSpectraPreferences();
   // Setup has its own Bridge step and the tour its own say, so nothing about the Bridge is offered over either.
@@ -107,6 +116,8 @@ export function BridgeConnection() {
   const setupPending = useSetupDue(preferences.integrations);
   const inSetup = !accountReady || setupPending || touring;
   const hasDevice = useSession()?.hasDevice;
+  // In Spectra for desktop this page runs inside the app that holds Bridge.
+  const desktop = useDesktop();
   // A computer removed or disconnected on purpose (here or in Bridge itself)
   // waits for a person to connect it again instead of joining by itself.
   const unjoined =
@@ -229,7 +240,7 @@ export function BridgeConnection() {
   }, [checked, discovery.kind, hasDevice, joined]);
   useEffect(() => {
     if (inSetup || !unjoined || rejoinable || pathname.startsWith("/devices") || offeredRecently()) return;
-    toast.info("Spectra Bridge is running on this computer.", {
+    toast.info("Bridge can sync files on this computer.", {
       id: "bridge-connect-offer",
       action: { label: "Connect", onClick: () => router.push("/devices?connect=1") },
     });
@@ -241,22 +252,33 @@ export function BridgeConnection() {
       if (inSetup) entryPromptShown = false;
       return;
     }
-    if (entryPromptShown || !checked || hasDevice === undefined) return;
+    if (entryPromptShown || !checked || hasDevice === undefined || desktop) return;
     if (pathname.startsWith("/devices") || bridgePlatform() === "other") return;
     entryPromptShown = true;
     toast.warning(
       hasDevice
-        ? "Spectra Bridge isn't running here. Open it, or get it for this computer, to keep your files and artifacts on it in step."
-        : "Get Spectra Bridge to keep your files and artifacts on this computer in step with Spectra.",
+        ? "Spectra for desktop isn't running here. Open it to keep your files and artifacts on this computer in step."
+        : "Install Spectra for desktop to sync local files and keep your artifacts on this computer in step.",
       {
         id: "bridge-entry",
-        // It stays until closed, and comes back on the next visit while Bridge is still missing.
+        // It stays until closed, and comes back on the next visit while the app is still missing.
         duration: Infinity,
         closeButton: true,
-        action: { label: hasDevice ? "Open Devices" : "Get Bridge", onClick: () => router.push("/devices") },
+        action: { label: hasDevice ? "Open Devices" : "Get the app", onClick: () => router.push("/devices") },
       },
     );
-  }, [checked, discovery.kind, hasDevice, inSetup, joined, pathname, router]);
+  }, [checked, desktop, discovery.kind, hasDevice, inSetup, joined, pathname, router]);
+  // A downloaded update waits while a window is open; the person picks the moment.
+  const updateReady = discovery.kind === "running" ? discovery.health.updateReady : undefined;
+  useEffect(() => {
+    if (!updateReady) { toast.dismiss("desktop-update"); return; }
+    toast.info(`Spectra ${updateReady} is ready.`, {
+      id: "desktop-update",
+      duration: Infinity,
+      closeButton: true,
+      action: { label: "Restart", onClick: () => void restartForUpdate() },
+    });
+  }, [updateReady]);
   // Someone who was here before there was a choice hears about it once.
   useEffect(() => {
     if (inSetup || !joined || !workSettings || workSettings.storage || pathname.startsWith("/devices")) return;

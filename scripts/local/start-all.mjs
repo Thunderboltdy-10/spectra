@@ -12,7 +12,7 @@ const runtimeRoot = resolve(
   repositoryRoot,
   String(process.env.SPECTRA_LOCAL_ROOT ?? ".spectra-local").trim() || ".spectra-local",
 );
-const defaultBridgePort = 47615;
+const defaultBridgePort = 47615; // shared/bridge-port.ts
 const defaultTimeoutSeconds = 900;
 
 function parseArguments(argv) {
@@ -407,7 +407,7 @@ async function main() {
     return status.ok && !status.body?.bind_error;
   }, options.timeoutSeconds, bridge.pid);
   const ready = await bridgeStatus(undefined, webOrigin);
-  process.stdout.write(`Bridge ready: ${ready.body?.paired ? "paired" : "listening; pair it from Settings → Files and devices"}.\n`);
+  process.stdout.write(`Bridge ready: ${ready.body?.paired ? "paired" : "listening; connect it from /devices"}.\n`);
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

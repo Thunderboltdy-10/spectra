@@ -104,6 +104,20 @@ function mutationFor(command: string, args: Row, runId: string, executionId: str
     } };
     case "save_version": return { name: "changeGroups:createNamedCheckpoint", args: { artifactId: String(args.artifactId ?? ""), name: String(args.name ?? "") } };
     case "remove_device": return { name: "bridge:revokeDevice", args: { deviceId: String(args.deviceId ?? "") } };
+    case "change_folder_sync": {
+      const mountId = String(args.mountId ?? "");
+      switch (args.action) {
+        case "new_files": return { name: "syncPolicy:setFolderNewFiles", args: {
+          mountId,
+          newFiles: args.newFiles === "off" ? "off" : args.newFiles === "follow" ? "follow" : "on",
+          actorKind: "ai",
+          idempotencyKey: `ai:${runId}:${operationId}`,
+        } };
+        case "link": return { name: "bridgeSync:linkSameFolder", args: { mountId, twinMountId: String(args.twinMountId ?? "") } };
+        case "unlink": return { name: "bridgeSync:unlinkSameFolder", args: { mountId } };
+      }
+      break;
+    }
     case "change_sync_policy": return { name: "syncPolicy:patchItems", args: { itemIds: targetIds, patch: row(args.patch), actorKind: "ai", idempotencyKey: `ai:${runId}:${operationId}` } };
     case "change_sharing": {
       const resourceType = String(args.resourceType ?? "artifact");

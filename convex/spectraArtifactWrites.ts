@@ -103,7 +103,7 @@ export const commitPreparation = internalMutation({
           const policy = await computeEffectivePolicy(ctx, actor.accountId, { item: String(artifactId), mount: replica.mountId ? String(replica.mountId) : undefined });
           if (policy.contentDirection === "bidirectional" || policy.contentDirection === "spectra-to-local") {
             categories.push("bridge_files");
-            reasons.push("This also changes a file on your computer through Spectra Bridge. Go ahead?");
+            reasons.push("This also changes a file on your computer through Bridge. Go ahead?");
           }
         }
       }

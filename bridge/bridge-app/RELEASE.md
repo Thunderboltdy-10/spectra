@@ -1,8 +1,10 @@
-# Spectra Bridge desktop release runbook
+# Spectra for desktop release runbook
 
-This project builds the Bridge shell from `bridge/bridge-app`. The browser is
-the normal pairing and setup surface; the native window stays hidden at
-startup and the service runs quietly in the tray. The friend-test artifact is
+This project builds Spectra for desktop from `bridge/bridge-app`: a window on
+the hosted web app plus the Bridge, which syncs local files and keeps running
+in the tray when the window is closed. An interactive launch opens the window;
+a login start stays in the tray. Pairing is silent, from the window or from a
+browser tab on the same computer. The friend-test artifact is
 unsigned; on macOS, Control-click → Open (or Privacy & Security → Open Anyway)
 may be required on first launch. Do not use this document to
 claim Mac runtime verification from Windows.
@@ -24,14 +26,14 @@ cargo tauri build --bundles app,dmg --config tauri.friend-test.conf.json
 Because `bridge/bridge-app` is a member of the `bridge` workspace, the
 unsigned test outputs are under `bridge/target/release/bundle/`:
 
-- `macos/Spectra Bridge.app`
-- `dmg/Spectra Bridge_0.1.0_aarch64.dmg` (the exact architecture/version name may vary)
+- `macos/Spectra.app`
+- `dmg/Spectra_1.0.0_aarch64.dmg` (the exact architecture/version name may vary)
 
 Open the `.app` from Finder or with `open`, then check the local service before
 pairing from the hosted browser:
 
 ```sh
-open '../target/release/bundle/macos/Spectra Bridge.app'
+open '../target/release/bundle/macos/Spectra.app'
 curl --fail --max-time 10 http://127.0.0.1:47615/v1/health
 test -f "$HOME/Library/Application Support/com.spectra.bridge/startup.log"
 find "$HOME/Library/LaunchAgents" -maxdepth 1 -iname '*spectra*' -print
@@ -48,8 +50,8 @@ count. Use only copies of fixtures.
 
 Exercise a second launch, login launch, browser reload/session resume, folder
 remove/re-add, pause/resume (tray and page), and a native-file save/readback
-on disposable files. Also check that the tray's Open Devices in Spectra opens
-the Devices page, its tooltip names the state, and Show logs on the page opens
+on disposable files. Also check that closing the window leaves the tray running,
+that the tray's Open Spectra brings the window back, its tooltip names the state, and Show logs on the page opens
 a diagnostic file. An unsigned app
 may be blocked by Gatekeeper; that is expected for this test artifact and is
 not a public launch result.

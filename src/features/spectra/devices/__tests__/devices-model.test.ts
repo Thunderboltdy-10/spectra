@@ -130,7 +130,7 @@ describe("devices model", () => {
     const unreachable = devicesModel({ local: { reachability: "not-running", status: status({ paired: false }) }, cloud, now: NOW });
     expect(unreachable.thisComputer?.detail).toMatch(/connected to Spectra, but this browser can't reach it/);
     const quiet = devicesModel({ local: { reachability: "not-running", status: status({ paired: false }) }, cloud, now: NOW + DEVICE_ONLINE_MS });
-    expect(quiet.thisComputer?.detail).toBe("Bridge isn't running. Start Spectra Bridge on this computer, then try again.");
+    expect(quiet.thisComputer?.detail).toBe("Bridge isn't running. Open Spectra for desktop on this computer, then try again.");
     const running = devicesModel({ local: { reachability: "running", status: status({ paired: false }) }, cloud, now: NOW });
     expect(running.thisComputer?.detail).toBe("Bridge is running. Try again to reconnect this browser to it.");
   });

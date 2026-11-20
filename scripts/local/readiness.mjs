@@ -7,7 +7,7 @@ import { gatewayHealthPayload, isGatewayHealthBody } from "../collaboration-heal
 
 export { gatewayHealthPayload, isGatewayHealthBody };
 
-const BRIDGE_DEFAULT_URL = "http://127.0.0.1:47615";
+const BRIDGE_DEFAULT_URL = "http://127.0.0.1:47615"; // shared/bridge-port.ts
 
 async function fetchJson(url, timeoutMs = 1_500, headers = {}) {
   const controller = new AbortController();

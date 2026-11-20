@@ -324,7 +324,7 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     id: "app.devices.pair",
     title: "Connect this computer",
     icon: Laptop,
-    description: "Connect this computer through Spectra Bridge. You confirm a code on the computer.",
+    description: "Connect this computer through Bridge. You confirm a code on the computer.",
     presentation: { kind: "button", compact: { iconOnly: true }, medium: { label: "Connect this computer" } },
     defaultPlacement: { tab: "Devices", group: "This computer", order: 0 },
     availability: readable,

@@ -1,4 +1,4 @@
-import { v } from "convex/values";
+import { v, type Infer } from "convex/values";
 import { mutation, query } from "./functions";
 import type { Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
@@ -168,73 +168,161 @@ export const effective = query({
   },
 });
 
+const policyValuesObject = v.object(policyValues);
+type PolicyValues = Infer<typeof policyValuesObject>;
+type ScopeKind = Infer<typeof scopeKind>;
+
+async function changeFor(ctx: MutationCtx, accountId: Id<"accounts">, idempotencyKey: string) {
+  return await ctx.db
+    .query("syncPolicyChanges")
+    .withIndex("by_account_key", (q) => q.eq("accountId", accountId).eq("idempotencyKey", idempotencyKey))
+    .unique();
+}
+
+async function policyAt(ctx: MutationCtx, accountId: Id<"accounts">, kind: ScopeKind, scopeId: string) {
+  return await ctx.db
+    .query("syncPolicies")
+    .withIndex("by_account_scope", (q) => q.eq("accountId", accountId).eq("scopeKind", kind).eq("scopeId", scopeId))
+    .unique();
+}
+
+/** Set a scope's own policy, recording the change once per idempotency key. */
+async function writeOverride(
+  ctx: MutationCtx,
+  accountId: Id<"accounts">,
+  args: { scopeKind: ScopeKind; scopeId: string; values: PolicyValues; idempotencyKey: string; actorKind?: "user" | "ai" },
+) {
+  const scopeId = args.scopeId.trim();
+  if (!scopeId || scopeId.length > 200) throw new Error("SYNC_POLICY_SCOPE_INVALID");
+  if (args.scopeKind === "account" && scopeId !== String(accountId))
+    throw new Error("SYNC_POLICY_ACCOUNT_SCOPE_INVALID");
+  const idempotencyKey = args.idempotencyKey.trim();
+  if (!idempotencyKey || idempotencyKey.length > 200)
+    throw new Error("SYNC_POLICY_IDEMPOTENCY_KEY_INVALID");
+  const existingChange = await changeFor(ctx, accountId, idempotencyKey);
+  if (existingChange) return { changed: false, changeId: existingChange._id };
+  const existing = await policyAt(ctx, accountId, args.scopeKind, scopeId);
+  const now = Date.now();
+  const next = {
+    ...args.values,
+    includeGlobs: [...new Set(args.values.includeGlobs.map((glob) => glob.trim()).filter(Boolean))],
+    excludeGlobs: [...new Set(args.values.excludeGlobs.map((glob) => glob.trim()).filter(Boolean))],
+  };
+  if (next.includeGlobs.length > 100 || next.excludeGlobs.length > 100)
+    throw new Error("SYNC_POLICY_FILTER_LIMIT");
+  const policyId = existing
+    ? (await ctx.db.patch(existing._id, { ...next, updatedAt: now }), existing._id)
+    : await ctx.db.insert("syncPolicies", {
+        accountId,
+        scopeKind: args.scopeKind,
+        scopeId,
+        ...next,
+        createdAt: now,
+        updatedAt: now,
+      });
+  const changeId = await ctx.db.insert("syncPolicyChanges", {
+    accountId,
+    scopeKind: args.scopeKind,
+    scopeId,
+    action: "override",
+    before: policySnapshot(existing),
+    after: policySnapshot(next),
+    actorKind: args.actorKind === "ai" ? "ai" : "user",
+    idempotencyKey,
+    createdAt: now,
+  });
+  return { changed: true, policyId, changeId };
+}
+
+/** Drop a scope's own policy so it follows the one above it again. */
+async function removeOverride(
+  ctx: MutationCtx,
+  accountId: Id<"accounts">,
+  args: { scopeKind: ScopeKind; scopeId: string; idempotencyKey: string; actorKind?: "user" | "ai" },
+) {
+  if (args.scopeKind === "account") throw new Error("SYNC_POLICY_ACCOUNT_CANNOT_REVERT");
+  const scopeId = args.scopeId.trim();
+  const idempotencyKey = args.idempotencyKey.trim();
+  if (!scopeId || !idempotencyKey) throw new Error("SYNC_POLICY_REVERT_INVALID");
+  const existingChange = await changeFor(ctx, accountId, idempotencyKey);
+  if (existingChange) return { changed: false, changeId: existingChange._id };
+  const existing = await policyAt(ctx, accountId, args.scopeKind, scopeId);
+  const now = Date.now();
+  if (existing) await ctx.db.delete(existing._id);
+  const changeId = await ctx.db.insert("syncPolicyChanges", {
+    accountId,
+    scopeKind: args.scopeKind,
+    scopeId,
+    action: "revert",
+    before: policySnapshot(existing),
+    actorKind: args.actorKind === "ai" ? "ai" : "user",
+    idempotencyKey,
+    createdAt: now,
+  });
+  return { changed: Boolean(existing), changeId };
+}
+
 export const override = mutation({
   args: {
     scopeKind,
     scopeId: v.string(),
-    values: v.object(policyValues),
+    values: policyValuesObject,
     idempotencyKey: v.string(),
     actorKind: recordedActorKind,
   },
   handler: async (ctx, args) => {
     const actor = await getAuthenticatedActor(ctx);
     if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
-    const scopeId = args.scopeId.trim();
-    if (!scopeId || scopeId.length > 200) throw new Error("SYNC_POLICY_SCOPE_INVALID");
-    if (args.scopeKind === "account" && scopeId !== String(actor.accountId))
-      throw new Error("SYNC_POLICY_ACCOUNT_SCOPE_INVALID");
-    const idempotencyKey = args.idempotencyKey.trim();
-    if (!idempotencyKey || idempotencyKey.length > 200)
-      throw new Error("SYNC_POLICY_IDEMPOTENCY_KEY_INVALID");
-    const existingChange = await ctx.db
-      .query("syncPolicyChanges")
-      .withIndex("by_account_key", (q) =>
-        q.eq("accountId", actor.accountId).eq("idempotencyKey", idempotencyKey),
-      )
-      .unique();
-    if (existingChange) return { changed: false, changeId: existingChange._id };
-    const existing = await ctx.db
-      .query("syncPolicies")
-      .withIndex("by_account_scope", (q) =>
-        q.eq("accountId", actor.accountId).eq("scopeKind", args.scopeKind).eq("scopeId", scopeId),
-      )
-      .unique();
-    const now = Date.now();
-    const next = {
-      ...args.values,
-      includeGlobs: [...new Set(args.values.includeGlobs.map((glob) => glob.trim()).filter(Boolean))],
-      excludeGlobs: [...new Set(args.values.excludeGlobs.map((glob) => glob.trim()).filter(Boolean))],
-    };
-    if (next.includeGlobs.length > 100 || next.excludeGlobs.length > 100)
-      throw new Error("SYNC_POLICY_FILTER_LIMIT");
-    const policyId = existing
-      ? (await ctx.db.patch(existing._id, { ...next, updatedAt: now }), existing._id)
-      : await ctx.db.insert("syncPolicies", {
-          accountId: actor.accountId,
-          scopeKind: args.scopeKind,
-          scopeId,
-          ...next,
-          createdAt: now,
-          updatedAt: now,
-        });
-    const changeId = await ctx.db.insert("syncPolicyChanges", {
-      accountId: actor.accountId,
-      scopeKind: args.scopeKind,
+    return await writeOverride(ctx, actor.accountId, args);
+  },
+});
+
+/**
+ * Whether files added later to one synced folder come into Spectra by
+ * themselves: "on", "off", or "follow" the account's choice again. Everything
+ * else about the folder's policy stays as it is.
+ */
+export const setFolderNewFiles = mutation({
+  args: {
+    mountId: v.id("bridgeMounts"),
+    newFiles: v.union(v.literal("on"), v.literal("off"), v.literal("follow")),
+    idempotencyKey: v.string(),
+    actorKind: recordedActorKind,
+  },
+  handler: async (ctx, args) => {
+    const actor = await getAuthenticatedActor(ctx);
+    if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
+    const mount = await ctx.db.get(args.mountId);
+    if (!mount || mount.accountId !== actor.accountId || mount.state === "revoked") throw new Error("MOUNT_NOT_FOUND");
+    const scopeId = String(mount._id);
+    if (args.newFiles === "follow")
+      return await removeOverride(ctx, actor.accountId, { scopeKind: "mount", scopeId, idempotencyKey: args.idempotencyKey, actorKind: args.actorKind });
+    const policy = await computeEffectivePolicy(ctx, actor.accountId, { mount: scopeId });
+    const on = args.newFiles === "on";
+    return await writeOverride(ctx, actor.accountId, {
+      scopeKind: "mount",
       scopeId,
-      action: "override",
-      before: policySnapshot(existing),
-      after: policySnapshot(next),
-      actorKind: args.actorKind === "ai" ? "ai" : "user",
-      idempotencyKey,
-      createdAt: now,
+      idempotencyKey: args.idempotencyKey,
+      actorKind: args.actorKind,
+      values: {
+        preset: policy.preset,
+        contentDirection: policy.contentDirection,
+        cloudContent: policy.cloudContent,
+        includeGlobs: policy.includeGlobs,
+        excludeGlobs: policy.excludeGlobs,
+        timing: policy.timing,
+        protectedOriginal: policy.protectedOriginal,
+        ...(policy.localMirrorGrantId ? { localMirrorGrantId: policy.localMirrorGrantId } : {}),
+        discovery: on ? "auto" : "explicit",
+        structure: on ? "mirror-both" : "independent",
+      },
     });
-    return { changed: true, policyId, changeId };
   },
 });
 
 export const overrideAccount = mutation({
   args: {
-    values: v.object(policyValues),
+    values: policyValuesObject,
     idempotencyKey: v.string(),
     actorKind: recordedActorKind,
   },
@@ -328,35 +416,6 @@ export const revert = mutation({
   handler: async (ctx, args) => {
     const actor = await getAuthenticatedActor(ctx);
     if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
-    if (args.scopeKind === "account") throw new Error("SYNC_POLICY_ACCOUNT_CANNOT_REVERT");
-    const scopeId = args.scopeId.trim();
-    const idempotencyKey = args.idempotencyKey.trim();
-    if (!scopeId || !idempotencyKey) throw new Error("SYNC_POLICY_REVERT_INVALID");
-    const existingChange = await ctx.db
-      .query("syncPolicyChanges")
-      .withIndex("by_account_key", (q) =>
-        q.eq("accountId", actor.accountId).eq("idempotencyKey", idempotencyKey),
-      )
-      .unique();
-    if (existingChange) return { changed: false, changeId: existingChange._id };
-    const existing = await ctx.db
-      .query("syncPolicies")
-      .withIndex("by_account_scope", (q) =>
-        q.eq("accountId", actor.accountId).eq("scopeKind", args.scopeKind).eq("scopeId", scopeId),
-      )
-      .unique();
-    const now = Date.now();
-    if (existing) await ctx.db.delete(existing._id);
-    const changeId = await ctx.db.insert("syncPolicyChanges", {
-      accountId: actor.accountId,
-      scopeKind: args.scopeKind,
-      scopeId,
-      action: "revert",
-      before: policySnapshot(existing),
-      actorKind: args.actorKind === "ai" ? "ai" : "user",
-      idempotencyKey,
-      createdAt: now,
-    });
-    return { changed: Boolean(existing), changeId };
+    return await removeOverride(ctx, actor.accountId, args);
   },
 });

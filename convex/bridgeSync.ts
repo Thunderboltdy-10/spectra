@@ -1186,46 +1186,52 @@ async function discoverResourceForMount(
       .withIndex("by_device_resource", (q) => q.eq("deviceId", device._id).eq("localResourceId", input.localResourceId))
       .unique();
     const mountPolicy = await lookups.mountPolicy();
-    if (mountPolicy.source.kind !== "default") {
+    // Picked by the person inside this folder, approved before Bridge knew its
+    // id. Only a file about to become a work pays this one indexed read.
+    if (!discoveryRequest) {
+      const picked = await ctx.db.query("syncDiscoveryRequests")
+        .withIndex("by_mount_path", (q) => q.eq("mountId", mount._id).eq("relativePath", input.relativePath))
+        .first();
+      if (picked?.state === "approved") discoveryRequest = picked;
+    }
+    // A file the person chose syncs whatever the folder's rule for new files says.
+    if (mountPolicy.source.kind !== "default" && discoveryRequest?.state !== "approved") {
       if (!policyIncludesPath(mountPolicy, input.relativePath)) return { skipped: true as const, reason: "filtered" as const };
       if (mountPolicy.discovery === "explicit") return { skipped: true as const, reason: "explicit-only" as const };
       if (mountPolicy.discovery === "ask") {
         if (discoveryRequest?.state === "ignored")
           return { skipped: true as const, reason: "ignored-by-user" as const };
-        if (discoveryRequest?.state !== "approved") {
-          const now = Date.now();
-          if (discoveryRequest) {
-            if (discoveryRequest.state === "pending" && discoveryRequest.mountId === mount._id &&
-                discoveryRequest.relativePath === input.relativePath && discoveryRequest.size === input.size &&
-                discoveryRequest.contentHash === input.contentHash && discoveryRequest.nativeFormat === input.nativeFormat)
-              return { skipped: true as const, reason: "approval-required" as const };
-            await ctx.db.patch(discoveryRequest._id, {
-              mountId: mount._id,
-              relativePath: input.relativePath,
-              size: input.size,
-              contentHash: input.contentHash,
-              nativeFormat: input.nativeFormat,
-              state: "pending",
-              updatedAt: now,
-            });
-          } else {
-            const requestId = await ctx.db.insert("syncDiscoveryRequests", {
-              accountId: actor.accountId,
-              deviceId: device._id,
-              mountId: mount._id,
-              localResourceId: input.localResourceId,
-              relativePath: input.relativePath,
-              size: input.size,
-              contentHash: input.contentHash,
-              nativeFormat: input.nativeFormat,
-              state: "pending",
-              createdAt: now,
-              updatedAt: now,
-            });
-            discoveryRequest = await ctx.db.get(requestId);
-          }
-          return { skipped: true as const, reason: "approval-required" as const };
+        const now = Date.now();
+        if (discoveryRequest) {
+          if (discoveryRequest.state === "pending" && discoveryRequest.mountId === mount._id &&
+              discoveryRequest.relativePath === input.relativePath && discoveryRequest.size === input.size &&
+              discoveryRequest.contentHash === input.contentHash && discoveryRequest.nativeFormat === input.nativeFormat)
+            return { skipped: true as const, reason: "approval-required" as const };
+          await ctx.db.patch(discoveryRequest._id, {
+            mountId: mount._id,
+            relativePath: input.relativePath,
+            size: input.size,
+            contentHash: input.contentHash,
+            nativeFormat: input.nativeFormat,
+            state: "pending",
+            updatedAt: now,
+          });
+        } else {
+          await ctx.db.insert("syncDiscoveryRequests", {
+            accountId: actor.accountId,
+            deviceId: device._id,
+            mountId: mount._id,
+            localResourceId: input.localResourceId,
+            relativePath: input.relativePath,
+            size: input.size,
+            contentHash: input.contentHash,
+            nativeFormat: input.nativeFormat,
+            state: "pending",
+            createdAt: now,
+            updatedAt: now,
+          });
         }
+        return { skipped: true as const, reason: "approval-required" as const };
       }
     }
     const parts = input.relativePath.replaceAll("\\", "/").split("/").filter(Boolean);
@@ -1353,6 +1359,65 @@ export const pendingDiscovery = query({
       rows.push(...pending.map((request) => ({ ...request, mountLabel: mount.rootLabel })));
     }
     return rows.sort((left, right) => left.relativePath.localeCompare(right.relativePath));
+  },
+});
+
+/**
+ * Files the person picked that sit inside folders already syncing. Those
+ * Spectra has are named; the rest are approved to sync whatever the folder's
+ * rule for new files says, and their folders are named so the page can ask
+ * Bridge to look again.
+ */
+export const pickWithinFolders = mutation({
+  args: { items: v.array(v.object({ grantId: v.string(), relativePath: v.string() })) },
+  handler: async (ctx, args) => {
+    const actor = await getAuthenticatedActor(ctx);
+    if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
+    if (args.items.length > 100) throw new Error("PICKED_FILES_TOO_MANY: Pick up to 100 files at a time.");
+    const mounts = await ctx.db.query("bridgeMounts")
+      .withIndex("by_account_state", (q) => q.eq("accountId", actor.accountId).eq("state", "active"))
+      .take(100);
+    const byGrant = new Map(mounts.map((mount) => [mount.grantId, mount]));
+    const now = Date.now();
+    const rescan = new Set<string>();
+    const results: Array<{ grantId: string; relativePath: string; state: "synced" | "approved" | "unknown" }> = [];
+    for (const { grantId, relativePath } of args.items) {
+      const mount = byGrant.get(grantId);
+      const path = relativePath.replaceAll("\\", "/");
+      if (!mount || !path || path.length > 1024 || mount.selectedFile) {
+        results.push({ grantId, relativePath, state: "unknown" });
+        continue;
+      }
+      const replica = await ctx.db.query("workReplicas")
+        .withIndex("by_device_mount_path", (q) => q.eq("deviceId", mount.deviceId).eq("mountId", mount._id).eq("relativePath", path))
+        .first();
+      if (replica) {
+        results.push({ grantId, relativePath, state: "synced" });
+        continue;
+      }
+      const request = await ctx.db.query("syncDiscoveryRequests")
+        .withIndex("by_mount_path", (q) => q.eq("mountId", mount._id).eq("relativePath", path))
+        .first();
+      if (request) {
+        if (request.state !== "approved") await ctx.db.patch(request._id, { state: "approved", updatedAt: now });
+      } else {
+        await ctx.db.insert("syncDiscoveryRequests", {
+          accountId: actor.accountId,
+          deviceId: mount.deviceId,
+          mountId: mount._id,
+          localResourceId: `picked:${path}`,
+          relativePath: path,
+          size: 0,
+          nativeFormat: "unknown",
+          state: "approved",
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+      rescan.add(grantId);
+      results.push({ grantId, relativePath, state: "approved" });
+    }
+    return { results, rescan: [...rescan] };
   },
 });
 

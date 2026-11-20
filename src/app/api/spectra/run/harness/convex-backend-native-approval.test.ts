@@ -12,7 +12,7 @@ beforeEach(() => {
     if (name === "spectraOperations:recordPlan") return { operationIds: ["operation"] };
     if (name === "spectraHarness:ensureApproved") throw new Error("AI_PERMISSION_REQUIRED: Ask the user first.");
   });
-  io.act.mockResolvedValue({ approvalReasons: ["This also changes a file on your computer through Spectra Bridge. Go ahead?"], approvalCategories: ["bridge_files"] });
+  io.act.mockResolvedValue({ approvalReasons: ["This also changes a file on your computer through Bridge. Go ahead?"], approvalCategories: ["bridge_files"] });
   io.execute.mockResolvedValue({ affected: [{ type: "artifact", id: "native-work" }] });
 });
 describe("native artifact edit approvals", () => {

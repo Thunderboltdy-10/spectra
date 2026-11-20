@@ -68,7 +68,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
     path: "/devices",
     targets: [PAGE],
     say: () =>
-      "Devices is where your computers and Spectra meet. With Spectra Bridge on a computer, its folders stay in sync both ways, and for each folder and file you can see what is still on its way to the computer and what is still on its way to Spectra.",
+      "Devices is where your computers and Spectra meet. With Spectra for desktop on a computer, its folders stay in sync both ways, and for each folder and file you can see what is still on its way to the computer and what is still on its way to Spectra.",
   },
   {
     id: "start",

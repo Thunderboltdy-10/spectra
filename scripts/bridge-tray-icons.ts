@@ -7,7 +7,7 @@ import {
 } from "../src/features/spectra/life/prism";
 
 /*
- * The Spectra Bridge tray and app icons, drawn by the same prism renderer as
+ * The Bridge tray and app icons, drawn by the same prism renderer as
  * the app (the static mark pose). The pure half lives here so it can be
  * tested; generate-bridge-tray-icons.ts rasterises and writes the files.
  */

@@ -565,10 +565,9 @@ impl<P: Platform> SafeWriter<P> {
                 if sha256_file(&target)? != request.base_revision {
                     return Err(FsError::StaleRevision);
                 }
-            } else if !request
+            } else if request
                 .base_revision
-                .strip_prefix("new:")
-                .is_some_and(|id| !id.is_empty())
+                .strip_prefix("new:").is_none_or(|id| id.is_empty())
             {
                 return Err(FsError::StaleRevision);
             }
@@ -667,11 +666,10 @@ impl<P: Platform> SafeWriter<P> {
         {
             return Err(FsError::FileLocked);
         }
-        if let Some(expected) = expected_revision {
-            if sha256_file(&target)? != expected {
+        if let Some(expected) = expected_revision
+            && sha256_file(&target)? != expected {
                 return Err(FsError::StaleRevision);
             }
-        }
         let _permission = self.grants.hold_grant(grant_id, &[&target])?;
         self.platform.recycle(&target)?;
         self.journal
@@ -797,11 +795,10 @@ impl<P: Platform> SafeWriter<P> {
                 "destination already exists"
             )));
         }
-        if let Some(expected) = expected_revision {
-            if sha256_file(&source)? != expected {
+        if let Some(expected) = expected_revision
+            && sha256_file(&source)? != expected {
                 return Err(FsError::StaleRevision);
             }
-        }
         fs::rename(&source, &target)?;
         self.journal
             .transition(&op.op_id, OpState::Performed, pre_hash.as_deref(), None)?;

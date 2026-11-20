@@ -15,7 +15,7 @@ import { findPrimaryNode, syncSourceNodes } from "./orgTreeShared";
 import { retireRoomsForStorageMove } from "./collaboration";
 
 /*
- * Work kept on someone's computer. Its words live in Spectra Bridge; the row
+ * Work kept on someone's computer. Its words live in Bridge; the row
  * here holds what finding it needs (name, place in the tree, who owns it) and
  * which computer has it, so opening or listing it costs almost nothing here.
  */

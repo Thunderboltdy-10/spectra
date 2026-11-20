@@ -231,14 +231,14 @@ fn install_quietly(script: &str) -> bool {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        return std::process::Command::new("powershell.exe")
+        std::process::Command::new("powershell.exe")
             .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
             .spawn()
-            .is_ok();
+            .is_ok()
     }
     #[cfg(not(windows))]
     {
@@ -1448,14 +1448,14 @@ mod tests {
         // Only a shim on the PATH: found, so an npm install is seen.
         if cfg!(windows) {
             std::fs::write(npm_dir.join("fake.cmd"), "").unwrap();
-            assert_eq!(resolve_in("fake", &[path_dir.clone()], &[npm_dir.clone()]), Some(npm_dir.join("fake.cmd")));
+            assert_eq!(resolve_in("fake", std::slice::from_ref(&path_dir), std::slice::from_ref(&npm_dir)), Some(npm_dir.join("fake.cmd")));
         }
         // An installed executable wins over the shim, wherever each is.
         std::fs::write(local_dir.join(exe), "").unwrap();
-        assert_eq!(resolve_in("fake", &[path_dir.clone()], &[npm_dir.clone(), local_dir.clone()]), Some(local_dir.join(exe)));
+        assert_eq!(resolve_in("fake", std::slice::from_ref(&path_dir), &[npm_dir.clone(), local_dir.clone()]), Some(local_dir.join(exe)));
         // The PATH comes first among real executables.
         std::fs::write(path_dir.join(exe), "").unwrap();
-        assert_eq!(resolve_in("fake", &[path_dir.clone()], &[local_dir.clone()]), Some(path_dir.join(exe)));
+        assert_eq!(resolve_in("fake", std::slice::from_ref(&path_dir), std::slice::from_ref(&local_dir)), Some(path_dir.join(exe)));
         assert_eq!(resolve_in("missing", &[path_dir], &[local_dir]), None);
     }
 

@@ -36,12 +36,12 @@ const CODE_MESSAGES: Array<{ test: RegExp; message: (app: string) => string }> =
   {
     test: /LOCAL_REPLICA_UNAVAILABLE|LOCAL_REPLICA_MISSING/i,
     message: (app) =>
-      `Spectra saved your edit. The ${app} file on this computer was not updated because this file is not open as a local copy. Open it from Library while Spectra Bridge is connected, or keep working here.`,
+      `Spectra saved your edit. The ${app} file on this computer was not updated because this file is not open as a local copy. Open it from Library while Bridge is connected, or keep working here.`,
   },
   {
     test: /not-on-this-computer/i,
     message: () =>
-      "This copy is not on the computer running Spectra Bridge right now.",
+      "This copy is not on the computer running Bridge right now.",
   },
   {
     test: /NATIVE_PAYLOAD_UNAVAILABLE/i,
@@ -131,7 +131,7 @@ const CODE_MESSAGES: Array<{ test: RegExp; message: (app: string) => string }> =
   {
     test: /port .+ unavailable|address already in use|os error 10048/i,
     message: () =>
-      "Something else is using the Spectra Bridge connection on this PC. Close the other app, then try again.",
+      "Something else is using the Bridge connection on this PC. Close the other app, then try again.",
   },
   {
     test: /write-expired|write-failed/i,
@@ -261,7 +261,7 @@ export function humanizePublicFailure(
   if (worded && !/[A-Z]{3,}_[A-Z0-9_]{3,}/.test(worded[1])) return worded[1].trim();
   if (!raw || /^[A-Z][A-Z0-9_]{4,}$/.test(raw) || /[A-Z]{3,}_[A-Z0-9_]{3,}/.test(raw)) {
     return /BRIDGE|REPLICA|MOUNT|FILE|NATIVE|PAYLOAD|LOCAL|FOLDER|DEVICE/.test(raw)
-      ? "Spectra couldn't reach this file just now. Check that Spectra Bridge is running on the computer that has it, then try again."
+      ? "Spectra couldn't reach this file just now. Check that Bridge is running on the computer that has it, then try again."
       : INTERNAL_FAILURE;
   }
   if (

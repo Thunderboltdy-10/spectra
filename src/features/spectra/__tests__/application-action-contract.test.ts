@@ -35,6 +35,7 @@ const cases: Array<{ command: string; args: Record<string, unknown>; mutation?: 
   { command: "pair_device", args: {}, event: "devices_action", status: "requested" },
   { command: "control_device", args: { action: "retry_folder", grantId: "grant" }, event: "devices_action", status: "requested" },
   { command: "remove_device", args: { deviceId: "device" }, mutation: "bridge:revokeDevice", event: "devices_changed" },
+  { command: "change_folder_sync", args: { action: "new_files", mountId: "mount", newFiles: "off" }, mutation: "syncPolicy:setFolderNewFiles", event: "devices_changed" },
   { command: "organize_library", args: { action: "rename", targetIds: ["node"], name: "Sources" }, mutation: "orgTree:rename" },
   { command: "delete_library_items", args: { targetIds: ["node"] }, mutation: "orgTree:trash" },
   { command: "change_spectra_settings", args: { patch: { appearance: { density: "compact" } } }, mutation: "accountPreferences:writeLayer" },

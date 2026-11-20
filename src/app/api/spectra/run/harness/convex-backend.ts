@@ -350,7 +350,7 @@ export class ConvexHarnessBackend implements HarnessBackend {
       ? await readLiveArtifactValue({ artifactId: id, timeoutMs: 3_000, signal }).catch(() => null)
       : null;
     if (artifact.storageHome === "device" && !live)
-      throw new Error("This artifact is kept on the person's computer, and Spectra Bridge isn't reachable right now. Tell them to open it.");
+      throw new Error("This artifact is kept on the person's computer, and Bridge isn't reachable right now. Tell them to open it.");
     const current = overlayLiveArtifactRecord(artifact, live);
     const placement = rows(artifact.placements)[0];
     return {
@@ -469,7 +469,7 @@ export class ConvexHarnessBackend implements HarnessBackend {
       if (!permissionRequired(error) || approved) throw error;
       const asking = staged.approvalCategories.filter(category => permissionDecision("irreversible", category, permissions) === "ask");
       return { ok: false, content: "", pause: { kind: "approval",
-        question: staged.approvalReasons.join(" ") || "This also changes a file on your computer through Spectra Bridge. Go ahead?",
+        question: staged.approvalReasons.join(" ") || "This also changes a file on your computer through Bridge. Go ahead?",
         ...(asking.length === 1 ? { category: asking[0] } : {}),
       } };
     }
@@ -581,7 +581,7 @@ export class ConvexHarnessBackend implements HarnessBackend {
             content: "",
             pause: {
               kind: "approval",
-              question: `This also changes ${localFiles === 1 ? "a file" : `${localFiles} files`} on your computer through Spectra Bridge. Go ahead?`,
+              question: `This also changes ${localFiles === 1 ? "a file" : `${localFiles} files`} on your computer through Bridge. Go ahead?`,
               category: "bridge_files",
             },
           };

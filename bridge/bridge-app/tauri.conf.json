@@ -1,14 +1,23 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Spectra Bridge",
-  "version": "0.1.3",
+  "productName": "Spectra",
+  "mainBinaryName": "spectra",
+  "version": "1.0.0",
   "identifier": "com.spectra.bridge",
+  "build": {
+    "frontendDist": "desktop"
+  },
   "app": {
-    "windows": []
+    "windows": [],
+    "withGlobalTauri": false
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis", "app", "dmg"],
+    "targets": [
+      "nsis",
+      "app",
+      "dmg"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -19,12 +28,22 @@
     "createUpdaterArtifacts": true,
     "macOS": {
       "signingIdentity": "-"
-    }
+    },
+    "windows": {
+      "nsis": {
+        "installerHooks": "nsis/hooks.nsh",
+        "installMode": "currentUser"
+      }
+    },
+    "shortDescription": "Spectra, with your files on this computer"
   },
   "plugins": {
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhDM0VEQjczNDM0Q0IwNzAKUldSd3NFeERjOXMrakdhUnRGL0pIQTFXYnd0K0FvTlVLVCtYblQwOWxJQUtCemRzY3ZpVDZ3MVoK",
-      "endpoints": ["https://github.com/Thunderboltdy-10/spectra-bridge/releases/latest/download/latest.json"]
+      "endpoints": [
+        "https://github.com/Thunderboltdy-10/spectra-desktop/releases/latest/download/latest.json",
+        "https://github.com/Thunderboltdy-10/spectra-bridge/releases/latest/download/latest.json"
+      ]
     }
   }
 }

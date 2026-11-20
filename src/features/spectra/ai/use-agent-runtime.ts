@@ -121,7 +121,7 @@ export function providerProblem(provider: keyof typeof PROVIDER_LABEL, state: Ag
     case "not-installed":
       return `${name} isn't installed on this computer.`;
     case "no-bridge":
-      return "Spectra Bridge isn't running on this computer.";
+      return "Spectra for desktop isn't running on this computer.";
     case "error":
       return `${name} didn't answer. Try again in a moment.`;
     default:

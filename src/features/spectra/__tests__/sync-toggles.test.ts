@@ -278,7 +278,7 @@ describe("sync toggles (P1.I4)", () => {
     expect(resource).not.toContain("Open on device");
     expect(resource).not.toContain("Bridge can stream");
     expect(resource).not.toMatch(/Image preview/i);
-    expect(settings).toContain("Update Bridge");
+    expect(settings).toContain("Update Spectra for desktop");
     expect(settings).toContain("Remove this device");
     expect(settings).toContain("revokeDevice");
     expect(settings).toContain("forgetSession");

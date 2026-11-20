@@ -359,7 +359,7 @@ export type SpectraWorkspaceManifestReport = {
 
 export type SpectraArtifact = {
   _id: string;
-  /** Kept on a computer through Spectra Bridge. */
+  /** Kept on a computer through Bridge. */
   storageHome?: "device";
   /** An official course syllabus: shown read-only. */
   syllabus?: { id: string; level?: "SL" | "HL" };
@@ -1772,7 +1772,7 @@ export async function startSpectraQuizPractice(input: {
   // Marking happens in Spectra, so a quiz kept on this computer brings its questions along.
   const { readDeviceWork } = await import("../bridge/device-works");
   const stored = await readDeviceWork(input.artifactId);
-  if (!stored?.content) throw new Error("Open Spectra Bridge on the computer this quiz is kept on, then try again.");
+  if (!stored?.content) throw new Error("Open Spectra for desktop on the computer this quiz is kept on, then try again.");
   const started = await start(stored.content);
   if ("keptOnDevice" in started) throw new Error("This quiz could not be started.");
   return started;

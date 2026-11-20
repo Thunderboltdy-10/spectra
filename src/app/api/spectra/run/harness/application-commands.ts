@@ -74,6 +74,20 @@ const COMMANDS: Record<string, ApplicationCommand> = {
   },
   pair_device: { input: z.object({}), authority: "settings" },
   remove_device: { input: z.object({ deviceId: z.string().trim().min(1).max(200) }), authority: "settings" },
+  change_folder_sync: {
+    input: z
+      .object({
+        action: z.enum(["new_files", "link", "unlink"]),
+        mountId: z.string().trim().min(1).max(200),
+        newFiles: z.enum(["on", "off", "follow"]).optional(),
+        twinMountId: z.string().trim().min(1).max(200).optional(),
+      })
+      .superRefine((value, ctx) => {
+        if (value.action === "new_files" && !value.newFiles) ctx.addIssue({ code: "custom", path: ["newFiles"], message: "newFiles is required." });
+        if (value.action === "link" && !value.twinMountId) ctx.addIssue({ code: "custom", path: ["twinMountId"], message: "twinMountId is required." });
+      }),
+    authority: "settings",
+  },
   organize_library: {
     input: z
       .object({

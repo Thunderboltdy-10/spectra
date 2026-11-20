@@ -2,8 +2,9 @@ import { z } from "zod";
 import { queryPermission } from "./network-permission";
 import { humanizePublicFailure } from "./humanize";
 import { accountStorageMatches, accountStorageRevision, assertAccountStorageRevision } from "@/lib/account-storage-scope";
+import { BRIDGE_HTTP_ORIGIN } from "../../../../shared/bridge-port";
 
-export const BRIDGE_URL = "http://127.0.0.1:47615";
+export const BRIDGE_URL = BRIDGE_HTTP_ORIGIN;
 export const BRIDGE_PROTOCOL_VERSION = "1.0";
 /** Health/status must not block revoke, pairing UI, or Saved/Queued truth. */
 export const BRIDGE_REQUEST_TIMEOUT_MS = 2500;
@@ -32,6 +33,8 @@ const healthSchema = z
     bindError: z.string().nullable().optional(),
     /** Disconnected on purpose on this computer (or removed in Spectra): wait for a person to connect it again. */
     disconnectedHere: z.boolean().optional(),
+    /** Spectra for desktop has downloaded this version and installs it on restart. */
+    updateReady: z.string().optional(),
   })
   .passthrough();
 export type BridgeHealth = z.infer<typeof healthSchema>;
@@ -247,7 +250,7 @@ export function bridgeReachabilityCopy(kind: BridgeReachability): {
     return {
       label: "Offline",
       detail:
-        "This browser is offline. Spectra cannot check Spectra Bridge until you reconnect.",
+        "This browser is offline. Spectra cannot check Bridge until you reconnect.",
     };
   }
   if (kind === "not-set-up") {
@@ -261,28 +264,28 @@ export function bridgeReachabilityCopy(kind: BridgeReachability): {
     return {
       label: "Not running",
       detail:
-        "Spectra Bridge isn't running on this computer. Open it from the Start menu (or Applications on a Mac); if it's already open, quit it from its icon near the clock and open it again.",
+        "Spectra for desktop isn't running on this computer. Open it from the Start menu (or Applications on a Mac); if it's already open, quit it from its icon near the clock and open it again.",
     };
   }
   if (kind === "port-taken") {
     return {
       label: "Not recognised",
       detail:
-        "Something on this PC answered in Bridge's place, but not as Spectra Bridge. Restart Spectra Bridge from the system tray; if this stays, another app may be using its connection.",
+        "Something on this PC answered in Bridge's place, but not as Spectra. Restart Spectra from the system tray; if this stays, another app may be using its connection.",
     };
   }
   if (kind === "update-required") {
     return {
       label: "Update required",
       detail:
-        "This copy of Spectra Bridge is too old for this Spectra. Press Update Bridge below, or download it again and open the file.",
+        "This version of Spectra for desktop is too old for this Spectra. Press Update below, or download it again and open the file.",
     };
   }
   if (kind === "running") {
     return {
       label: "Not connected",
       detail:
-        "Spectra Bridge is running on this PC. Connect this device to use files that live here.",
+        "Bridge is running on this PC. Connect this device to use files that live here.",
     };
   }
   return {
@@ -303,7 +306,7 @@ export function rememberedFolderDetail(kind: BridgeReachability): string {
     return "This folder is remembered. Connect Bridge on this device to use it.";
   }
   if (kind === "port-taken") {
-    return "This folder is remembered. Spectra Bridge cannot use it until the connection is free.";
+    return "This folder is remembered. Bridge cannot use it until the connection is free.";
   }
   return "This folder is remembered. The background file connection must be running to use it.";
 }
@@ -365,7 +368,7 @@ export function pairingFailureMessage(
     return "This connection attempt timed out. Try again.";
   }
   if (/PAIRING_ORIGIN_REFUSED/.test(raw)) {
-    return "This copy of Spectra Bridge connects only to spectra.ink. Open Devices there and connect again.";
+    return "This version of Spectra for desktop connects only to spectra.ink. Open Devices there and connect again.";
   }
   if (/PAIRING_CHALLENGE_INVALID/.test(raw)) {
     return "Spectra could not confirm this computer. Start connecting again from Bridge.";
@@ -459,7 +462,7 @@ export function persistBridgeStatusCache(status: BridgeStatus) {
 }
 
 /** Bridge answers its own refusals with a sentence; a route it does not know means it is older than this app. */
-export const BRIDGE_OUTDATED = "This computer's Spectra Bridge is too old for this. Update it from Devices, then try again.";
+export const BRIDGE_OUTDATED = "This computer's Spectra for desktop is too old for this. Update it from Devices, then try again.";
 
 /**
  * The session Bridge holds for this browser, or null once it has plainly said
@@ -474,7 +477,7 @@ async function resumeBridgeSession(token: string, revision: string, signal?: Abo
     cache: "no-store",
   });
   if (!accountStorageMatches(revision)) return null;
-  if (!resume.ok) throw new Error("Spectra Bridge could not check this browser's session.");
+  if (!resume.ok) throw new Error("Bridge could not check this browser's session.");
   const result = z
     .object({ paired: z.boolean(), sessionToken: z.string().optional() })
     .passthrough()
@@ -524,7 +527,7 @@ export async function authorizedBridgeRequest(
   if (!response.ok) {
     const error = await response.text();
     if (!accountStorageMatches(revision)) return null;
-    throw new Error(error || "Spectra Bridge could not complete the request.");
+    throw new Error(error || "Bridge could not complete the request.");
   }
   return response;
 }
@@ -685,7 +688,7 @@ export async function requestBridgeUpdate(): Promise<string> {
       } | null;
       return (
         body?.message ??
-        "Spectra Bridge is installing the update and will restart."
+        "Spectra is installing the update and will restart."
       );
     }
   } catch {
@@ -694,11 +697,26 @@ export async function requestBridgeUpdate(): Promise<string> {
   return manualBridgeUpdateMessage(bridgePlatform());
 }
 
+/** Restart Spectra for desktop into the update it already downloaded. */
+export async function restartForUpdate(): Promise<boolean> {
+  try {
+    const response = await fetch(`${BRIDGE_URL}/v1/update/restart`, {
+      method: "POST",
+      signal: bridgeRequestSignal(),
+      cache: "no-store",
+    });
+    return response.ok;
+  } catch {
+    // The app closes as it restarts, which can cut this answer off.
+    return true;
+  }
+}
+
 /** How to update a Bridge that can't be updated from the page: install the new one over it. */
 export function manualBridgeUpdateMessage(platform: BridgePlatform) {
   return platform === "macos"
-    ? "This Spectra Bridge is too old to update from here. Download the new one, open it and drag Spectra Bridge into Applications to replace this one, then open it. Your folders stay connected."
-    : "This Spectra Bridge is too old to update from here. Download the new one and run it: it installs over this one, and your folders stay connected.";
+    ? "This version of Spectra for desktop is too old to update from here. Download the new one, open it and drag Spectra into Applications to replace this one, then open it. Your folders stay connected."
+    : "This version of Spectra for desktop is too old to update from here. Download the new one and run it: it installs over this one, and your folders stay connected.";
 }
 
 /** "0.1.0" is older than "0.1.2". Unknown versions are never called old. */
@@ -774,7 +792,7 @@ export function bridgePlatform(nav: { userAgent?: string; platform?: string; use
 }
 
 const BRIDGE_DOWNLOAD_BASE =
-  process.env.NEXT_PUBLIC_SPECTRA_BRIDGE_DOWNLOAD_URL || "/bridge/download";
+  process.env.NEXT_PUBLIC_SPECTRA_DESKTOP_DOWNLOAD_URL || process.env.NEXT_PUBLIC_SPECTRA_BRIDGE_DOWNLOAD_URL || "/desktop/download";
 
 /** Where this computer downloads Bridge, or null when Bridge does not run on it. */
 export function bridgeDownloadUrl(platform: BridgePlatform): string | null {

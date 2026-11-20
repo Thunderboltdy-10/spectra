@@ -46,16 +46,16 @@ export function bridgeIsAway() {
 
 /** The same sentence for the Devices page itself, where "go to Devices" means nothing. */
 export function bridgeUnavailableHere(availability: BridgeAvailability) {
-  if (availability === "not-connected") return "Spectra Bridge isn't connected to this browser yet. Connect it on this page first.";
-  if (availability === "not-running") return "Spectra Bridge isn't running on this computer. Open it and this page picks it up.";
-  if (availability === "not-installed") return "This needs Spectra Bridge. Get it on this page first.";
+  if (availability === "not-connected") return "Bridge isn't connected to this browser yet. Connect it on this page first.";
+  if (availability === "not-running") return "Spectra for desktop isn't running on this computer. Open it and this page picks it up.";
+  if (availability === "not-installed") return "This needs Spectra for desktop. Get it on this page first.";
   return null;
 }
 
 /** The sentence on anything greyed out, with where to go next. */
 export function bridgeUnavailableReason(availability: BridgeAvailability) {
-  if (availability === "not-connected") return "Spectra Bridge isn't connected to this browser. Go to Devices to connect it.";
-  if (availability === "not-running") return "Spectra Bridge isn't running on this computer. Go to Devices to start it.";
-  if (availability === "not-installed") return "This needs Spectra Bridge, which isn't installed yet. Go to Devices to get it.";
+  if (availability === "not-connected") return "Bridge isn't connected to this browser. Go to Devices to connect it.";
+  if (availability === "not-running") return "Spectra for desktop isn't running on this computer. Go to Devices to start it.";
+  if (availability === "not-installed") return "This needs Spectra for desktop, which isn't installed yet. Go to Devices to get it.";
   return null;
 }

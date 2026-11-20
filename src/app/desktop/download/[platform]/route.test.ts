@@ -14,13 +14,13 @@ const RELEASE = {
 
 async function download(platform: string, query = "", release: unknown = RELEASE, ok = true) {
   vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(release), { status: ok ? 200 : 404 })));
-  const response = await GET(new Request(`http://localhost:3000/bridge/download/${platform}${query}`), { params: Promise.resolve({ platform }) });
+  const response = await GET(new Request(`http://localhost:3000/desktop/download/${platform}${query}`), { params: Promise.resolve({ platform }) });
   return { status: response.status, location: response.headers.get("location") };
 }
 
 afterEach(() => vi.unstubAllGlobals());
 
-describe("Bridge download", () => {
+describe("Spectra for desktop download", () => {
   it("sends each computer to its own installer from the latest release", async () => {
     expect(await download("windows")).toEqual({ status: 307, location: "https://example.test/win-setup.exe" });
     expect((await download("macos")).location).toBe("https://example.test/mac-arm.dmg");
@@ -31,5 +31,19 @@ describe("Bridge download", () => {
     expect((await download("windows", "", {}, false)).location).toMatch(/\/releases\/latest$/);
     expect((await download("windows", "", { assets: [] })).location).toMatch(/\/releases\/latest$/);
     expect((await download("linux")).location).toMatch(/\/releases\/latest$/);
+  });
+
+  it("tries the old releases repository when the new one has no release yet", async () => {
+    const fetch = vi.fn(async (url: string) =>
+      url.includes("spectra-bridge")
+        ? new Response(JSON.stringify(RELEASE), { status: 200 })
+        : new Response("{}", { status: 404 }));
+    vi.stubGlobal("fetch", fetch);
+    const response = await GET(new Request("http://localhost:3000/desktop/download/windows"), { params: Promise.resolve({ platform: "windows" }) });
+    expect(response.headers.get("location")).toBe("https://example.test/win-setup.exe");
+    expect(fetch.mock.calls.map(([url]) => url)).toEqual([
+      "https://api.github.com/repos/Thunderboltdy-10/spectra-desktop/releases/latest",
+      "https://api.github.com/repos/Thunderboltdy-10/spectra-bridge/releases/latest",
+    ]);
   });
 });

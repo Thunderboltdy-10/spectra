@@ -11,7 +11,7 @@ export function BridgeInstallSteps({ platform }: { platform: BridgePlatform }) {
     <ol className="bridge-install-steps">
       <li>
         <strong>Open the file you downloaded</strong>
-        <span>{mac ? "Drag Spectra Bridge into Applications, then open it." : "It installs and opens Spectra Bridge in a few seconds."}</span>
+        <span>{mac ? "Drag Spectra into Applications, then open it." : "It installs and opens Spectra in a few seconds."}</span>
       </li>
       <li>
         <strong>Allow the browser to talk to it</strong>
@@ -19,8 +19,21 @@ export function BridgeInstallSteps({ platform }: { platform: BridgePlatform }) {
       </li>
       <li>
         <strong>That&apos;s it from then on</strong>
-        <span>Bridge starts by itself whenever this computer turns on, and updates itself.</span>
+        <span>Spectra starts by itself whenever this computer turns on, keeps Bridge syncing in the background, and updates itself.</span>
       </li>
     </ol>
+  );
+}
+
+/**
+ * A browser can't tell an Intel Mac from an Apple silicon one, so the Mac
+ * download is the Apple silicon build and Intel Macs get theirs here.
+ */
+export function IntelMacLink({ href, platform }: { href: string | null | undefined; platform: BridgePlatform }) {
+  if (platform !== "macos" || !href) return null;
+  return (
+    <a className="text-caption text-[var(--text-secondary)] underline underline-offset-2 hover:text-[var(--text-primary)]" href={`${href}?arch=x64`} rel="noopener">
+      Intel Mac?
+    </a>
   );
 }

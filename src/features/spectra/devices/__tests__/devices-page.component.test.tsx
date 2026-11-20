@@ -47,7 +47,7 @@ vi.mock("../../../../../convex/_generated/api", () => {
       bridgeSync: { linkSameFolder: ref("bridgeSync:linkSameFolder"), unlinkSameFolder: ref("bridgeSync:unlinkSameFolder") },
       catalogGraph: { identity: ref("catalogGraph:identity") },
       identity: { session: ref("identity:session") },
-      syncPolicy: { effective: ref("syncPolicy:effective"), overrideAccount: ref("syncPolicy:overrideAccount") },
+      syncPolicy: { effective: ref("syncPolicy:effective"), overrideAccount: ref("syncPolicy:overrideAccount"), setFolderNewFiles: ref("syncPolicy:setFolderNewFiles") },
       deviceWorks: { settings: ref("deviceWorks:settings"), counts: ref("deviceWorks:counts"), onThisComputer: ref("deviceWorks:onThisComputer"), movable: ref("deviceWorks:movable"), backupsToRestore: ref("deviceWorks:backupsToRestore"), choose: ref("deviceWorks:choose"), backupUploadUrl: ref("deviceWorks:backupUploadUrl"), recordBackup: ref("deviceWorks:recordBackup"), adoptRestored: ref("deviceWorks:adoptRestored"), deleteBackups: ref("deviceWorks:deleteBackups") },
     },
   };
@@ -268,7 +268,7 @@ describe("Devices page", () => {
   it("asks before reconnecting a computer whose Bridge was disconnected on purpose", () => {
     h.local = { ...bridge(false), reachability: "running", discovery: { kind: "running", health: { version: "1", paired: false, protocolVersion: "1.0", disconnectedHere: true } } };
     render(<DevicesPage />);
-    expect(screen.getByText(/This computer was disconnected\. Spectra Bridge is still running here/)).toBeTruthy();
+    expect(screen.getByText(/This computer was disconnected\. Bridge is still running here/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Connect this computer" })).toBeTruthy();
   });
 

@@ -107,7 +107,7 @@ describe("system prompt", () => {
     expect(block).toContain('Open: document "Cells" (id wx1); presentation "Mitosis" (id wx2)');
     expect(block).toContain('Selection in document "Cells" (id wx1): "the inner membrane"');
     expect(block).toContain('Referenced with @: thread "Exam plan" (id th1)');
-    expect(block).toContain("Spectra Bridge: online (Ana's laptop)");
+    expect(block).toContain("Bridge: online (Ana's laptop)");
     expect(block).not.toMatch(/Outline|Focused/);
   });
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { BridgeInstallSteps } from "./bridge-install-steps";
+import { BridgeInstallSteps, IntelMacLink } from "./bridge-install-steps";
 import { useEffect, useRef } from "react";
 import { Icon } from "@/components/icons";
 import { Button } from "@/components/ui/button";
@@ -62,12 +62,12 @@ function PairingCard({
       className="rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4"
     >
       {state.phase === "checking" || state.phase === "requesting" ? (
-        <Waiting text={state.phase === "checking" ? "Looking for Spectra Bridge on this computer." : "Connecting this computer."} onCancel={onCancel} />
+        <Waiting text={state.phase === "checking" ? "Looking for Spectra for desktop on this computer." : "Connecting this computer."} onCancel={onCancel} />
       ) : state.phase === "download" ? (
         <div className="space-y-3">
-          <p className="text-ui font-medium text-[var(--text-primary)]">Get Spectra Bridge</p>
+          <p className="text-ui font-medium text-[var(--text-primary)]">Get Spectra for desktop</p>
           <p className="max-w-xl text-caption text-[var(--text-secondary)]">
-            Spectra Bridge keeps the folders you choose on this computer in sync. Download it, then:
+            Spectra for desktop keeps the folders you choose on this computer in sync through Bridge. Download it, then:
           </p>
           <BridgeInstallSteps platform={state.platform} />
           <div className="flex flex-wrap items-center gap-2">
@@ -79,13 +79,14 @@ function PairingCard({
                 </a>
               </Button>
             ) : null}
+            <IntelMacLink href={state.url} platform={state.platform} />
             <Button variant="ghost" size="sm" onClick={onCancel}>
               Cancel
             </Button>
           </div>
           <p className="flex items-center gap-2 text-micro text-[var(--text-tertiary)]">
             <Icon name="syncing" size={14} />
-            Waiting for Spectra Bridge to start.
+            Waiting for Spectra for desktop to start.
           </p>
         </div>
       ) : state.phase === "confirming" ? (

@@ -55,7 +55,7 @@ vi.mock("../school/use-class-book", () => ({ inkStyle: () => ({}), useClassBook:
 
 const choice = { classShelvesStatus: "chosen", classShelfRecordIds: ["biology"] };
 function answerClasses() { fireEvent.click(screen.getByRole("button", { name: "Use selected classes" })); }
-function bridgeVisible() { expect(screen.getByRole("heading", { name: "Put Spectra Bridge on this computer" })).toBeTruthy(); }
+function bridgeVisible() { expect(screen.getByRole("heading", { name: "Put Spectra for desktop on this computer" })).toBeTruthy(); }
 beforeEach(() => {
   remote.state.createdAt = new Date("2026-11-17T00:00:00Z");
   remote.state.phase = "ready";
@@ -95,7 +95,7 @@ it("advances an existing account immediately with one combined save and stays on
   bridgeVisible();
   view.unmount();
   render(<SetupMount />);
-  await screen.findByRole("heading", { name: "Put Spectra Bridge on this computer" });
+  await screen.findByRole("heading", { name: "Put Spectra for desktop on this computer" });
 });
 
 it("still confirms a new account with the server before advancing, even if its selection is unchanged", async () => {
@@ -122,7 +122,7 @@ it("saves changed choices for an existing account instead of taking the unchange
   await screen.findByRole("button", { name: "Use selected classes" });
   fireEvent.click(screen.getByRole("option", { name: /Biology/ }));
   fireEvent.click(screen.getByRole("button", { name: "Continue without classes" }));
-  await screen.findByRole("heading", { name: "Put Spectra Bridge on this computer" });
+  await screen.findByRole("heading", { name: "Put Spectra for desktop on this computer" });
   const submission = remote.state.request.mock.calls.find(([, init]) => init?.method === "POST");
   expect(JSON.parse(submission![1].body)).toMatchObject({ action: "selectClasses", recordIds: [], expectedRevision: 2 });
   expect(remote.state.mutation.mock.calls[0][1].values).toEqual({ integrations: {
@@ -176,7 +176,7 @@ it("moves past Bridge after Not now and stays there after acknowledgement and re
     };
   }));
   const view = render(<SetupMount />);
-  await screen.findByRole("heading", { name: "Put Spectra Bridge on this computer" });
+  await screen.findByRole("heading", { name: "Put Spectra for desktop on this computer" });
   fireEvent.click(screen.getByRole("button", { name: "Not now" }));
   const dialog = await screen.findByRole("alertdialog");
   fireEvent.click(within(dialog).getByRole("button", { name: "Not now" }));

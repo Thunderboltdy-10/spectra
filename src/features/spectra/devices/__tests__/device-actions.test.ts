@@ -11,7 +11,7 @@ vi.mock("../../bridge/client", () => {
   const call = (name: string) => async (...args: unknown[]) => {
     bridge.calls.push([name, ...args.map(String)].join(":"));
     if (bridge.fail) throw new Error("Failed to fetch");
-    return name === "update" ? "Spectra Bridge is up to date." : undefined;
+    return name === "update" ? "Bridge is up to date." : undefined;
   };
   return {
     loadBridgeStatusCache: () => bridge.status,
@@ -64,7 +64,7 @@ describe("device actions on this computer", () => {
     try {
       await expect(runLocalDeviceAction({ action: "pause_folder", grantId: "grant_a" })).resolves.toMatchObject({ status: "completed", message: "Paused the folder." });
       await runLocalDeviceAction({ action: "resume_syncing" });
-      await expect(runLocalDeviceAction({ action: "update" })).resolves.toMatchObject({ message: "Spectra Bridge is up to date." });
+      await expect(runLocalDeviceAction({ action: "update" })).resolves.toMatchObject({ message: "Bridge is up to date." });
     } finally {
       off();
     }

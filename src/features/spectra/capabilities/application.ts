@@ -185,14 +185,14 @@ const APP_SPECS: readonly AppSpec[] = [
   },
   {
     id: "app.devices.pair",
-    description: "Connect this computer through Spectra Bridge; the user confirms the code on the computer.",
+    description: "Connect this computer through Bridge; the user confirms the code on the computer.",
     risk: "confirm",
     availability: "readable",
     choreography: { target: "devices-route", region: "pair" },
   },
   {
     id: "app.devices.add-folder",
-    description: "Open the folder picker on this computer through Spectra Bridge.",
+    description: "Open the folder picker on this computer through Bridge.",
     risk: "safe",
     availability: "readable",
     choreography: { target: "devices-route", region: "folders" },

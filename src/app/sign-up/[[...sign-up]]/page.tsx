@@ -2,6 +2,7 @@ import Link from "next/link";
 import { SignUp } from "@clerk/nextjs";
 import { AuthShell } from "@/components/auth/auth-shell";
 import { SignedInContinue } from "@/components/signed-in-continue";
+import { DesktopSignInChoice } from "@/features/spectra/desktop/desktop-sign-in";
 import { SignInConnectionState } from "@/components/account-connection-state";
 import { authHrefForRedirect } from "@/lib/invitation-session";
 import {
@@ -71,6 +72,7 @@ function SignUpCard({
       </div>
       <div className="auth-clerk">
         <SignedInContinue to={redirectUrl} />
+        <DesktopSignInChoice redirectUrl={redirectUrl} action="Sign up" />
         <SignInConnectionState />
         <SignUp
           signInUrl={authHrefForRedirect("/sign-in", redirectUrl)}

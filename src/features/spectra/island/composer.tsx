@@ -578,7 +578,7 @@ function RuntimeControls() {
                       <Tooltip label={unavailable} className="flex" side="right">
                         <DropdownMenuItem asChild>
                           <Link href={DEVICES_HREF} className="text-[var(--text-secondary)]">
-                            Open Spectra Bridge to use it
+                            Open Spectra for desktop to use it
                           </Link>
                         </DropdownMenuItem>
                       </Tooltip>

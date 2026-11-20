@@ -468,6 +468,27 @@
   text-wrap: balance;
 }
 
+/* The one way to get the app, under the scene that shows what it does. */
+.sp-desktop-get {
+  display: inline-block;
+  margin-top: 14px;
+  color: var(--text-primary);
+  font-weight: 600;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 4px;
+}
+
+.sp-desktop-get:hover {
+  text-decoration-thickness: 2px;
+}
+
+.sp-desktop-get:focus-visible {
+  outline: 2px solid var(--brand-primary);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
 .sp-lede {
   max-width: 44ch;
   margin: 18px 0 0;
@@ -3631,6 +3652,122 @@
 }
 
 .auth-clerk .cl-footer > :not(:last-child) {
+  display: none;
+}
+
+/* Spectra for desktop: signing in through the person's own browser. */
+.auth-desktop {
+  display: grid;
+  gap: 14px;
+}
+
+.auth-handoff-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  width: 100%;
+  padding: 0 16px;
+  border: 1px solid var(--border-strong, var(--border-default));
+  border-radius: 10px;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font: inherit;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  box-shadow: var(--shadow-soft);
+}
+
+.auth-handoff-button:hover {
+  background: var(--bg-hover);
+}
+
+.auth-handoff-button:focus-visible,
+.auth-text-button:focus-visible {
+  outline: 2px solid var(--brand-primary);
+  outline-offset: 2px;
+}
+
+.auth-handoff-button:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+.auth-desktop-note,
+.auth-desktop-step {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.auth-desktop-problem {
+  margin: 0;
+  color: color-mix(in oklab, var(--danger) 85%, var(--text-primary));
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.auth-desktop-or {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 6px;
+  color: var(--text-tertiary, var(--text-secondary));
+  font-size: 12px;
+}
+
+.auth-desktop-or::before,
+.auth-desktop-or::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border-subtle);
+}
+
+.auth-desktop-wait {
+  display: grid;
+  gap: 10px;
+}
+
+/* The one thing to compare between the app and the browser. */
+.auth-code {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(2.4rem, 4vw, 3rem);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  color: var(--text-primary);
+}
+
+.auth-desktop-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+
+.auth-text-button {
+  padding: 4px 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.auth-text-button:hover {
+  color: var(--text-primary);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* Google and Microsoft can't finish in the app's window; the browser button above does it. */
+html[data-spectra-desktop] .auth-clerk :is(.cl-socialButtonsRoot, .cl-dividerRow) {
   display: none;
 }
 

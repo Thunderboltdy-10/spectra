@@ -1,3 +1,6 @@
+// Protocol calls carry many plain fields, and some return shapes are long by nature.
+#![allow(clippy::too_many_arguments, clippy::type_complexity)]
+
 pub mod agent_relay;
 pub mod computer_names;
 pub mod fs;

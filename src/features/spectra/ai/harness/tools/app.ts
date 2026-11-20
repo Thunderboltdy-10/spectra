@@ -243,7 +243,7 @@ function refuseElapsedStart(args: Record<string, unknown>, timeZone: string, now
   }
 }
 
-/* Devices: Spectra Bridge on the user's computers (docs/product/DEVICES.md). */
+/* Devices: Bridge on the user's computers (docs/product/DEVICES.md). */
 
 const CALENDAR_ACTIONS = ["add_event", "schedule_task", "move_block", "resize_block", "complete_block", "remove_event"] as const;
 const CALENDAR_WORDS: Record<string, [string, string]> = {
@@ -293,10 +293,22 @@ export const DEVICES_TOOL_ACTIONS = [
   "show_logs",
   "update",
   "remove_device",
+  "new_files",
+  "link_folders",
+  "unlink_folder",
 ] as const;
 
 type DevicesAction = (typeof DEVICES_TOOL_ACTIONS)[number];
-export type DevicesArgs = { action: DevicesAction; grantId?: string; deviceId?: string; paused?: boolean; path?: string };
+export type DevicesArgs = {
+  action: DevicesAction;
+  grantId?: string;
+  deviceId?: string;
+  paused?: boolean;
+  path?: string;
+  mountId?: string;
+  twinMountId?: string;
+  newFiles?: "on" | "off" | "follow";
+};
 
 const DEVICES_LABELS: Record<DevicesAction, [string, string]> = {
   status: ["Checking your devices", "Checked your devices"],
@@ -310,8 +322,11 @@ const DEVICES_LABELS: Record<DevicesAction, [string, string]> = {
   remove_folder: ["Removing the folder", "Asked to remove the folder"],
   pause_syncing: ["Changing syncing on this computer", "Asked to change syncing"],
   show_logs: ["Opening Bridge's logs", "Asked to open Bridge's logs"],
-  update: ["Updating Spectra Bridge", "Asked Spectra Bridge to update"],
+  update: ["Updating Spectra for desktop", "Asked Spectra for desktop to update"],
   remove_device: ["Removing the device", "Removed the device"],
+  new_files: ["Changing how new files sync in the folder", "Changed how new files sync in the folder"],
+  link_folders: ["Linking the two folders as one", "Linked the two folders as one"],
+  unlink_folder: ["Unlinking the folder", "Unlinked the folder"],
 };
 
 /** Pairing and removing ask first (settings); reading is free; the rest are ordinary. */
@@ -322,7 +337,8 @@ function devicesLabel(action: string): [string, string] {
 
 export function devicesToolEffect(action: DevicesAction): ToolEffect {
   if (action === "status" || action === "list_names") return "read";
-  if (action === "pair" || action === "remove_folder" || action === "remove_device") return "settings";
+  if (action === "pair" || action === "remove_folder" || action === "remove_device" || action === "new_files" || action === "link_folders")
+    return "settings";
   return "write";
 }
 
@@ -336,6 +352,17 @@ function parseDevicesArgs(raw: Record<string, unknown>): DevicesArgs {
   const path = optionalString(raw, "path", 1000);
   if (action === "sync_path" && !path) throw new ToolInputError("sync_path needs path; read it with action list_names.");
   const paused = action === "pause_folder" || action === "pause_syncing" ? raw.paused !== false : undefined;
+  if (action === "new_files" || action === "link_folders" || action === "unlink_folder") {
+    const mountId = optionalString(raw, "mountId", 200);
+    if (!mountId) throw new ToolInputError(`${action} needs mountId; read it with action status.`);
+    if (action === "new_files") return { action, mountId, newFiles: oneOf(raw, "newFiles", ["on", "off", "follow"] as const) };
+    if (action === "link_folders") {
+      const twinMountId = optionalString(raw, "twinMountId", 200);
+      if (!twinMountId) throw new ToolInputError("link_folders needs twinMountId, the same folder on the other computer; read it with action status.");
+      return { action, mountId, twinMountId };
+    }
+    return { action, mountId };
+  }
   return { action, ...(grantId ? { grantId } : {}), ...(deviceId ? { deviceId } : {}), ...(paused === undefined ? {} : { paused }), ...(path ? { path } : {}) };
 }
 
@@ -900,7 +927,7 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
     commandTool(session, {
       name: "devices",
       description:
-        "The user's computers connected through Spectra Bridge. Files already synced are ordinary artifacts: find them with search and read them like any other. list_names {path}: read the names of files and folders on the computer the user has Bridge on, one level at a time, in Documents, Desktop, Downloads and OneDrive; start with no path. You only ever get names, never contents. When the user's request would be helped by something you can see there and it is not in Spectra yet, say what you found and ask whether to sync it; on yes, sync_path {path} opens a prompt on the computer and it comes in only if they agree there. You cannot run commands on the computer or delete its files, and trashing a synced artifact leaves its file alone. status: read each computer's state, folders (grantId), last sync and any problem, with deviceIds. pair: connect the computer the user has Spectra open on; Spectra offers the download if Bridge is missing and the user confirms a code on the computer. add_folder opens the folder picker on that computer. add_files opens its native picker for one or more individual files without syncing their parent folder. retry_folder {grantId}, pause_folder {grantId, paused (false resumes)}, remove_folder {grantId} (files stay). pause_syncing {paused (false resumes)} for every folder. show_logs opens Bridge's log file. update installs a ready Bridge update. remove_device {deviceId} unpairs a computer; its files stay. Actions on a computer run there through the user's open Spectra; pass deviceId to aim at one computer. pair, remove_folder and remove_device ask first.",
+        "The user's computers running Spectra for desktop, which syncs their files through Bridge. Files already synced are ordinary artifacts: find them with search and read them like any other. list_names {path}: read the names of files and folders on the computer the user has Bridge on, one level at a time, in Documents, Desktop, Downloads and OneDrive; start with no path. You only ever get names, never contents. When the user's request would be helped by something you can see there and it is not in Spectra yet, say what you found and ask whether to sync it; on yes, sync_path {path} opens a prompt on the computer and it comes in only if they agree there. You cannot run commands on the computer or delete its files, and trashing a synced artifact leaves its file alone. status: read each computer's state, folders (grantId, mountId), last sync and any problem, with deviceIds. pair: connect the computer the user has Spectra open on; Spectra offers the download if Spectra for desktop is missing, and in the app or a browser on the same computer it connects by itself. add_folder opens the folder picker on that computer. add_files opens its native picker for one or more individual files without syncing their parent folder; a file inside a synced folder comes in without changing the folder. retry_folder {grantId}, pause_folder {grantId, paused (false resumes)}, remove_folder {grantId} (files stay). pause_syncing {paused (false resumes)} for every folder. new_files {mountId, newFiles: on, off or follow}: whether files added to that folder later come into Spectra by themselves (off: they wait until picked with add_files; follow: the user's choice for all folders). link_folders {mountId, twinMountId}: the same folder synced from two computers (OneDrive, Dropbox, iCloud) becomes one in Spectra and duplicates go to the Trash; status names likely pairs. unlink_folder {mountId} stops treating them as one. show_logs opens Bridge's log file. update installs a ready update of Spectra for desktop. remove_device {deviceId} unpairs a computer; its files stay. Actions on a computer run there through the user's open Spectra; pass deviceId to aim at one computer. pair, remove_folder, remove_device, new_files and link_folders ask first.",
       parameters: {
         type: "object",
         properties: {
@@ -909,6 +936,9 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
           deviceId: { type: "string" },
           paused: { type: "boolean" },
           path: { type: "string", description: "list_names and sync_path: where on the computer, such as Documents/IB. Empty lists the places." },
+          mountId: { type: "string", description: "new_files, link_folders and unlink_folder: the folder, from status." },
+          twinMountId: { type: "string", description: "link_folders: the same folder on the other computer, from status." },
+          newFiles: { type: "string", enum: ["on", "off", "follow"] },
         },
         required: ["action"],
         additionalProperties: false,
@@ -918,7 +948,15 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
       doneLabel: (args: DevicesArgs) => devicesLabel(args.action)[1],
       question: (args: DevicesArgs) =>
         args.action === "pair"
-          ? "Connect this computer to Spectra? You'll confirm a code on the computer."
+          ? "Connect this computer to Spectra?"
+          : args.action === "new_files"
+            ? args.newFiles === "off"
+              ? "Stop new files in this folder coming into Spectra by themselves? You'll pick them with Add files."
+              : args.newFiles === "follow"
+                ? "Have this folder follow your choice for all folders again?"
+                : "Let new files in this folder come into Spectra by themselves?"
+          : args.action === "link_folders"
+            ? "Treat these two folders as one? Files that came in from both keep one copy; the other goes to the Trash."
           : args.action === "remove_folder"
             ? "Stop using this folder in Spectra? Its files stay on the computer."
             : "Remove this device? It stops syncing; its files stay on the computer.",
@@ -932,6 +970,12 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
             ? { command: "pair_device", args: {} }
             : args.action === "remove_device"
               ? { command: "remove_device", args: { deviceId: args.deviceId } }
+            : args.action === "new_files"
+              ? { command: "change_folder_sync", args: { action: "new_files", mountId: args.mountId, newFiles: args.newFiles } }
+            : args.action === "link_folders"
+              ? { command: "change_folder_sync", args: { action: "link", mountId: args.mountId, twinMountId: args.twinMountId } }
+            : args.action === "unlink_folder"
+              ? { command: "change_folder_sync", args: { action: "unlink", mountId: args.mountId } }
               : { command: "control_device", args: controlDeviceArgs(args) },
     }),
   ];

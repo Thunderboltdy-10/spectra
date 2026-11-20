@@ -2,7 +2,7 @@ name: Spectra Bridge release
 
 # Pushing a tag `bridge-v<version>` (matching bridge-app/tauri.conf.json)
 # builds installers and publishes them, with updater signatures and a manifest, as a
-# release of the public releases repository. Spectra's /bridge/download route
+# release of the public releases repository. Spectra's /desktop/download route
 # and the Bridge updater both read the latest release there.
 #
 # Repository configuration:
@@ -21,7 +21,7 @@ permissions:
   contents: read
 
 env:
-  RELEASES_REPO: ${{ vars.BRIDGE_RELEASES_REPO || 'Thunderboltdy-10/spectra-bridge' }}
+  RELEASES_REPO: ${{ vars.BRIDGE_RELEASES_REPO || 'Thunderboltdy-10/spectra-desktop' }}
 
 jobs:
   release:

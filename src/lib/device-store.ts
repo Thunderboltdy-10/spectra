@@ -1,13 +1,14 @@
 import { agentHubTicket } from "../../shared/agent-hub-ticket.mjs";
 import WebSocket from "ws";
 import { localBridgeRelay } from "./local-bridge-relay";
+import { BRIDGE_WS_ORIGIN } from "../../shared/bridge-port";
 
 /*
  * The server's way to the work kept on someone's computer: straight to Bridge
  * when they run on the same machine, through the hub when the server is hosted.
  */
 
-const LOCAL_BRIDGE = "ws://127.0.0.1:47615";
+const LOCAL_BRIDGE = BRIDGE_WS_ORIGIN;
 const TICKET_MS = 60_000;
 const CALL_TIMEOUT_MS = 20_000;
 
@@ -15,7 +16,7 @@ const hubUrl = () => process.env.SPECTRA_AGENT_HUB_URL?.trim().replace(/\/$/, ""
 
 function hubTicket(accountId: string) {
   const secret = process.env.SPECTRA_COLLAB_TOKEN_SECRET?.trim();
-  if (!secret) throw new Error("DEVICE_STORE_UNAVAILABLE: Spectra Bridge can't be reached from this server.");
+  if (!secret) throw new Error("DEVICE_STORE_UNAVAILABLE: Bridge can't be reached from this server.");
   return agentHubTicket(accountId, secret, TICKET_MS);
 }
 
@@ -55,7 +56,7 @@ export async function deviceStoreCall<T = unknown>(
       settle();
     };
     const timer = setTimeout(() => {
-      finish(() => reject(new Error("DEVICE_STORE_UNAVAILABLE: Spectra Bridge didn't answer.")));
+      finish(() => reject(new Error("DEVICE_STORE_UNAVAILABLE: Bridge didn't answer.")));
     }, Math.max(1, timeoutMs - (Date.now() - started)));
     socket.on("open", () => socket.send(JSON.stringify({ id: 1, method, params })));
     socket.on("message", (data) => {
@@ -67,10 +68,10 @@ export async function deviceStoreCall<T = unknown>(
       }
     });
     socket.on("error", () =>
-      finish(() => reject(new Error("DEVICE_STORE_UNAVAILABLE: Spectra Bridge isn't reachable."))),
+      finish(() => reject(new Error("DEVICE_STORE_UNAVAILABLE: Bridge isn't reachable."))),
     );
     socket.on("close", (code) =>
-      finish(() => reject(new Error(`DEVICE_STORE_UNAVAILABLE: Spectra Bridge closed the connection (${code}).`))),
+      finish(() => reject(new Error(`DEVICE_STORE_UNAVAILABLE: Bridge closed the connection (${code}).`))),
     );
   });
 }

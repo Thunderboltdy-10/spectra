@@ -96,8 +96,8 @@ contact requests are still saved in Convex.
 
 | Key | Value |
 | --- | --- |
-| `NEXT_PUBLIC_SPECTRA_BRIDGE_DOWNLOAD_URL` | Download base route; default `/bridge/download`. The client appends `/windows` or `/macos`. |
-| `SPECTRA_BRIDGE_RELEASES_REPO` | Repository used by the app's download proxy; default `Thunderboltdy-10/spectra-bridge`. |
+| `NEXT_PUBLIC_SPECTRA_DESKTOP_DOWNLOAD_URL` | Spectra for desktop download base route; default `/desktop/download`. The client appends `/windows` or `/macos`. `NEXT_PUBLIC_SPECTRA_BRIDGE_DOWNLOAD_URL` is still read as a fallback; `/bridge/download/*` redirects. |
+| `SPECTRA_DESKTOP_RELEASES_REPO` | Repository used by the download proxy and `/desktop/latest`; default `Thunderboltdy-10/spectra-desktop`, with `Thunderboltdy-10/spectra-bridge` tried second. `SPECTRA_BRIDGE_RELEASES_REPO` is still read as a fallback. |
 | `SPECTRA_ORIGINS` | Comma-separated allowed browser origins in the Bridge process/build environment. Local default `http://localhost:3000,http://127.0.0.1:3000`; releases require hosted origins. |
 | `SPECTRA_BRIDGE_DATA_DIR` | Optional native runtime data directory for an isolated Bridge. Omit for normal desktop use. |
 
@@ -154,7 +154,7 @@ uses `SPECTRA_CONVEX_URL` and `SPECTRA_ORIGINS` as repository variables too.
 
 | Key | Value |
 | --- | --- |
-| `BRIDGE_RELEASES_REPO` | GitHub variable: release repository `owner/name`, default `Thunderboltdy-10/spectra-bridge`. |
+| `BRIDGE_RELEASES_REPO` | GitHub variable: release repository `owner/name`, default `Thunderboltdy-10/spectra-desktop`. |
 | `BRIDGE_RELEASES_TOKEN` | GitHub secret: token permitted to publish releases in that repository. |
 | `TAURI_SIGNING_PRIVATE_KEY` | GitHub secret: Tauri updater signing private key. |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | GitHub secret: password for that signing key, if encrypted. |

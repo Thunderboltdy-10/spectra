@@ -244,7 +244,7 @@ function thisComputerView(local: LocalBridge, cloud: CloudDevice | undefined, mo
     paused: allPaused,
   };
   if (updateRequired)
-    return { ...common, tone: "attention", label: "Out of date", detail: "Update Spectra Bridge to keep syncing." };
+    return { ...common, tone: "attention", label: "Out of date", detail: "Update Spectra for desktop to keep syncing." };
   if (!live) {
     // Bridge still reports to Spectra, so it runs: only this browser lost it.
     const reporting = Boolean(cloud && now - cloud.lastSeenAt < DEVICE_ONLINE_MS);
@@ -257,7 +257,7 @@ function thisComputerView(local: LocalBridge, cloud: CloudDevice | undefined, mo
             ? "Bridge is running. Try again to reconnect this browser to it."
             : reporting
               ? "Bridge is connected to Spectra, but this browser can't reach it. Try again. If that doesn't work, quit Bridge from its icon near the clock and open it again."
-              : "Bridge isn't running. Start Spectra Bridge on this computer, then try again.";
+              : "Bridge isn't running. Open Spectra for desktop on this computer, then try again.";
     return { ...common, tone: "offline", label: "Not connected", detail };
   }
   if (allPaused) return { ...common, tone: "paused", label: "Paused", detail: "Syncing is paused on this computer." };
@@ -296,7 +296,7 @@ function otherDeviceView(device: CloudDevice, mounts: CloudMount[], now: number)
     paused: Boolean(online && health?.paused),
   };
   if (!online) return { ...base, tone: "offline", label: "Offline", detail: seen };
-  if (updateRequired) return { ...base, tone: "attention", label: "Out of date", detail: "Update Spectra Bridge on that computer." };
+  if (updateRequired) return { ...base, tone: "attention", label: "Out of date", detail: "Update Spectra for desktop on that computer." };
   if (health?.paused) return { ...base, tone: "paused", label: "Paused", detail: "Syncing is paused on that computer." };
   if (problem) return { ...base, tone: "attention", label: "Needs attention", detail: problem, problem };
   return { ...base, tone: "ok", label: "Connected", detail: seen };
@@ -413,9 +413,16 @@ export function describeDevicesForAi(cloud: CloudOverview | null | undefined, no
   const described = others.map((device) => {
     const lines = [`${device.name} (${device.platformLabel}, deviceId ${device.id}): ${device.label}. ${device.detail}`];
     if (device.lastSyncAt) lines.push(`Last sync ${timeAgo(device.lastSyncAt, now)}.`);
-    if (device.version) lines.push(`Spectra Bridge ${device.version}${device.updateRequired ? ", out of date" : ""}.`);
-    for (const folder of device.folders)
-      lines.push(`- Folder ${folder.name} (grantId ${folder.id})${folder.detail ? `: ${folder.detail}` : ""}`);
+    if (device.version) lines.push(`Spectra for desktop ${device.version}${device.updateRequired ? ", out of date" : ""}.`);
+    for (const folder of device.folders) {
+      const ids = [`grantId ${folder.id}`, ...(folder.mountId ? [`mountId ${folder.mountId}`] : [])].join(", ");
+      const twin = folder.sameAs
+        ? ` Already one folder with the one on ${folder.sameAs.computer}${folder.sameAs.byHand ? " (linked; unlink_folder undoes it)" : ""}.`
+        : folder.alsoOn && folder.alsoOnMountId
+          ? ` Probably the same folder as on ${folder.alsoOn} (mountId ${folder.alsoOnMountId}); link_folders makes them one.`
+          : "";
+      lines.push(`- ${folder.kind === "file" ? "File" : "Folder"} ${folder.name} (${ids})${folder.detail ? `: ${folder.detail}` : ""}.${twin}`);
+    }
     return lines.join("\n");
   });
   return [

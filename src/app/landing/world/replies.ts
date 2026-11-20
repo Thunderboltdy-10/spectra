@@ -137,7 +137,7 @@ const ABOUT: Reply[] = [
     matches: has(/\bbridge\b/i, /\bmy (own )?files\b/i, /\bcomputer\b/i, /\bword\b/i, /\boffline\b/i, /\bdesktop\b/i),
     title: "Your files and Bridge",
     steps: [{ label: "Checked Bridge" }],
-    text: `With Spectra Bridge your own folders stay on your computer and show up in Spectra. The file on your desktop and the artifact in Spectra are the same file: edit it in Word or here, and it is never copied or uploaded twice.`,
+    text: `With Spectra for desktop your own folders stay on your computer and show up in Spectra. The file on your desktop and the artifact in Spectra are the same file: edit it in Word or here, and it is never copied or uploaded twice.`,
   },
   {
     key: "price",

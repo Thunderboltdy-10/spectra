@@ -112,8 +112,8 @@ pub fn classify_selected_changes(
     paths: impl IntoIterator<Item = PathBuf>,
 ) -> ChangeBatch {
     let selected = selected_file.map(|name| root.join(name));
-    if let Some(path) = &selected {
-        if std::fs::symlink_metadata(path)
+    if let Some(path) = &selected
+        && std::fs::symlink_metadata(path)
             .is_ok_and(|metadata| metadata.is_dir() || metadata.file_type().is_symlink())
         {
             return ChangeBatch {
@@ -125,7 +125,6 @@ pub fn classify_selected_changes(
                 }],
             };
         }
-    }
     let mut batch = classify_changed_paths(
         root,
         paths.into_iter().filter(|path| {
@@ -288,8 +287,7 @@ pub fn scan_selection<P: Platform>(
     selected_file: Option<&Path>,
 ) -> anyhow::Result<ScanPage> {
     let selection = selected_file.map_or_else(|| root.to_owned(), |name| root.join(name));
-    if selected_file.is_some() {
-        let name = selected_file.unwrap();
+    if let Some(name) = selected_file {
         anyhow::ensure!(
             name.components().count() == 1
                 && matches!(
@@ -320,7 +318,7 @@ pub fn scan_selection<P: Platform>(
             ),
         }
         anyhow::ensure!(
-            selection.canonicalize()? == root.canonicalize()?.join(selected_file.unwrap()),
+            selection.canonicalize()? == root.canonicalize()?.join(name),
             "Selected file escaped its grant"
         );
     }
@@ -726,8 +724,8 @@ impl StabilityTracker {
         // Poll metadata while waiting for quiescence. A fresh writer-exclusive
         // hash is still mandatory at the deadline, including when a writer
         // preserved length and mtime, so this cannot authorize partial bytes.
-        if let Some(candidate) = self.candidates.get(path) {
-            if now.duration_since(candidate.first_stable_at) < self.window {
+        if let Some(candidate) = self.candidates.get(path)
+            && now.duration_since(candidate.first_stable_at) < self.window {
                 let metadata = path.metadata()?;
                 if metadata.len() == candidate.size
                     && metadata.modified().ok() == candidate.modified
@@ -735,7 +733,6 @@ impl StabilityTracker {
                     return Ok(None);
                 }
             }
-        }
         let (snapshot, writer_complete) =
             match stable_file_snapshot_with(self.platform.as_ref(), path)? {
                 Some(snapshot) => (

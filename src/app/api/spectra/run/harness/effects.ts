@@ -231,6 +231,18 @@ export async function executeApplicationCommand(
             : "Sent to Spectra on the user's computer, which runs it through Bridge. The Devices page shows the result; check with devices status.",
     };
   }
+  if (command === "change_folder_sync") {
+    const action = String(parsed.action);
+    const result = await applyMutation(
+      action === "new_files" ? "syncPolicy:setFolderNewFiles" : action === "link" ? "bridgeSync:linkSameFolder" : "bridgeSync:unlinkSameFolder",
+      parsed,
+    );
+    onUiEvent?.({
+      key: "devices_changed",
+      payload: { note: action === "new_files" ? "Changed a folder's new files" : action === "link" ? "Linked two folders as one" : "Unlinked a folder" },
+    });
+    return { ok: true, result };
+  }
   if (command === "remove_device") {
     const result = await applyMutation("bridge:revokeDevice", { deviceId: String(parsed.deviceId) });
     onUiEvent?.({ key: "devices_changed", payload: { note: "Removed a device" } });
@@ -769,9 +781,9 @@ async function readComputerNames(path: string) {
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
     if (/unknown request/i.test(message))
-      return { available: false, message: "This computer's Spectra Bridge needs updating before Spectra can see file names. Offer devices update." };
+      return { available: false, message: "This computer's Bridge needs updating before Spectra can see file names. Offer devices update." };
     if (/DEVICE_STORE_UNAVAILABLE|connect|timed? ?out|socket|closed/i.test(message))
-      return { available: false, message: "Spectra Bridge isn't reachable on the user's computer right now. Suggest opening it, or devices pair if it was never set up." };
+      return { available: false, message: "Bridge isn't reachable on the user's computer right now. Suggest opening it, or devices pair if it was never set up." };
     return { available: false, message: message || "That path couldn't be read." };
   }
 }

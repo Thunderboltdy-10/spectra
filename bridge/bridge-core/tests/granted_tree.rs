@@ -41,9 +41,9 @@ fn granting_and_scanning_the_acceptance_tree_changes_zero_bytes() {
         b"day,value\n1,42\n",
     )
     .unwrap();
-    let before = manifest(&root);
-    let page = scan_page(&HostPlatform, &root, None, 100).unwrap();
-    let after = manifest(&root);
+    let before = manifest(root);
+    let page = scan_page(&HostPlatform, root, None, 100).unwrap();
+    let after = manifest(root);
     assert_eq!(page.entries.len(), 4); // one folder plus three files
     assert_eq!(before, after);
 }

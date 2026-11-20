@@ -4,7 +4,7 @@ import sharp from "sharp";
 import { appIconSvg, encodeIco, trayFileName, traySvg, trayVariants } from "./bridge-tray-icons";
 
 /*
- * Writes the Spectra Bridge icons from the prism renderer:
+ * Writes the Bridge icons from the prism renderer:
  *   icons/tray/<theme>-<dot>-<size>.png  the tray, per taskbar theme, state dot and size
  *   icons/app-icon.svg, icons/app-icon.png the source for `cargo tauri icon`
  *   icons/icon.ico                       the Windows executable icon

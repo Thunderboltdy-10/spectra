@@ -249,7 +249,7 @@ export function editArtifactTool(session: HarnessSession): HarnessTool<EditArgs>
 
 /** F12: what the reply may claim about a file on the computer that Bridge has not written yet. */
 export const DESKTOP_FILE_PENDING =
-  "The file on their computer has not taken the change yet: Spectra Bridge writes it next, and waits while the file is open in Office. Say it is saved in Spectra and will reach the file on their computer; do not say the file itself is saved.";
+  "The file on their computer has not taken the change yet: Bridge writes it next, and waits while the file is open in Office. Say it is saved in Spectra and will reach the file on their computer; do not say the file itself is saved.";
 
 type ReadArgs = { id: string } & ReadRange;
 

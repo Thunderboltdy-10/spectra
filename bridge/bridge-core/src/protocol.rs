@@ -13,6 +13,9 @@ pub struct HealthResponse {
     /// joining by themselves. Absent from older Bridges, so it defaults off.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub disconnected_here: bool,
+    /// Spectra for desktop: the version downloaded and waiting for a restart.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub update_ready: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

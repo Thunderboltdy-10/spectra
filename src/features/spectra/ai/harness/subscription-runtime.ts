@@ -16,6 +16,7 @@ import {
   type ModelUsage,
   type ProviderToolSpec,
 } from "./types";
+import { BRIDGE_WS_ORIGIN } from "../../../../../shared/bridge-port";
 
 /*
  * Runs Spectra's harness on the user's own logged-in `codex` or `claude` CLI,
@@ -70,7 +71,7 @@ export type OneShotRequest = RuntimeTarget & {
   small?: boolean;
 };
 
-const RELAY_URL = "ws://127.0.0.1:47615/v1/agent/connect";
+const RELAY_URL = `${BRIDGE_WS_ORIGIN}/v1/agent/connect`;
 const HUB_TICKET_MS = 60_000;
 /** Close codes the agent hub uses when it cannot reach the account's Bridge. */
 const HUB_NO_BRIDGE = 4404;
@@ -106,7 +107,7 @@ const hubUrl = () => process.env.SPECTRA_AGENT_HUB_URL?.trim().replace(/\/$/, ""
 
 async function authenticatedRuntimeAccount() {
   const actor = await convexQuery<Record<string, never>, { accountId: string } | null>("identity:me", {});
-  if (!actor?.accountId) throw new ProviderUnavailableError("Spectra Bridge requires an authenticated account.");
+  if (!actor?.accountId) throw new ProviderUnavailableError("Bridge requires an authenticated account.");
   return actor.accountId;
 }
 
@@ -118,11 +119,11 @@ async function relayEndpoint(provider: SubscriptionProvider, accountId: string |
       const relay = await localBridgeRelay(owner);
       return { url: `${RELAY_URL}?provider=${provider}&${relay.query}`, protocols: ["spectra-agent", relay.token] };
     } catch (error) {
-      throw new ProviderUnavailableError(error instanceof Error ? error.message : "Spectra Bridge can't be reached.");
+      throw new ProviderUnavailableError(error instanceof Error ? error.message : "Bridge can't be reached.");
     }
   }
   const secret = process.env.SPECTRA_COLLAB_TOKEN_SECRET?.trim();
-  if (!secret) throw new ProviderUnavailableError("Spectra Bridge can't be reached from this server.");
+  if (!secret) throw new ProviderUnavailableError("Bridge can't be reached from this server.");
   return {
     url: `${hub}/_spectra/agent-hub/server?provider=${provider}`,
     protocols: ["spectra-agent", await agentHubTicket(owner, secret, HUB_TICKET_MS)],
@@ -136,9 +137,9 @@ function relayErrorMessage(provider: SubscriptionProvider, detail: string) {
 }
 
 function relayCloseMessage(provider: SubscriptionProvider, code: number | undefined) {
-  if (code === HUB_NO_BRIDGE) return "Spectra Bridge isn't connected on your computer.";
-  if (code === HUB_PIPE_TIMEOUT) return "Spectra Bridge didn't answer.";
-  return `Could not reach Spectra Bridge for ${PROVIDER_NAME[provider]}.`;
+  if (code === HUB_NO_BRIDGE) return "Bridge isn't connected on your computer.";
+  if (code === HUB_PIPE_TIMEOUT) return "Bridge didn't answer.";
+  return `Could not reach Bridge for ${PROVIDER_NAME[provider]}.`;
 }
 
 /** Spectra's tools as a minimal MCP server, for one Claude Code session. */
@@ -1398,9 +1399,9 @@ export function runtimeChainReason(runtime: RuntimeName, reason: string) {
   if (/usage limit|rate limit|quota|too many/i.test(reason)) return `${name} hit its usage limit`;
   if (/isn't installed/.test(reason)) return `${name} isn't installed on this computer`;
   if (/cannot read this attached/i.test(reason)) return `${name} can't read the attached file`;
-  if (/different Spectra account/i.test(reason)) return "Spectra Bridge on this computer is connected to another account";
-  if (/isn't running/i.test(reason)) return "Spectra Bridge isn't running";
-  if (/bridge|relay|can't be reached|could not reach/i.test(reason)) return "Spectra Bridge can't be reached";
+  if (/different Spectra account/i.test(reason)) return "Bridge on this computer is connected to another account";
+  if (/isn't running/i.test(reason)) return "Spectra for desktop isn't running";
+  if (/bridge|relay|can't be reached|could not reach/i.test(reason)) return "Bridge can't be reached";
   return `${name} stopped responding`;
 }
 
@@ -1410,7 +1411,7 @@ export type UnreachableRuntime = { runtime: SubscriptionProvider; state: "signed
 const UNREACHABLE_WORDS: Record<UnreachableRuntime["state"], string> = {
   "signed-out": "Log in",
   "not-installed": "isn't installed",
-  "no-bridge": "Spectra Bridge isn't running.",
+  "no-bridge": "Spectra for desktop isn't running.",
   error: "stopped responding",
 };
 

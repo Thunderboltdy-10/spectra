@@ -84,28 +84,34 @@ Its public WebSocket URL is `wss://spectra-collaboration-gateway.fly.dev`.
    invitation (`IDENTITY_NOT_INVITED`), except the operators in `SUPER_ADMIN_EMAILS`. Set that name identically on
    Convex and Vercel.
 
-## 5. Bridge releases
+## 5. Spectra for desktop releases
 
-The Bridge updater and `/bridge/download/<platform>` both read the latest release of the public repository
-`Thunderboltdy-10/spectra-bridge` (`bridge/bridge-app/tauri.conf.json`, `endpoints`).
+Spectra for desktop is the Tauri app in `bridge/bridge-app`: a window on the web app plus the Bridge that syncs local
+files. Its updater, `/desktop/download/<platform>` and `/desktop/latest` read the latest release of the public repository
+`Thunderboltdy-10/spectra-desktop` (renamed from `spectra-bridge`; GitHub forwards the old name, and the updater and the
+download route try the old name second). Tags stay `bridge-v*`.
 
-1. Create that repository on GitHub: public, with a README so it has a default branch. Nothing else goes in it.
+1. Rename the repository `Thunderboltdy-10/spectra-bridge` to `spectra-desktop` on GitHub (Settings → General → Repository
+   name). Public, with a README so it has a default branch. Nothing else goes in it.
 2. Make a fine-grained token with **Contents: read and write** on that repository only.
 3. In **this** repository, Settings → Secrets and variables → Actions:
    - Variables: `SPECTRA_CONVEX_URL` (production Convex URL), `SPECTRA_ORIGINS` (the https web origin, comma-separated
-     if several), `BRIDGE_RELEASES_REPO` = `Thunderboltdy-10/spectra-bridge`.
+     if several), `BRIDGE_RELEASES_REPO` = `Thunderboltdy-10/spectra-desktop`.
    - Secrets: `BRIDGE_RELEASES_TOKEN` (the token), `TAURI_SIGNING_PRIVATE_KEY` and
      `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (the key whose public half is `pubkey` in `tauri.conf.json`; it is kept, commented
-     out, in your local `.env.local`). Losing that key means installed Bridges can never update again.
+     out, in your local `.env.local`). Losing that key means installed copies can never update again.
    - Optional, for a notarized Mac build: `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`,
      `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID`.
+   - Vercel: `SPECTRA_DESKTOP_RELEASES_REPO` = `Thunderboltdy-10/spectra-desktop` (optional; that is the default).
 4. Release: the tag must equal `bridge-v` + the `version` in `tauri.conf.json`:
-   `git tag bridge-v0.1.0 && git push origin bridge-v0.1.0`. The workflow **Spectra Bridge release** builds the signed
+   `git tag bridge-v1.0.0 && git push origin bridge-v1.0.0`. The workflow **Spectra Bridge release** builds the signed
    installers and `latest.json` and publishes them.
-5. Check `https://github.com/Thunderboltdy-10/spectra-bridge/releases/latest/download/latest.json` opens, then
-   `https://<domain>/bridge/download/windows` downloads the installer.
-6. Every later release: bump `version` in `tauri.conf.json` (and `version` under `[workspace.package]` in `bridge/Cargo.toml`), commit, tag, push the
-   tag. Installed Bridges check within 6 hours (20 minutes after a failed check) and install when idle.
+5. Check `https://github.com/Thunderboltdy-10/spectra-desktop/releases/latest/download/latest.json` opens, then
+   `https://<domain>/desktop/download/windows` downloads the installer.
+6. Every later release: bump `version` in `tauri.conf.json` (and `version` under `[workspace.package]` in `bridge/Cargo.toml`),
+   commit, tag, push the tag. Installed copies (the old tray-only Bridge included, which keeps the same identifier) check a
+   minute after starting and then every 30 minutes, also when the window gains focus or the computer wakes, and install
+   when idle. The window's content is the web app, so web changes reach it without a release.
 
 ## 6. Syllabi
 

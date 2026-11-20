@@ -252,11 +252,10 @@ pub(crate) fn readable_doc(state: Option<&[u8]>, updates: &[Vec<u8>], artifact_i
             if let Err(error) = applied {
                 eprintln!("[works] {artifact_id}: the saved state couldn't be read ({error:#}); using the newest saved point");
                 damaged = true;
-                if let Some(saved) = fallback() {
-                    if let Ok(update) = Update::decode_v1(&saved) {
+                if let Some(saved) = fallback()
+                    && let Ok(update) = Update::decode_v1(&saved) {
                         let _ = txn.apply_update(update);
                     }
-                }
             }
         }
         for (index, update) in updates.iter().enumerate() {
@@ -729,11 +728,10 @@ impl Connection {
             SYNC => self.sync(&raw_key, &mut reader),
             AWARENESS => self.awareness(&raw_key, &mut reader),
             QUERY_AWARENESS => {
-                if let Some(joined) = self.joined.get(&raw_key) {
-                    if let Some(update) = locked(&joined.room).awareness_update() {
+                if let Some(joined) = self.joined.get(&raw_key)
+                    && let Some(update) = locked(&joined.room).awareness_update() {
                         self.send(&raw_key, &awareness_body(&update));
                     }
-                }
                 Ok(())
             }
             STATELESS => self.stateless(&raw_key, reader.string()?),

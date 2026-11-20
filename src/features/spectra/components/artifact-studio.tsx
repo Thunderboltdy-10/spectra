@@ -3186,7 +3186,7 @@ function ArtifactStudioEditor({
       return;
     }
     setNativeRecoveryError(
-      "Connect Spectra Bridge and add a folder in Spectra Settings before keeping a local copy.",
+      "Connect Bridge and add a folder in Spectra Settings before keeping a local copy.",
     );
   }, [
     artifact.title,
@@ -5587,7 +5587,7 @@ function ArtifactStudioEditor({
           toast.error(
             error instanceof Error && error.message
               ? error.message
-              : "Spectra Bridge could not reach this file.",
+              : "Bridge could not reach this file.",
           ),
       );
       return;

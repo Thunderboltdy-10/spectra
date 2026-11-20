@@ -1,5 +1,7 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
+#![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
+mod desktop;
 mod pairing_work;
 mod polling;
 
@@ -226,6 +228,10 @@ impl LocalBridgeControl for SpectraLocalControl {
 
     async fn request_update(&self) -> Result<String, String> {
         request_bridge_update(&self.app).await
+    }
+
+    async fn restart_update(&self) -> Result<String, String> {
+        restart_for_update(&self.app)
     }
 
     fn snapshot(&self) -> LocalControlSnapshot {
@@ -759,14 +765,14 @@ fn tray_view(paired: bool, connected: bool, paused: bool, mounts: &[LocalMountSt
     if !paired {
         return TrayView {
             dot: TrayDot::Orange,
-            tooltip: "Spectra Bridge \u{b7} Not connected yet".into(),
+            tooltip: "Spectra \u{b7} Not connected yet".into(),
         };
     }
     if paused {
         return TrayView {
             dot: TrayDot::Grey,
             tooltip: format!(
-                "Spectra Bridge \u{b7} Paused \u{b7} {}",
+                "Spectra \u{b7} Paused \u{b7} {}",
                 folder_count(mounts.len())
             ),
         };
@@ -781,7 +787,7 @@ fn tray_view(paired: bool, connected: bool, paused: bool, mounts: &[LocalMountSt
             return TrayView {
                 dot: TrayDot::Red,
                 tooltip: format!(
-                    "Spectra Bridge \u{b7} Problem with {}",
+                    "Spectra \u{b7} Problem with {}",
                     short_label(&only.label)
                 ),
             };
@@ -789,20 +795,20 @@ fn tray_view(paired: bool, connected: bool, paused: bool, mounts: &[LocalMountSt
         many => {
             return TrayView {
                 dot: TrayDot::Red,
-                tooltip: format!("Spectra Bridge \u{b7} Problem with {} folders", many.len()),
+                tooltip: format!("Spectra \u{b7} Problem with {} folders", many.len()),
             };
         }
     }
     if !connected {
         return TrayView {
             dot: TrayDot::Grey,
-            tooltip: "Spectra Bridge \u{b7} Disconnected".into(),
+            tooltip: "Spectra \u{b7} Disconnected".into(),
         };
     }
     TrayView {
         dot: TrayDot::None,
         tooltip: format!(
-            "Spectra Bridge \u{b7} Connected \u{b7} {}",
+            "Spectra \u{b7} Connected \u{b7} {}",
             folder_count(mounts.len())
         ),
     }
@@ -966,32 +972,35 @@ fn refresh_tray(app: &tauri::AppHandle) {
     *shown = Some(next);
 }
 
-/// The Devices page on the Spectra this computer is paired with.
-fn devices_page_url(origin: &str) -> Option<String> {
-    let origin = origin.trim().trim_end_matches('/');
-    let scheme_ok = origin.starts_with("https://") || origin.starts_with("http://");
-    let plain = !origin.is_empty()
-        && origin.chars().all(|character| {
-            character.is_ascii_graphic() && !matches!(character, '"' | '\'' | '\x60')
-        });
-    (scheme_ok && plain).then(|| format!("{origin}/devices"))
-}
 
-fn open_devices_page(app: &tauri::AppHandle) {
-    let origin = app
+/// Which Spectra the app window shows: the one this computer is paired with,
+/// else the first deployed origin the build serves.
+fn desktop_site(app: &tauri::AppHandle) -> Option<desktop::DesktopSite> {
+    let state = app.try_state::<Arc<ServerState>>()?;
+    let origins = state.origins();
+    let paired = app
         .try_state::<BridgeRuntime>()
         .and_then(|runtime| runtime.journal.config("browser_origin").ok().flatten())
-        .or_else(|| {
-            app.try_state::<Arc<ServerState>>()
-                .and_then(|state| state.primary_origin())
-        });
-    let Some(url) = origin.as_deref().and_then(devices_page_url) else {
-        return;
-    };
-    if let Err(error) = open_with_system(std::ffi::OsStr::new(&url))
-        && let Some(runtime) = app.try_state::<BridgeRuntime>()
-    {
-        record_runtime_error(&runtime.journal, "Could not open Spectra", &error);
+        .filter(|origin| state.origin_allowed(origin));
+    let origin = paired.or_else(|| state.primary_origin())?;
+    let mut all = origins;
+    if !all.contains(&origin) {
+        all.push(origin.clone());
+    }
+    Some(desktop::DesktopSite { origin, origins: all })
+}
+
+/// Opens the Spectra window, at `path` when given (such as `/devices`).
+fn open_spectra(app: &tauri::AppHandle, path: Option<&str>) {
+    let Some(runtime) = app.try_state::<BridgeRuntime>() else { return };
+    let journal = runtime.journal.clone();
+    match desktop_site(app) {
+        Some(site) => desktop::open(app, journal, site, path),
+        None => record_runtime_error(
+            &journal,
+            "Could not open Spectra",
+            &"this build has no Spectra address",
+        ),
     }
 }
 
@@ -999,7 +1008,7 @@ fn open_devices_page(app: &tauri::AppHandle) {
 const WINDOWS_CREATE_NO_WINDOW: u32 = 0x08000000;
 
 #[cfg(windows)]
-const WINDOWS_AUTOSTART_SCRIPT: &str = r#"$service=New-Object -ComObject Schedule.Service;$service.Connect();$root=$service.GetFolder('\');$definition=$service.NewTask(0);$definition.RegistrationInfo.Description='Starts Spectra Bridge immediately at user logon';$definition.Settings.Enabled=$true;$definition.Settings.StartWhenAvailable=$true;$definition.Settings.MultipleInstances=2;$trigger=$definition.Triggers.Create(9);$trigger.Enabled=$true;$trigger.UserId=[System.Security.Principal.WindowsIdentity]::GetCurrent().Name;$action=$definition.Actions.Create(0);$action.Path=$env:SPECTRA_BRIDGE_EXE;$action.Arguments='--autostart';$action.WorkingDirectory=$env:SPECTRA_BRIDGE_WORKDIR;$null=$root.RegisterTaskDefinition('Spectra Bridge',$definition,6,$null,$null,3,$null)"#;
+const WINDOWS_AUTOSTART_SCRIPT: &str = r#"$service=New-Object -ComObject Schedule.Service;$service.Connect();$root=$service.GetFolder('\');$definition=$service.NewTask(0);$definition.RegistrationInfo.Description='Starts Spectra immediately at user logon';$definition.Settings.Enabled=$true;$definition.Settings.StartWhenAvailable=$true;$definition.Settings.MultipleInstances=2;$trigger=$definition.Triggers.Create(9);$trigger.Enabled=$true;$trigger.UserId=[System.Security.Principal.WindowsIdentity]::GetCurrent().Name;$action=$definition.Actions.Create(0);$action.Path=$env:SPECTRA_BRIDGE_EXE;$action.Arguments='--autostart';$action.WorkingDirectory=$env:SPECTRA_BRIDGE_WORKDIR;$null=$root.RegisterTaskDefinition('Spectra',$definition,6,$null,$null,3,$null)"#;
 
 #[cfg(windows)]
 fn repair_windows_autostart_command() -> anyhow::Result<()> {
@@ -1014,7 +1023,7 @@ fn repair_windows_autostart_command() -> anyhow::Result<()> {
     let app_data =
         std::env::var_os("APPDATA").ok_or_else(|| anyhow::anyhow!("APPDATA is unavailable"))?;
     let shortcut = std::path::PathBuf::from(app_data)
-        .join("Microsoft\\Windows\\Start Menu\\Programs\\Startup\\Spectra Bridge.lnk");
+        .join("Microsoft\\Windows\\Start Menu\\Programs\\Startup\\Spectra.lnk");
     let working_directory = executable
         .parent()
         .ok_or_else(|| anyhow::anyhow!("Bridge executable has no parent directory"))?;
@@ -1035,7 +1044,10 @@ fn repair_windows_autostart_command() -> anyhow::Result<()> {
         .creation_flags(WINDOWS_CREATE_NO_WINDOW)
         .status()?;
     anyhow::ensure!(status.success(), "Windows logon task could not be created");
-    let _ = run.delete_value("Spectra Bridge");
+    // The login entries the task replaces, under this name and the Bridge's old one.
+    for name in ["Spectra", "Spectra Bridge"] {
+        let _ = run.delete_value(name);
+    }
     if shortcut.exists() {
         std::fs::remove_file(shortcut)?;
     }
@@ -1194,9 +1206,9 @@ fn open_sync_log(app: &tauri::AppHandle) -> Result<(), String> {
         .ok_or_else(|| "Bridge is still starting".to_string())?;
     let dir = app.path().app_log_dir().map_err(|error| error.to_string())?;
     std::fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
-    let path = dir.join("Spectra Bridge sync log.txt");
+    let path = dir.join("Spectra sync log.txt");
     let mut text = format!(
-        "Spectra Bridge {} sync log, newest first. Times are UTC.\n\n",
+        "Spectra {} sync log (Bridge), newest first. Times are UTC.\n\n",
         env!("CARGO_PKG_VERSION")
     );
     for entry in read_sync_log(&runtime.journal).iter().rev() {
@@ -1567,9 +1579,9 @@ fn guard_paired_deployment(journal: &Journal, proposed: &str) -> Result<(), Stri
         let stored = journal
             .config("deployment_url")
             .map_err(|error| error.to_string())?
-            .ok_or_else(|| "This computer's original Spectra connection could not be identified. Choose Disconnect this computer from the Spectra Bridge tray menu, then connect here. Your files will stay on this computer.".to_string())?;
+            .ok_or_else(|| "This computer's original Spectra connection could not be identified. Choose Disconnect this computer from the Spectra menu near the clock (or in the menu bar on a Mac), then connect here. Your files will stay on this computer.".to_string())?;
         if reqwest::Url::parse(&stored).ok() != reqwest::Url::parse(proposed).ok() {
-            return Err("This computer is connected to another Spectra. Choose Disconnect this computer from the Spectra Bridge tray menu, then connect here. Your files will stay on this computer.".into());
+            return Err("This computer is connected to another Spectra. Choose Disconnect this computer from the Spectra menu near the clock (or in the menu bar on a Mac), then connect here. Your files will stay on this computer.".into());
         }
     }
     Ok(())
@@ -3748,20 +3760,16 @@ fn spawn_grant_watcher(
                 let marker_key = format!("mount_availability:{}", grant.id);
                 let already_reported =
                     journal.config(&marker_key).ok().flatten().as_deref() == Some("unavailable");
-                if !already_reported {
-                    if let (Ok(url), Ok(device_id)) =
+                if !already_reported
+                    && let (Ok(url), Ok(device_id)) =
                         (deployment_url(&journal), grant_device_id(&journal, &grant))
-                    {
-                        if let Ok(Some(credential)) = HostPlatform.read_credential(&device_id) {
-                            if set_mount_availability(&url, &credential, &grant.id, false)
+                        && let Ok(Some(credential)) = HostPlatform.read_credential(&device_id)
+                            && set_mount_availability(&url, &credential, &grant.id, false)
                                 .await
                                 .is_ok()
                             {
                                 let _ = journal.set_config(&marker_key, "unavailable");
                             }
-                        }
-                    }
-                }
                 let _ = set_mount_status(
                     &journal,
                     &grant.id,
@@ -3805,20 +3813,16 @@ fn spawn_grant_watcher(
                     let marker_key = format!("mount_availability:{}", grant.id);
                     let was_unavailable = journal.config(&marker_key).ok().flatten().as_deref()
                         == Some("unavailable");
-                    if was_unavailable {
-                        if let (Ok(url), Ok(device_id)) =
+                    if was_unavailable
+                        && let (Ok(url), Ok(device_id)) =
                             (deployment_url(&journal), grant_device_id(&journal, &grant))
-                        {
-                            if let Ok(Some(credential)) = HostPlatform.read_credential(&device_id) {
-                                if set_mount_availability(&url, &credential, &grant.id, true)
+                            && let Ok(Some(credential)) = HostPlatform.read_credential(&device_id)
+                                && set_mount_availability(&url, &credential, &grant.id, true)
                                     .await
                                     .is_ok()
                                 {
                                     let _ = journal.delete_config(&marker_key);
                                 }
-                            }
-                        }
-                    }
                     stability = StabilityTracker::new(config.stability_window);
                     pending_files.clear();
                     pending_missing.clear();
@@ -4060,13 +4064,11 @@ fn spawn_grant_watcher(
                             {
                                 local_work_queued = true;
                             }
-                        } else {
-                            if enqueue_unlocked_path(&grant, &journal, &held_path)
-                                .map(|queued| queued > 0)
-                                .unwrap_or(false)
-                            {
-                                local_work_queued = true;
-                            }
+                        } else if enqueue_unlocked_path(&grant, &journal, &held_path)
+                            .map(|queued| queued > 0)
+                            .unwrap_or(false)
+                        {
+                            local_work_queued = true;
                         }
                     }
                 }
@@ -4378,11 +4380,13 @@ async fn prepare_work_account(
 }
 
 /// What the Bridge is doing that an update restart would cut off.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 struct BridgeActivity {
     runs: usize,
     syncs: usize,
     open_works: usize,
+    /// A Spectra window is open and the person has not asked to restart.
+    window_open: bool,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -4391,16 +4395,27 @@ enum UpdateGate {
     /// Works stay open in a tab for days; past the wait they are saved first.
     SaveOpenWorksThenInstall,
     Wait,
+    /// Ready, and held until the window closes or the person restarts: a page
+    /// never disappears under someone's cursor.
+    WaitForWindow,
 }
 
 /// How long an update waits for open works to close before saving them and going ahead.
 const UPDATE_OPEN_WORK_WAIT: std::time::Duration = std::time::Duration::from_secs(6 * 60 * 60);
 const UPDATE_IDLE_POLL: std::time::Duration = std::time::Duration::from_secs(30);
+/// How often an installed app looks for a new version.
+const UPDATE_CHECK_EVERY: std::time::Duration = std::time::Duration::from_secs(30 * 60);
+/// After a check that could not reach the release (offline, at login before the network).
+const UPDATE_RETRY_AFTER: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+/// A window coming to the front checks early, at most this often.
+const UPDATE_NUDGE_SPACING: std::time::Duration = std::time::Duration::from_secs(10 * 60);
 
 /// A run or a sync is never interrupted. Open works are waited for, then saved.
 fn update_gate(activity: BridgeActivity, waited: std::time::Duration) -> UpdateGate {
     if activity.runs > 0 || activity.syncs > 0 {
         UpdateGate::Wait
+    } else if activity.window_open {
+        UpdateGate::WaitForWindow
     } else if activity.open_works == 0 {
         UpdateGate::Install
     } else if waited >= UPDATE_OPEN_WORK_WAIT {
@@ -4430,10 +4445,34 @@ fn bridge_activity(app: &tauri::AppHandle) -> BridgeActivity {
         runs: spectra_bridge_core::agent_relay::live_sessions(),
         syncs,
         open_works,
+        window_open: desktop::any_open(app)
+            && !UPDATE_RESTART_NOW.load(std::sync::atomic::Ordering::Acquire),
     }
 }
 
 static UPDATE_INSTALLING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// The person asked to restart into the waiting update.
+static UPDATE_RESTART_NOW: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn check_nudge() -> &'static tokio::sync::Notify {
+    static NUDGE: std::sync::OnceLock<tokio::sync::Notify> = std::sync::OnceLock::new();
+    NUDGE.get_or_init(tokio::sync::Notify::new)
+}
+
+fn install_nudge() -> &'static tokio::sync::Notify {
+    static NUDGE: std::sync::OnceLock<tokio::sync::Notify> = std::sync::OnceLock::new();
+    NUDGE.get_or_init(tokio::sync::Notify::new)
+}
+
+/// A window came to the front: look for an update if the last look was a while ago.
+fn nudge_update_check() {
+    check_nudge().notify_one();
+}
+
+/// A window closed or the person asked to restart: a waiting update may go now.
+fn nudge_update_install() {
+    install_nudge().notify_one();
+}
 
 const UPDATE_NOTE_KEY: &str = "update_note";
 
@@ -4448,24 +4487,59 @@ fn note_update(app: &tauri::AppHandle, note: Option<String>) {
     };
 }
 
-fn manual_update_hint() -> &'static str {
-    if cfg!(target_os = "macos") {
-        "Download the latest Spectra Bridge from the Devices page and drag it into Applications, replacing the old one."
-    } else {
-        "Download the latest Spectra Bridge from the Devices page and run the installer."
+/// The version downloaded and waiting for a restart, which pages show as a Restart pill.
+fn set_update_ready(app: &tauri::AppHandle, version: Option<&str>) {
+    if let Some(state) = app.try_state::<Arc<ServerState>>() {
+        state.set_update_ready(version.map(str::to_owned));
     }
 }
 
-/// Installs `update` once nothing would be cut off by the restart.
+fn manual_update_hint() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "Download the latest Spectra from spectra.ink and drag it into Applications, replacing the old one."
+    } else {
+        "Download the latest Spectra from spectra.ink and run the installer."
+    }
+}
+
+/// Downloads `update` at once and installs it once nothing would be cut off by the restart.
 async fn install_when_idle(app: tauri::AppHandle, update: tauri_plugin_updater::Update) {
     use std::sync::atomic::Ordering;
     if UPDATE_INSTALLING.swap(true, Ordering::AcqRel) {
         return;
     }
+    let version = update.version.clone();
+    let bytes = match update.download(|_, _| {}, || {}).await {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            eprintln!("[update] download failed: {error}");
+            UPDATE_RESTART_NOW.store(false, Ordering::Release);
+            UPDATE_INSTALLING.store(false, Ordering::Release);
+            return;
+        }
+    };
     let started = std::time::Instant::now();
     loop {
         match update_gate(bridge_activity(&app), started.elapsed()) {
-            UpdateGate::Wait => tokio::time::sleep(UPDATE_IDLE_POLL).await,
+            UpdateGate::Wait => {
+                tokio::select! {
+                    _ = tokio::time::sleep(UPDATE_IDLE_POLL) => {}
+                    _ = install_nudge().notified() => {}
+                }
+            }
+            UpdateGate::WaitForWindow => {
+                set_update_ready(&app, Some(&version));
+                note_update(
+                    &app,
+                    Some(format!(
+                        "Spectra {version} is ready. Restart Spectra to finish, or it finishes when you close its window."
+                    )),
+                );
+                tokio::select! {
+                    _ = tokio::time::sleep(UPDATE_IDLE_POLL) => {}
+                    _ = install_nudge().notified() => {}
+                }
+            }
             gate => {
                 if gate == UpdateGate::SaveOpenWorksThenInstall {
                     let saved = app
@@ -4478,10 +4552,9 @@ async fn install_when_idle(app: tauri::AppHandle, update: tauri_plugin_updater::
                         continue;
                     }
                 }
-                let version = update.version.clone();
-                note_update(&app, Some(format!("Installing Spectra Bridge {version}…")));
-                match update.download_and_install(|_, _| {}, || {}).await {
-                    // Windows' installer restarts Bridge itself. Elsewhere the
+                note_update(&app, Some(format!("Installing Spectra {version}…")));
+                match update.install(&bytes) {
+                    // Windows' installer restarts the app itself. Elsewhere the
                     // new app is in place but this process is still the old
                     // one: restart into it, or the update never takes effect.
                     Ok(()) => {
@@ -4493,7 +4566,7 @@ async fn install_when_idle(app: tauri::AppHandle, update: tauri_plugin_updater::
                         note_update(
                             &app,
                             Some(format!(
-                                "Spectra Bridge {version} could not be installed: {error}. {}",
+                                "Spectra {version} could not be installed: {error}. {}",
                                 manual_update_hint()
                             )),
                         );
@@ -4503,37 +4576,64 @@ async fn install_when_idle(app: tauri::AppHandle, update: tauri_plugin_updater::
             }
         }
     }
+    set_update_ready(&app, None);
+    UPDATE_RESTART_NOW.store(false, Ordering::Release);
     UPDATE_INSTALLING.store(false, Ordering::Release);
 }
 
+/// The person pressed Restart on a waiting update (the page's pill or the tray).
+fn restart_for_update(app: &tauri::AppHandle) -> Result<String, String> {
+    let ready = app
+        .try_state::<Arc<ServerState>>()
+        .and_then(|state| state.update_ready());
+    if ready.is_none() {
+        return Err("No update is waiting.".into());
+    }
+    UPDATE_RESTART_NOW.store(true, std::sync::atomic::Ordering::Release);
+    nudge_update_install();
+    Ok(
+        if update_gate(bridge_activity(app), std::time::Duration::ZERO) == UpdateGate::Install {
+            "Spectra is restarting to finish the update.".into()
+        } else {
+            "Spectra restarts to finish the update as soon as the work in progress finishes.".into()
+        },
+    )
+}
+
+/// "Check for updates": an update someone asked for does not wait for the window.
 async fn request_bridge_update(app: &tauri::AppHandle) -> Result<String, String> {
+    if UPDATE_INSTALLING.load(std::sync::atomic::Ordering::Acquire) {
+        return restart_for_update(app).or_else(|_| Ok("Spectra is downloading an update.".into()));
+    }
     let updater = match app.updater() {
         Ok(updater) => updater,
         // A build from source has no updater; it is kept current by building it again.
-        Err(_) => return Ok("This Spectra Bridge was built from source, so it doesn't update itself.".into()),
+        Err(_) => return Ok("This Spectra was built from source, so it doesn't update itself.".into()),
     };
     match updater.check().await {
         Ok(Some(update)) => {
+            UPDATE_RESTART_NOW.store(true, std::sync::atomic::Ordering::Release);
             let waits =
                 update_gate(bridge_activity(app), std::time::Duration::ZERO) != UpdateGate::Install;
             tauri::async_runtime::spawn(install_when_idle(app.clone(), update));
             Ok(if waits {
-                "Spectra Bridge will update as soon as the work in progress finishes.".into()
+                "Spectra will update as soon as the work in progress finishes.".into()
             } else {
-                "Spectra Bridge is installing the update and will restart.".into()
+                "Spectra is installing the update and will restart.".into()
             })
         }
         // A check is what the button asks for, so its answer is said plainly.
-        Ok(None) => Ok("Spectra Bridge is up to date.".into()),
+        Ok(None) => Ok("Spectra is up to date.".into()),
         Err(error) => {
             eprintln!("[update] check failed: {error}");
-            Ok("Spectra Bridge couldn't check for an update just now. It tries again by itself.".into())
+            Ok("Spectra couldn't check for an update just now. It tries again by itself.".into())
         }
     }
 }
 
-/// Keeps an installed Bridge current without asking, never in the middle of
-/// work. A build from source is never replaced.
+/// Keeps an installed app current without asking, never in the middle of
+/// work: a look every half hour, sooner after waking from sleep or when a
+/// window comes to the front. A build from source is never replaced.
 fn start_update_checks(app: tauri::AppHandle) {
     let from_source = std::env::current_exe()
         .map(|path| path.components().any(|part| part.as_os_str() == "target"))
@@ -4544,8 +4644,7 @@ fn start_update_checks(app: tauri::AppHandle) {
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_secs(60)).await;
         loop {
-            // A check that could not reach the release (offline, at login before
-            // the network) tries again soon instead of waiting half a day.
+            let checked_at = std::time::Instant::now();
             let reached = match app.updater() {
                 Ok(updater) => match updater.check().await {
                     Ok(Some(update)) => {
@@ -4560,8 +4659,26 @@ fn start_update_checks(app: tauri::AppHandle) {
                 },
                 Err(_) => false,
             };
-            let wait = if reached { 6 * 60 * 60 } else { 20 * 60 };
-            tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
+            let wait = if reached { UPDATE_CHECK_EVERY } else { UPDATE_RETRY_AFTER };
+            loop {
+                let wall_before = std::time::SystemTime::now();
+                let tick_started = std::time::Instant::now();
+                let nudged = tokio::select! {
+                    _ = tokio::time::sleep(std::time::Duration::from_secs(60)) => false,
+                    _ = check_nudge().notified() => true,
+                };
+                if checked_at.elapsed() >= wait
+                    || (nudged && checked_at.elapsed() >= UPDATE_NUDGE_SPACING)
+                {
+                    break;
+                }
+                // The monotonic clock stands still while the computer sleeps on
+                // some systems; the wall clock does not. A jump means it just woke.
+                let wall = wall_before.elapsed().unwrap_or_default();
+                if wall > tick_started.elapsed() + std::time::Duration::from_secs(120) {
+                    break;
+                }
+            }
         }
     });
 }
@@ -4576,6 +4693,7 @@ mod update_tests {
             runs,
             syncs,
             open_works,
+            window_open: false,
         }
     }
 
@@ -4607,6 +4725,22 @@ mod update_tests {
             update_gate(activity(0, 0, 2), UPDATE_OPEN_WORK_WAIT),
             UpdateGate::SaveOpenWorksThenInstall
         );
+    }
+
+    #[test]
+    fn an_open_window_holds_a_ready_update_until_it_closes_or_restarts() {
+        let open = BridgeActivity { window_open: true, ..activity(0, 0, 0) };
+        assert_eq!(update_gate(open, Duration::ZERO), UpdateGate::WaitForWindow);
+        assert_eq!(update_gate(open, UPDATE_OPEN_WORK_WAIT * 4), UpdateGate::WaitForWindow);
+        // Work in progress still comes first.
+        let busy = BridgeActivity { window_open: true, ..activity(0, 1, 0) };
+        assert_eq!(update_gate(busy, Duration::ZERO), UpdateGate::Wait);
+    }
+
+    #[test]
+    fn updates_are_looked_for_within_the_hour() {
+        assert!(super::UPDATE_CHECK_EVERY <= Duration::from_secs(60 * 60));
+        assert!(super::UPDATE_RETRY_AFTER < super::UPDATE_CHECK_EVERY);
     }
 }
 
@@ -4733,39 +4867,50 @@ mod pairing_tests {
     }
 }
 
-/// Bridge has no window of its own, so on Windows its pickers would open behind
-/// the browser that asked for them. A one-pixel always-on-top window owns them
-/// and brings them in front of every app; it closes with the picker.
-struct PickerOwner(Option<tauri::WebviewWindow>);
+/// Pickers belong to the Spectra window when it is open, so they open in front
+/// of it. Without one (the app closed to the tray, a browser asking), on Windows
+/// a picker would open behind the browser that asked: a one-pixel always-on-top
+/// window owns it instead and closes with it.
+struct PickerOwner {
+    window: Option<tauri::WebviewWindow>,
+    owned: bool,
+}
 
 impl PickerOwner {
     fn new(app: &tauri::AppHandle) -> Self {
+        if let Some(window) = app.get_webview_window(desktop::MAIN_LABEL)
+            && window.is_visible().unwrap_or(false) && !window.is_minimized().unwrap_or(false) {
+                let _ = window.set_focus();
+                return Self { window: Some(window), owned: false };
+            }
         if !cfg!(windows) {
-            return Self(None);
+            return Self { window: None, owned: false };
         }
         static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
         let label = format!("picker-{}", NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
-        let Ok(url) = "about:blank".parse() else { return Self(None) };
-        let window = tauri::WebviewWindowBuilder::new(app, label, tauri::WebviewUrl::External(url))
-            .title("Spectra Bridge")
+        let Ok(url) = "about:blank".parse() else { return Self { window: None, owned: false } };
+        let builder = tauri::WebviewWindowBuilder::new(app, label, tauri::WebviewUrl::External(url))
+            .title("Spectra")
             .inner_size(1.0, 1.0)
             .decorations(false)
             .resizable(false)
             .skip_taskbar(true)
             .always_on_top(true)
             .center()
-            .focused(true)
-            .build()
-            .ok();
+            .focused(true);
+        // Every webview of the app shares one WebView2 environment, so one set of arguments.
+        #[cfg(windows)]
+        let builder = builder.additional_browser_args(desktop::BROWSER_ARGS);
+        let window = builder.build().ok();
         if let Some(window) = &window {
             let _ = window.set_focus();
         }
-        Self(window)
+        Self { window, owned: true }
     }
 
     fn file(&self, app: &tauri::AppHandle) -> tauri_plugin_dialog::FileDialogBuilder<tauri::Wry> {
         let builder = app.dialog().file();
-        match &self.0 {
+        match &self.window {
             Some(window) => builder.set_parent(window),
             None => builder,
         }
@@ -4774,9 +4919,10 @@ impl PickerOwner {
 
 impl Drop for PickerOwner {
     fn drop(&mut self) {
-        if let Some(window) = self.0.take() {
-            let _ = window.close();
-        }
+        if let Some(window) = self.window.take()
+            && self.owned {
+                let _ = window.close();
+            }
     }
 }
 
@@ -4824,7 +4970,7 @@ async fn sync_named_impl(
 
 It stays on this computer and stays in step with Spectra. Spectra AI can't run anything on this computer or delete your files."
         ));
-    let message = match &owner.0 {
+    let message = match &owner.window {
         Some(window) => message.parent(window),
         None => message,
     };
@@ -4944,12 +5090,11 @@ fn bind_legacy_folder_grant(
     key: &str,
     config: &mut serde_json::Value,
 ) -> anyhow::Result<()> {
-    if key.starts_with("mount:") && config.get("deviceId").is_none() && config.is_object() {
-        if let Some(device_id) = journal.config("device_id")?.filter(|id| !id.is_empty()) {
+    if key.starts_with("mount:") && config.get("deviceId").is_none() && config.is_object()
+        && let Some(device_id) = journal.config("device_id")?.filter(|id| !id.is_empty()) {
             config["deviceId"] = serde_json::Value::String(device_id);
             journal.set_config(key, &config.to_string())?;
         }
-    }
     Ok(())
 }
 
@@ -5171,8 +5316,8 @@ async fn remove_mount_impl(
         journal
             .config("device_id")
             .map_err(|error| error.to_string())?,
-    ) {
-        if let Some(credential) = HostPlatform
+    )
+        && let Some(credential) = HostPlatform
             .read_credential(&device_id)
             .map_err(|error| error.to_string())?
         {
@@ -5180,7 +5325,6 @@ async fn remove_mount_impl(
                 .await
                 .map_err(|error| error.to_string())?;
         }
-    }
     grants.remove(grant_id);
     forget_mount_config(journal, grant_id)?;
     wake.wake();
@@ -5730,15 +5874,14 @@ async fn run_sync_worker(
         if wake.is_shutdown() {
             break;
         }
-        if let Ok(current_device_id) = journal.config("device_id") {
-            if device_id != current_device_id {
+        if let Ok(current_device_id) = journal.config("device_id")
+            && device_id != current_device_id {
                 scheduler.set_device_id(current_device_id.as_deref());
                 device_id = current_device_id;
                 health = HealthReporter::default();
                 restored_grants_reconciled.clear();
                 configuration_dirty = true;
             }
-        }
         let result = if let Some(lease) = active_mount_syncs.pairing.lease() {
             lease
                 .run(run_sync_iteration(
@@ -5781,6 +5924,11 @@ async fn run_sync_worker(
     }
 }
 
+/// A person started Spectra (not the login task, not an updater restart into the tray).
+fn launched_by_person() -> bool {
+    !std::env::args().any(|argument| argument == "--autostart")
+}
+
 fn main() {
     configure_embedded_release_environment();
     record_process_start();
@@ -5788,10 +5936,10 @@ fn main() {
     let shutdown_wake = sync_wake.clone();
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
-            // Starting Bridge again while it runs opens its home: the
-            // Devices page. A login start stays quiet.
+            // Starting Spectra again while it runs brings its window to the
+            // front. A login start stays quiet.
             if !args.iter().any(|argument| argument == "--autostart") {
-                open_devices_page(app);
+                open_spectra(app, None);
             }
         }))
         .plugin(tauri_plugin_dialog::init())
@@ -5852,11 +6000,10 @@ fn main() {
                     state.restore_sessions(&sessions);
                 }
             }
-            if credential_ready {
-                if let Some(device_id) = journal.config("device_id")? {
+            if credential_ready
+                && let Some(device_id) = journal.config("device_id")? {
                     state.set_device_id(device_id);
                 }
-            }
             app.manage(state.clone());
             let grants = Arc::new(GrantRegistry::default());
             let mut persisted_mounts = journal.config_prefix("mount:")?;
@@ -5958,8 +6105,7 @@ fn main() {
             });
             // Connection recovery must remain available without access to the
             // previously paired account's Devices page.
-            let open =
-                MenuItem::with_id(app, "open", "Open Devices in Spectra", true, None::<&str>)?;
+            let open = MenuItem::with_id(app, "open", "Open Spectra", true, None::<&str>)?;
             let account = MenuItem::with_id(app, "account", "Not connected to Spectra", false, None::<&str>)?;
             let pause = MenuItem::with_id(app, "pause", "Pause syncing", true, None::<&str>)?;
             let log = MenuItem::with_id(app, "log", "Show sync log", true, None::<&str>)?;
@@ -5971,7 +6117,7 @@ fn main() {
                 None::<&str>,
             )?;
             let disconnect = MenuItem::with_id(app, "disconnect", "Disconnect this computer", true, None::<&str>)?;
-            let quit = MenuItem::with_id(app, "quit", "Quit Bridge", true, None::<&str>)?;
+            let quit = MenuItem::with_id(app, "quit", "Quit Spectra", true, None::<&str>)?;
             let separator = tauri::menu::PredefinedMenuItem::separator(app)?;
             let separator_end = tauri::menu::PredefinedMenuItem::separator(app)?;
             let menu = Menu::with_items(
@@ -5982,14 +6128,26 @@ fn main() {
             let tray_wake = sync_wake.clone();
             TrayIconBuilder::with_id(TRAY_ID)
                 .menu(&menu)
-                .tooltip("Spectra Bridge")
+                .tooltip("Spectra")
+                // A click opens Spectra; the menu is on the other button.
+                .show_menu_on_left_click(false)
+                .on_tray_icon_event(|tray, event| {
+                    if let tauri::tray::TrayIconEvent::Click {
+                        button: tauri::tray::MouseButton::Left,
+                        button_state: tauri::tray::MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        open_spectra(tray.app_handle(), None);
+                    }
+                })
                 .icon(tauri::image::Image::from_bytes(tray_icon_png(
                     taskbar_is_light(),
                     TrayDot::Grey,
                     32,
                 ))?)
                 .on_menu_event(move |app, event| match event.id().as_ref() {
-                    "open" => open_devices_page(app),
+                    "open" => open_spectra(app, None),
                     "log" => {
                         if let Err(error) = open_sync_log(app) {
                             app.dialog().message(error).title("Could not show the sync log").show(|_| {});
@@ -6001,7 +6159,7 @@ fn main() {
                             let message = request_bridge_update(&app)
                                 .await
                                 .unwrap_or_else(|error| error);
-                            app.dialog().message(message).title("Spectra Bridge updates").show(|_| {});
+                            app.dialog().message(message).title("Spectra updates").show(|_| {});
                         });
                     }
                     "pause" => {
@@ -6044,17 +6202,27 @@ fn main() {
                     tokio::time::sleep(TRAY_REFRESH).await;
                 }
             });
+            desktop::retire_bridge_install(&journal);
+            // A person opening Spectra gets its window; a login start lives in the tray.
+            if launched_by_person() {
+                open_spectra(app.handle(), None);
+            } else {
+                desktop::set_dock_presence(app.handle());
+            }
             Ok(())
         })
         .build(tauri::generate_context!())
-        .expect("Spectra Bridge shell failed")
+        .expect("Spectra failed to start")
         .run(move |_app, event| match event {
-            // `code: None` means the last window closed. Bridge lives in the tray and its only
-            // windows are the pickers' one-pixel owners (`PickerOwner`), so closing one must not
+            // `code: None` means the last window closed. Spectra lives on in the tray with
+            // the Bridge, so closing its window (or a picker's one-pixel owner) must not
             // end the app. Quit (`app.exit(0)`) and the update restart carry a code.
             tauri::RunEvent::ExitRequested {
                 code: None, api, ..
             } => api.prevent_exit(),
+            // The Dock icon on macOS.
+            #[cfg(target_os = "macos")]
+            tauri::RunEvent::Reopen { .. } => open_spectra(_app, None),
             tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. } => {
                 shutdown_wake.shutdown();
             }
@@ -6227,18 +6395,18 @@ mod devices_tests {
             tray_view(true, true, false, &three),
             TrayView {
                 dot: TrayDot::None,
-                tooltip: "Spectra Bridge \u{b7} Connected \u{b7} 3 folders".into()
+                tooltip: "Spectra \u{b7} Connected \u{b7} 3 folders".into()
             }
         );
         assert_eq!(
             tray_view(true, true, false, &three[..1]).tooltip,
-            "Spectra Bridge \u{b7} Connected \u{b7} 1 folder"
+            "Spectra \u{b7} Connected \u{b7} 1 folder"
         );
         assert_eq!(
             tray_view(true, false, false, &three),
             TrayView {
                 dot: TrayDot::Grey,
-                tooltip: "Spectra Bridge \u{b7} Disconnected".into()
+                tooltip: "Spectra \u{b7} Disconnected".into()
             }
         );
         assert_eq!(tray_view(false, false, false, &[]).dot, TrayDot::Orange);
@@ -6246,7 +6414,7 @@ mod devices_tests {
         assert_eq!(paused.dot, TrayDot::Grey);
         assert_eq!(
             paused.tooltip,
-            "Spectra Bridge \u{b7} Paused \u{b7} 3 folders"
+            "Spectra \u{b7} Paused \u{b7} 3 folders"
         );
     }
 
@@ -6258,14 +6426,14 @@ mod devices_tests {
         ];
         let view = tray_view(true, true, false, &unreachable);
         assert_eq!(view.dot, TrayDot::Red);
-        assert_eq!(view.tooltip, "Spectra Bridge \u{b7} Problem with Biology");
+        assert_eq!(view.tooltip, "Spectra \u{b7} Problem with Biology");
         let two = [
             mount("Biology", "error", false),
             mount("Maths", "unavailable", false),
         ];
         assert_eq!(
             tray_view(true, true, false, &two).tooltip,
-            "Spectra Bridge \u{b7} Problem with 2 folders"
+            "Spectra \u{b7} Problem with 2 folders"
         );
         let paused_problem = [mount("Biology", "unavailable", true)];
         assert_eq!(
@@ -6294,21 +6462,6 @@ mod devices_tests {
         let path = std::path::Path::new("/Users/sam/Documents/Biology");
         assert_eq!(friendly_path(path), "Documents \u{203a} Biology");
         assert_eq!(friendly_path(std::path::Path::new("Biology")), "Biology");
-    }
-
-    #[test]
-    fn the_devices_page_opens_only_on_a_web_origin() {
-        assert_eq!(
-            devices_page_url("https://spectra.school/").as_deref(),
-            Some("https://spectra.school/devices")
-        );
-        assert_eq!(
-            devices_page_url("http://localhost:3000").as_deref(),
-            Some("http://localhost:3000/devices")
-        );
-        assert_eq!(devices_page_url("file:///etc/passwd"), None);
-        assert_eq!(devices_page_url("https://a.test\" & calc"), None);
-        assert_eq!(devices_page_url(""), None);
     }
 
     #[test]
@@ -6755,7 +6908,7 @@ mod tests {
         let active = Arc::new(MountSyncs::default());
         let guard = ActiveMountSyncGuard::acquire(&active, "grant-1");
         assert!(guard.is_some());
-        assert!(!ActiveMountSyncGuard::acquire(&active, "grant-1").is_some());
+        assert!(ActiveMountSyncGuard::acquire(&active, "grant-1").is_none());
         drop(guard);
         assert!(ActiveMountSyncGuard::acquire(&active, "grant-1").is_some());
     }

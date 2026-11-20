@@ -52,7 +52,7 @@ function scripted(runtime: RuntimeLink["runtime"], script: Array<Error | string>
 }
 
 const silent = () => new ProviderUnavailableError("The AI session stopped responding.");
-const unreachable = () => new ProviderUnavailableError("Spectra Bridge can't be reached.");
+const unreachable = () => new ProviderUnavailableError("Bridge can't be reached.");
 
 afterEach(() => vi.unstubAllEnvs());
 
@@ -96,7 +96,7 @@ describe("the runtime order", () => {
     const moves: Array<[string, string, string]> = [];
     const caller = withRuntimeChain([codex.link, claude.link], { onMove: (from, to, reason) => moves.push([from, to, reason]), retryDelayMs: 0 });
     await expect(caller(request())).resolves.toMatchObject({ text: "from claude" });
-    expect(moves).toEqual([["codex", "claude", "Spectra Bridge can't be reached"]]);
+    expect(moves).toEqual([["codex", "claude", "Bridge can't be reached"]]);
     await caller(request());
     expect(codex.calls).toHaveLength(2);
     expect(claude.calls).toHaveLength(2);
@@ -129,7 +129,7 @@ describe("the runtime order", () => {
     const codex = scripted("codex", [unreachable()]);
     const spectra = scripted("spectra", ["should not run"]);
     const caller = withRuntimeChain([codex.link, spectra.link], { onMove: vi.fn(), retryDelayMs: 0 });
-    await expect(caller(request())).rejects.toThrow("Spectra Bridge can't be reached.");
+    await expect(caller(request())).rejects.toThrow("Bridge can't be reached.");
     expect(spectra.calls).toEqual([]);
     expect(codex.calls).toHaveLength(1);
   });
@@ -147,10 +147,10 @@ describe("the runtime order", () => {
     expect(runtimeChainReason("codex", "The AI session stopped responding.")).toBe("Codex stopped responding");
     expect(runtimeChainReason("claude", "Log in to Claude Code on this computer to use it in Spectra.")).toBe("Claude Code isn't logged in on this computer");
     expect(runtimeChainReason("codex", "Codex isn't installed on this computer.")).toBe("Codex isn't installed on this computer");
-    expect(runtimeChainReason("claude", "Could not reach the Bridge relay for claude.")).toBe("Spectra Bridge can't be reached");
+    expect(runtimeChainReason("claude", "Could not reach the Bridge relay for claude.")).toBe("Bridge can't be reached");
     // F06: a running Bridge paired to another account is not "not running".
-    expect(runtimeChainReason("claude", "DEVICE_STORE_UNAVAILABLE: Spectra Bridge on this computer is connected to a different Spectra account. Reconnect it in Devices.")).toBe("Spectra Bridge on this computer is connected to another account");
-    expect(runtimeChainReason("codex", "DEVICE_STORE_UNAVAILABLE: Spectra Bridge isn't running on this computer.")).toBe("Spectra Bridge isn't running");
+    expect(runtimeChainReason("claude", "DEVICE_STORE_UNAVAILABLE: Bridge on this computer is connected to a different Spectra account. Reconnect it in Devices.")).toBe("Bridge on this computer is connected to another account");
+    expect(runtimeChainReason("codex", "DEVICE_STORE_UNAVAILABLE: Spectra for desktop isn't running on this computer.")).toBe("Spectra for desktop isn't running");
   });
 });
 
@@ -159,7 +159,7 @@ describe("a send to a runtime this computer can't reach", () => {
     const { runtimeOrderFor } = await import("../subscription-runtime");
     expect(runtimeOrderFor("codex", ["claude", "spectra"], [{ runtime: "codex", state: "no-bridge" }])).toEqual({
       order: ["claude", "spectra"],
-      skipped: { from: "codex", to: "claude", reason: "Spectra Bridge isn't running" },
+      skipped: { from: "codex", to: "claude", reason: "Spectra for desktop isn't running" },
     });
     expect(runtimeOrderFor("claude", ["codex", "spectra"], [{ runtime: "claude", state: "signed-out" }, { runtime: "codex", state: "no-bridge" }])).toEqual({
       order: ["spectra"],

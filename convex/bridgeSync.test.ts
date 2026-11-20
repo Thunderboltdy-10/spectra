@@ -784,6 +784,41 @@ describe("the same cloud-drive folder on two computers", () => {
   });
 });
 
+describe("a synced folder's rule for new files", () => {
+  it("keeps new files out when off, still takes a file picked inside, and follows the account again", async () => {
+    const t = setupTest();
+    const fixture = await seedBridge(t);
+    const mountId = await t.mutation(api.bridgeSync.registerMount, {
+      credential, rootLabel: "School", grantId: "grant_ab12", rootKey: "9".repeat(64), scanId: crypto.randomUUID(), fileCount: 2, doubleSyncRisk: false, ownerLockPaths: [],
+    });
+    const clerkId = await t.run(async (ctx) => (await ctx.db.get(fixture.accountId))!.clerkId);
+    const me = t.withIdentity({ subject: clerkId, email: "bridge-batch@example.test", emailVerified: true });
+    const file = (n: number, relativePath: string) => ({ localResourceId: "lr_" + String(n).repeat(16), relativePath, size: 12, contentHash: String(n).repeat(64), nativeFormat: "docx" });
+
+    // With no choice made anywhere, a new file comes in by itself.
+    const auto = await t.mutation(api.bridgeSync.discoverResourcesPage, { credential, mountId, resources: [file(1, "Essay.docx")] });
+    expect(auto.registrations[0]).toHaveProperty("workId");
+
+    await me.mutation(api.syncPolicy.setFolderNewFiles, { mountId, newFiles: "off", idempotencyKey: "rule-off" });
+    expect(await me.query(api.syncPolicy.effective, { mountId })).toMatchObject({ discovery: "explicit", source: { kind: "mount" } });
+    const held = await t.mutation(api.bridgeSync.discoverResourcesPage, { credential, mountId, resources: [file(2, "Notes.docx")] });
+    expect(held.registrations[0]).not.toHaveProperty("workId");
+
+    // Picking the file inside the folder brings it in without changing the folder.
+    const picked = await me.mutation(api.bridgeSync.pickWithinFolders, { items: [{ grantId: "grant_ab12", relativePath: "Notes.docx" }] });
+    expect(picked.results[0]).toMatchObject({ state: "approved" });
+    const taken = await t.mutation(api.bridgeSync.discoverResourcesPage, { credential, mountId, resources: [file(2, "Notes.docx")] });
+    expect(taken.registrations[0]).toHaveProperty("workId");
+    expect(await me.query(api.syncPolicy.effective, { mountId })).toMatchObject({ discovery: "explicit" });
+    expect(await t.run((ctx) => ctx.db.query("syncDiscoveryRequests").collect())).toHaveLength(0);
+
+    await me.mutation(api.syncPolicy.setFolderNewFiles, { mountId, newFiles: "follow", idempotencyKey: "rule-follow" });
+    expect((await me.query(api.syncPolicy.effective, { mountId }))?.source.kind).toBe("default");
+    // Replaying a change does nothing twice.
+    expect(await me.mutation(api.syncPolicy.setFolderNewFiles, { mountId, newFiles: "follow", idempotencyKey: "rule-follow" })).toMatchObject({ changed: false });
+  });
+});
+
 function setupTest() {
   const t = convexTest(schema, modules);
   aggregateTest.register(t, "orgNodeCountByType");

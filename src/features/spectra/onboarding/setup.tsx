@@ -1,5 +1,6 @@
 "use client";
 
+import { useDesktop } from "../desktop/desktop";
 import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useConvex, useConvexAuth, useMutation } from "convex/react";
 import { useQuery } from "@/features/spectra/data/use-kept-query";
@@ -47,7 +48,7 @@ type StepId = "classes" | "bridge" | "storage" | "subscriptions" | "island" | "s
 
 const STEP_NAME: Record<StepId, string> = {
   classes: "Classes",
-  bridge: "Spectra Bridge",
+  bridge: "Spectra for desktop",
   storage: "Your artifacts",
   subscriptions: "AI subscription",
   island: "The island",
@@ -294,6 +295,7 @@ function BridgeStep({ platform, ready, onDone, onBack }: { platform: BridgePlatf
   const [skipping, setSkipping] = useState(false);
   const connecting = pairingState.phase !== "idle" && pairingState.phase !== "paired";
   const computer = platform === "macos" ? "Mac" : "computer";
+  const desktop = useDesktop();
 
   const connect = () => {
     setBridgeRemovedHere(false);
@@ -308,11 +310,13 @@ function BridgeStep({ platform, ready, onDone, onBack }: { platform: BridgePlatf
 
   return (
     <StepFrame
-      title={ready ? `Spectra Bridge is on this ${computer}` : `Put Spectra Bridge on this ${computer}`}
+      title={ready ? `Spectra for desktop is on this ${computer}` : `Put Spectra for desktop on this ${computer}`}
       about={
         ready
           ? "Spectra can now keep the folders you choose in sync, open files on this computer, and run Codex or Claude Code for you."
-          : "A small app that lets Spectra reach the folders you choose on this computer, keep their files in your Library, and run Codex or Claude Code on your own subscription. It only ever sees what you allow."
+          : desktop
+          ? "Bridge runs inside this app. Connect it to keep the folders you choose on this computer in sync with your Library, and to run Codex or Claude Code on your own subscription."
+          : "Install Spectra for desktop to sync local files: the folders you choose on this computer stay in step with your Library, and Codex or Claude Code run on your own subscription. It only ever sees what you allow."
       }
       actions={
         <Actions onBack={onBack}>
@@ -327,7 +331,7 @@ function BridgeStep({ platform, ready, onDone, onBack }: { platform: BridgePlatf
               </Button>
               {connecting ? null : (
                 <Button variant="primary" onClick={connect}>
-                  Set up Bridge
+                  {desktop ? "Connect" : "Set it up"}
                 </Button>
               )}
             </>
@@ -342,11 +346,11 @@ function BridgeStep({ platform, ready, onDone, onBack }: { platform: BridgePlatf
         </p>
       ) : connecting ? (
         <PairingPanel state={pairingState} onCancel={() => pairing.cancel()} onRetry={connect} />
-      ) : (
+      ) : desktop ? null : (
         <div className="spectra-setup-note">
           <p>Setting it up takes about a minute:</p>
           <BridgeInstallSteps platform={platform} />
-          <p className="text-micro text-[var(--text-tertiary)]">Spectra notices Bridge by itself once it&apos;s running, then shows a code to confirm.</p>
+          <p className="text-micro text-[var(--text-tertiary)]">Spectra notices the app by itself once it&apos;s running and connects this computer.</p>
         </div>
       )}
       {!ready && permission === "denied" ? (
@@ -356,7 +360,7 @@ function BridgeStep({ platform, ready, onDone, onBack }: { platform: BridgePlatf
       ) : null}
       <ConfirmDialog
         open={skipping}
-        title="Set up Bridge later?"
+        title={desktop ? "Connect Bridge later?" : "Set up Spectra for desktop later?"}
         detail="Without it, Spectra can't reach files on this computer or run Codex and Claude Code. You can set it up any time from Devices."
         confirmLabel="Not now"
         cancelLabel="Set it up"

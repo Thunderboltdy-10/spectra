@@ -277,7 +277,7 @@ export function ResourceSurface({
                     ? "Spectra keeps this file as it is. Open it in its own app to use it."
                     : bridge.reachability === "connected"
                       ? "This file is on this computer. Open it in its own app to use it."
-                      : "This file is on one of your computers. Start Spectra Bridge there to open it."}
+                      : "This file is on one of your computers. Open Spectra for desktop there to open it."}
         </p>
         <div className="resource-surface-actions">
           {lens ? (

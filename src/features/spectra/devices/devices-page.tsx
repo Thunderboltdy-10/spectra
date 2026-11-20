@@ -1,7 +1,8 @@
 "use client";
 
 import { NETWORK_PERMISSION_FIX, useNetworkPermission } from "../bridge/network-permission";
-import { BridgeInstallSteps } from "./bridge-install-steps";
+import { BridgeInstallSteps, IntelMacLink } from "./bridge-install-steps";
+import { useDesktop } from "../desktop/desktop";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useConvexAuth, useMutation } from "convex/react";
 import { useQuery } from "@/features/spectra/data/use-kept-query";
@@ -58,7 +59,7 @@ type Confirm =
   | { kind: "native-writes"; choice: NativeWrites };
 
 /*
- * Devices: the user's computers connected through Spectra Bridge, in one
+ * Devices: the user's computers connected through Bridge, in one
  * list led by the one they are on. Here they connect a computer and see and
  * set what is bridged; using those files happens in the Library. Connecting
  * starts here (or from the command bar and Spectra AI, which ask this page
@@ -108,6 +109,8 @@ export function DevicesPage() {
   const [platform, setPlatform] = useState<ReturnType<typeof bridgePlatform>>("other");
   useEffect(() => setPlatform(bridgePlatform()), []);
   const downloadUrl = bridgeDownloadUrl(platform);
+  // Spectra for desktop is the app itself: nothing to download from inside it.
+  const desktop = useDesktop();
   const stored = {
     permissionFullControl: preferences.ai.permissionFullControl,
     permissionAllow: preferences.ai.permissionAllow,
@@ -215,7 +218,8 @@ export function DevicesPage() {
     }
   }
 
-  const newFilesBothWays = policy?.discovery === "auto" && policy?.structure === "mirror-both";
+  // With no choice made, Bridge brings new files in by itself (the default policy does not gate them).
+  const newFilesBothWays = policy?.source?.kind === "default" || (policy?.discovery === "auto" && policy?.structure === "mirror-both");
 
   async function chooseNewFiles(on: boolean) {
     if (!policy) return;
@@ -376,7 +380,7 @@ export function DevicesPage() {
                 <div className="device-problem" role="alert">
                   <p className="device-problem-title">Your browser is blocking Spectra from reaching Bridge</p>
                   <p>
-                    Spectra talks to Spectra Bridge on this computer, and the browser was told not to allow that. {NETWORK_PERMISSION_FIX}
+                    Spectra talks to Bridge on this computer, and the browser was told not to allow that. {NETWORK_PERMISSION_FIX}
                   </p>
                 </div>
               ) : permission === "prompt" && bridgeMissing(local.reachability) && !here ? (
@@ -387,13 +391,13 @@ export function DevicesPage() {
               <PairingPanel state={pairingState} onCancel={() => pairing.cancel()} onRetry={connect} />
               {here ? (
                 deviceCard(here)
-              ) : !connecting && isAuthenticated && bridgeMissing(local.reachability) && downloadUrl ? (
+              ) : !connecting && isAuthenticated && bridgeMissing(local.reachability) && downloadUrl && !desktop ? (
                 // No Bridge here yet: the download is the first step. Pressing it
                 // also starts connecting, which carries on once Bridge opens.
                 <div className="device-connect" data-step="download">
-                  <p className="text-ui font-medium text-[var(--text-primary)]">Get Spectra Bridge</p>
+                  <p className="text-ui font-medium text-[var(--text-primary)]">Get Spectra for desktop</p>
                   <p className="max-w-xl text-ui leading-6 text-[var(--text-secondary)]">
-                    Bridge keeps the files and folders you choose on this computer in sync with Spectra. Download it, then:
+                    Install Spectra for desktop to sync local files: Bridge, inside it, keeps the files and folders you choose on this computer in step with Spectra. Download it, then:
                   </p>
                   {likelyHereHint}
                   <BridgeInstallSteps platform={platform} />
@@ -407,15 +411,16 @@ export function DevicesPage() {
                     <Button variant={likelyHere ? "primary" : "ghost"} size="sm" onClick={reconnect}>
                       {likelyHere ? "Try again" : "I already have it"}
                     </Button>
+                    <IntelMacLink href={downloadUrl} platform={platform} />
                   </div>
                 </div>
               ) : !connecting ? (
                 <div className="device-connect">
                   <p className="max-w-xl text-ui leading-6 text-[var(--text-secondary)]">
                     {isAuthenticated && local.discovery.kind === "running" && local.discovery.health.disconnectedHere
-                      ? "This computer was disconnected. Spectra Bridge is still running here; connect it again to use its files."
+                      ? "This computer was disconnected. Bridge is still running here; connect it again to use its files."
                       : isAuthenticated && removedHere && local.discovery.kind === "running"
-                      ? "You removed this computer. Spectra Bridge is still running here; pair it again to use its files."
+                      ? "You removed this computer. Bridge is still running here; pair it again to use its files."
                       : isAuthenticated
                       ? // Pairing is per browser: Bridge can be running, even paired, while this browser isn't connected to it.
                         bridgeReachabilityCopy(local.reachability).detail
@@ -493,7 +498,7 @@ function useLatestBridgeVersion() {
   const [version, setVersion] = useState<string | null>(null);
   useEffect(() => {
     let live = true;
-    void fetch("/bridge/latest")
+    void fetch("/desktop/latest")
       .then((response) => (response.ok ? response.json() : null))
       .then((body: { version?: string | null } | null) => {
         if (live && typeof body?.version === "string") setVersion(body.version);

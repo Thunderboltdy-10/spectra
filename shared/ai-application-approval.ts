@@ -47,6 +47,10 @@ export function applicationCommandCategory(command: string, args: Args): Permiss
       return "managebac";
     case "change_sync_policy":
       return "bridge_files";
+    // Which new files follow, and treating two computers' folders as one (the
+    // duplicates go to the Trash), are the user's to choose. Unlinking only stops.
+    case "change_folder_sync":
+      return args.action === "unlink" ? null : "settings";
     // A deleted comment is gone for everyone; the other comment changes can be undone.
     case "manage_comment":
       return args.action === "delete" ? "permanent_delete" : null;

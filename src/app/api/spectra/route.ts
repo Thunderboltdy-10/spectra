@@ -1490,7 +1490,7 @@ export async function POST(request: NextRequest) {
       const stored = me
         ? await (await import("@/lib/device-store")).deviceStoreCall<{ content?: unknown } | null>(me.accountId, "get", { artifactId })
         : null;
-      if (onDevice && !stored?.content) return badRequest("Open Spectra Bridge on the computer that holds this artifact to copy it.");
+      if (onDevice && !stored?.content) return badRequest("Open Spectra for desktop on the computer that holds this artifact to copy it.");
       const content = onDevice
         ? stored!.content
         : source.blueprintKey === "sheets"

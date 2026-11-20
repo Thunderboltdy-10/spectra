@@ -3,6 +3,7 @@ import {
   initializeNativeArtifactDocument,
   nativeArtifactProjection,
 } from "../../../../scripts/collaboration-native-projection.mjs";
+import { BRIDGE_WS_ORIGIN } from "../../../../shared/bridge-port";
 
 /*
  * Work kept on a computer has no gateway to write its first version or to say
@@ -10,7 +11,7 @@ import {
  * room would build, handed to Bridge, and the same projection read back out.
  */
 
-export const DEVICE_ROOM_URL = "ws://127.0.0.1:47615/v1/rooms";
+export const DEVICE_ROOM_URL = `${BRIDGE_WS_ORIGIN}/v1/rooms`;
 
 export type DeviceSeed = {
   typeKey: string;

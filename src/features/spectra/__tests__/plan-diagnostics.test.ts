@@ -451,7 +451,7 @@ describe("plan diagnostics and schema slip recovery", () => {
       "verified citations on its narrative slides",
     );
     expect(formatPlanApplicationPublicError(failure)).not.toContain(
-      "open the file from Library with Spectra Bridge connected",
+      "open the file from Library with Bridge connected",
     );
   });
 

@@ -119,7 +119,7 @@ export function FileStorageControls({
       setOpenError(
         currentDeviceMounts.length > 1
           ? "Choose the folder for this computer below before keeping a local copy."
-          : "Connect Spectra Bridge and add a folder in Spectra Settings before keeping a local copy.",
+          : "Connect Bridge and add a folder in Spectra Settings before keeping a local copy.",
       );
       return;
     }
@@ -220,7 +220,7 @@ export function FileStorageControls({
             {transitionPreview?.pendingWork?.relativePath
               ? `Writing the retained work to ${transitionPreview.pendingWork.relativePath}.`
               : "Moving this artifact between Spectra and this computer."}{" "}
-            The item stays open while Spectra Bridge verifies the file.
+            The item stays open while Bridge verifies the file.
           </p>
           {transitionPreview?.pendingWork?.localResourceId ? (
             <p className="text-[var(--text-tertiary)]">

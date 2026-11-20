@@ -2,11 +2,12 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { convexQuery } from "./convex-server";
 import { getConvexUrl } from "./env";
+import { BRIDGE_HTTP_ORIGIN } from "../../shared/bridge-port";
 
 /** A machine token alone never authorizes another student's local connection. */
 export class AccountMismatchError extends Error {
   constructor() {
-    super("DEVICE_STORE_UNAVAILABLE: Spectra Bridge on this computer is connected to a different Spectra account. Reconnect it in Devices.");
+    super("DEVICE_STORE_UNAVAILABLE: Bridge on this computer is connected to a different Spectra account. Reconnect it in Devices.");
     this.name = "AccountMismatchError";
   }
 }
@@ -14,8 +15,8 @@ export class AccountMismatchError extends Error {
 export async function localBridgeRelay(accountId?: string, timeoutMs = 2_500) {
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const unavailable = () => new Error("DEVICE_STORE_UNAVAILABLE: Spectra Bridge cannot verify this account's connection on this computer. Update or reconnect your Bridge.");
-  const notRunning = () => new Error("DEVICE_STORE_UNAVAILABLE: Spectra Bridge isn't running on this computer. Open it from the Start menu.");
+  const unavailable = () => new Error("DEVICE_STORE_UNAVAILABLE: Bridge cannot verify this account's connection on this computer. Update or reconnect your Bridge.");
+  const notRunning = () => new Error("DEVICE_STORE_UNAVAILABLE: Spectra for desktop isn't running on this computer. Open it from the Start menu.");
   // A Bridge paired to someone else is running: say so, so the person reconnects it instead of restarting it.
   const otherAccount = () => new AccountMismatchError();
   try {
@@ -26,7 +27,7 @@ export async function localBridgeRelay(accountId?: string, timeoutMs = 2_500) {
         let response: Response;
         try {
           token = readFileSync(join(base, "Spectra", "agent-relay.token"), "utf8").trim();
-          response = await fetch("http://127.0.0.1:47615/v1/agent/identity", {
+          response = await fetch(`${BRIDGE_HTTP_ORIGIN}/v1/agent/identity`, {
             headers: { authorization: `Bearer ${token}` }, signal: controller.signal,
           });
         } catch {

@@ -88,9 +88,8 @@ impl ValidatedBackup {
         let mut artifact_ids = Vec::new();
         let mut seen = HashSet::new();
         visit_backup(&bytes, |header, _| {
-            if let Some(id) = header["artifactId"].as_str() {
-                if seen.insert(id.to_owned()) { artifact_ids.push(id.to_owned()); }
-            }
+            if let Some(id) = header["artifactId"].as_str()
+                && seen.insert(id.to_owned()) { artifact_ids.push(id.to_owned()); }
             Ok(())
         })?;
         Ok(Self { bytes, artifact_ids })
@@ -259,11 +258,10 @@ impl WorkStore {
     /// The work's whole document as far as it can be read, and whether any of it couldn't be.
     pub fn readable_state(&self, artifact_id: &str) -> anyhow::Result<(Vec<u8>, bool)> {
         let (state, updates) = self.load(artifact_id)?;
-        if updates.is_empty() {
-            if let Some(state) = state.as_ref().filter(|state| !state.is_empty()) {
+        if updates.is_empty()
+            && let Some(state) = state.as_ref().filter(|state| !state.is_empty()) {
                 return Ok((state.clone(), false));
             }
-        }
         let (doc, damaged) = crate::rooms::readable_doc(state.as_deref(), &updates, artifact_id, || {
             self.latest_version_state(artifact_id).ok().flatten()
         });

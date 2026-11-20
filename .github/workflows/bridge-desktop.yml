@@ -1,4 +1,4 @@
-name: Spectra Bridge desktop artifacts
+name: Spectra for desktop artifacts
 
 # This workflow is deliberately manual. A friend-test run creates unsigned
 # artifacts for the final Mac smoke test; a public-candidate run requires the

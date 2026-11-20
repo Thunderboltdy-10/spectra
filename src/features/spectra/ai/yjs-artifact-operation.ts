@@ -455,7 +455,7 @@ async function createCollaborationSession(
       throw new Error("AI_ARTIFACT_PERMISSION_REVOKED: Access was removed before the live document could be loaded.");
     const summary = await deviceStoreCall<{ storeId?: string }>(actor.accountId, "summary", {}, 4_000).catch(() => null);
     if (!summary)
-      throw new Error("DEVICE_WORK_UNAVAILABLE: This artifact is kept on the person's computer, and Bridge isn't reachable right now.");
+      throw new Error("DEVICE_WORK_UNAVAILABLE: This artifact is kept on the person's computer, and Spectra for desktop isn't reachable right now.");
     if (summary.storeId !== artifact.storageStoreId)
       throw new Error("DEVICE_WORK_ELSEWHERE: This artifact is kept on another of the person's computers, which isn't reachable from here.");
     const baseline = deviceBaseline({

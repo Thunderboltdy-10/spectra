@@ -95,7 +95,7 @@ describe("Bridge discovery gate (LV-012)", () => {
     expect(fetchMock).not.toHaveBeenCalled();
     expect(result.current.checked).toBe(true);
     expect(result.current.reachability).toBe("not-set-up");
-    expect(bridgeReachabilityCopy("not-set-up").detail).toContain("Connect Bridge");
+    expect(bridgeReachabilityCopy("not-set-up").detail).toContain("Connect this computer");
   });
 
   it("discovers an installed Bridge for a signed-in account before any device is paired", async () => {

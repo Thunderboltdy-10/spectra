@@ -119,7 +119,7 @@ export function FileStorageControls({
       setOpenError(
         currentDeviceMounts.length > 1
           ? "Choose the folder for this computer below before keeping a local copy."
-          : "Connect Bridge and add a folder in Spectra Settings before keeping a local copy.",
+          : "Connect this computer and add a folder on Devices before keeping a local copy.",
       );
       return;
     }

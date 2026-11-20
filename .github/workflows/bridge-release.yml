@@ -1,9 +1,9 @@
-name: Spectra Bridge release
+name: Spectra for desktop release
 
-# Pushing a tag `bridge-v<version>` (matching bridge-app/tauri.conf.json)
+# Pushing a tag `desktop-v<version>` (matching bridge-app/tauri.conf.json)
 # builds installers and publishes them, with updater signatures and a manifest, as a
 # release of the public releases repository. Spectra's /desktop/download route
-# and the Bridge updater both read the latest release there.
+# and the app's updater both read the latest release there.
 #
 # Repository configuration:
 #   vars.SPECTRA_CONVEX_URL       hosted Convex URL baked into the Bridge
@@ -15,7 +15,7 @@ name: Spectra Bridge release
 on:
   push:
     tags:
-      - "bridge-v*"
+      - "desktop-v*"
 
 permissions:
   contents: read
@@ -35,8 +35,8 @@ jobs:
       - name: Tag matches the app version
         run: |
           version=$(jq -r .version bridge/bridge-app/tauri.conf.json)
-          test "${GITHUB_REF_NAME}" = "bridge-v${version}" || {
-            echo "Tag ${GITHUB_REF_NAME} does not match bridge-app version ${version}" >&2
+          test "${GITHUB_REF_NAME}" = "desktop-v${version}" || {
+            echo "Tag ${GITHUB_REF_NAME} does not match the app version ${version}" >&2
             exit 1
           }
 
@@ -47,7 +47,7 @@ jobs:
         run: |
           id=$(gh api "repos/${RELEASES_REPO}/releases" \
             -f tag_name="${GITHUB_REF_NAME}" \
-            -f name="Spectra Bridge ${GITHUB_REF_NAME#bridge-v}" \
+            -f name="Spectra for desktop ${GITHUB_REF_NAME#desktop-v}" \
             -F draft=true --jq .id)
           echo "release_id=${id}" >> "$GITHUB_OUTPUT"
 

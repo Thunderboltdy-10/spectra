@@ -45,13 +45,13 @@ function BridgeChoice() {
   useEffect(() => setDownload(bridgeDownloadUrl(bridgePlatform())), []);
   if (connected === undefined) return null;
   if (connected)
-    return <p className="text-caption text-[var(--text-secondary)]">Bridge is already set up on one of your computers.</p>;
+    return <p className="text-caption text-[var(--text-secondary)]">Spectra for desktop already syncs one of your computers.</p>;
   if (!download)
-    return <p className="text-caption text-[var(--text-secondary)]">Bridge runs on Windows and macOS. Open Devices there to set it up.</p>;
+    return <p className="text-caption text-[var(--text-secondary)]">Spectra for desktop runs on Windows and macOS. Open Devices there to set it up.</p>;
   return (
     <div className="flex items-center gap-3">
       <Button asChild size="sm" variant="secondary">
-        <a href={download}>Download Bridge</a>
+        <a href={download}>Download Spectra for desktop</a>
       </Button>
       <span className="text-micro text-[var(--text-tertiary)]">Or later, from Devices.</span>
     </div>

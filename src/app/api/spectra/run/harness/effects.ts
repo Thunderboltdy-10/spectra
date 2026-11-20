@@ -781,9 +781,9 @@ async function readComputerNames(path: string) {
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
     if (/unknown request/i.test(message))
-      return { available: false, message: "This computer's Bridge needs updating before Spectra can see file names. Offer devices update." };
+      return { available: false, message: "This computer's Spectra for desktop needs updating before Spectra can see file names. Offer devices update." };
     if (/DEVICE_STORE_UNAVAILABLE|connect|timed? ?out|socket|closed/i.test(message))
-      return { available: false, message: "Bridge isn't reachable on the user's computer right now. Suggest opening it, or devices pair if it was never set up." };
+      return { available: false, message: "Spectra for desktop isn't reachable on the user's computer right now. Suggest opening it, or devices pair if it was never set up." };
     return { available: false, message: message || "That path couldn't be read." };
   }
 }

@@ -103,9 +103,9 @@ works with it; the copy names the app "Spectra for desktop" and the background p
   GitHub redirects the old `releases/latest/download/latest.json` URL, which is what every installed Bridge has
   baked in. Never create a new repo under the old name (that kills the redirect). The new app lists both
   endpoints (new first, old second). `BRIDGE_RELEASES_REPO` and `RELEASES_REPO` defaults move to the new name.
-  Tags stay `bridge-v*` (they version the Bridge protocol too; renaming tags gains nothing).
-- **Version 1.0.0.** It satisfies every `>= 0.2.0` gate the OneNote plan adds, and the web keeps detecting
-  features by capability, not version.
+  Tags become `desktop-v*`: installing and updating is the desktop app, never "Bridge".
+- **Version 0.2.0.** Versions continue from the last Bridge release (0.1.3). The web detects features by
+  capability, not version.
 - **Install folder never shares the data folder.** `%LOCALAPPDATA%\Spectra\` already holds user data: the
   device-only works store (`works/works.db`, `bridge-core/src/works.rs`) and `agent-relay.token`
   (`agent_relay.rs`). Tauri's per-user NSIS default for a product named "Spectra" is exactly that folder, so an
@@ -115,7 +115,7 @@ works with it; the copy names the app "Spectra for desktop" and the background p
   its hash are untouched. If the hook cannot move `$INSTDIR` in update mode, the fallback is a custom NSIS
   template with that one line changed; shipping into `%LOCALAPPDATA%\Spectra` is not an option.
 - **Windows migration.** `productName` becomes `Spectra`, `mainBinaryName` `spectra`. The NSIS update then
-  installs into `%LOCALAPPDATA%\Programs\Spectra`, so the old copy must be cleaned up. On first start of 1.0.0 the app,
+  installs into `%LOCALAPPDATA%\Programs\Spectra`, so the old copy must be cleaned up. On first start of 0.2.0 the app,
   once, records `migrated_from_bridge` in the journal after: deleting the scheduled task `Spectra Bridge` (the new
   one is `Spectra`), the `HKCU\…\Run\Spectra Bridge` value, the old Startup shortcut, the old Start menu shortcut,
   the `HKCU\…\Uninstall\Spectra Bridge` key, and `%LOCALAPPDATA%\Spectra Bridge\` (after confirming the running
@@ -202,7 +202,7 @@ a window open; nothing is ever lost or silently duplicated.
    a dev Convex deployment and a shared temp folder standing in for OneDrive. Scenarios: create/edit/rename/move/
    delete on each side; the same file edited on both computers offline then reconnected (one work, conflict kept
    as both); Word holding a lock; 500-file folder added; sleep/resume; network drop mid-upload; update mid-sync;
-   unpair/re-pair; account switch; nested selection merge; the 0.1.x → 1.0.0 migration on a copied app-data
+   unpair/re-pair; account switch; nested selection merge; the 0.1.3 → 0.2.0 migration on a copied app-data
    folder. Each asserts end state and timing.
 2. **Fix what it finds** before the release; anything that misses the latency target gets a cause written in the
    test.
@@ -224,7 +224,7 @@ a window open; nothing is ever lost or silently duplicated.
 3. **Synced-folder model.** Nested selection resolution and merge, per-folder New files, Also on, Local panel,
    AI commands. Convex tests for policy and twins.
 4. **Reliability suite and Convex budget**, then fixes.
-5. **Release.** Repo rename, workflow rename (`spectra-desktop-release.yml`, still on `bridge-v*` tags), docs
+5. **Release.** Repo rename, workflow rename (`spectra-desktop-release.yml`, on `desktop-v*` tags), docs
    (`docs/product/DEVICES.md` rewritten around the desktop app, `RELEASE.md`). Tag only when Pablo says.
 
 ## Rename inventory (outside `bridge/`)

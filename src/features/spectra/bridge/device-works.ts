@@ -78,7 +78,7 @@ export async function callWorks<T = unknown>(
 ): Promise<T> {
   const revision = accountStorageRevision();
   assertAccountStorageRevision(revision);
-  if (bridgeIsAway() && !options.evenIfAway) throw new Error("Bridge isn't answering on this computer.");
+  if (bridgeIsAway() && !options.evenIfAway) throw new Error("Spectra for desktop isn't answering on this computer.");
   const response = await authorizedBridgeRequest(
     "/v1/works/call",
     {
@@ -88,7 +88,7 @@ export async function callWorks<T = unknown>(
     },
     timeoutMs,
   );
-  if (!response) throw new Error("Bridge isn't connected to this browser.");
+  if (!response) throw new Error("Spectra for desktop isn't connected to this browser.");
   if (!response.ok) throw new Error(`Bridge answered ${response.status}.`);
   const reply = (await response.json()) as { result?: T; error?: string };
   assertAccountStorageRevision(revision);
@@ -350,14 +350,14 @@ export async function enterDeviceRoom<T extends { token: string; device?: { stor
   knownOnDevice.add(artifactId);
   if (!loadBridgeSession())
     throw new Error(
-      "COLLABORATION_DEVICE_UNAVAILABLE: This artifact is kept on a computer through Bridge, which isn't connected to this browser.",
+      "COLLABORATION_DEVICE_UNAVAILABLE: This artifact is kept on a computer through Spectra for desktop, which isn't connected to this browser.",
     );
   let summary: DeviceStoreSummary;
   try {
     summary = await deviceStoreSummary();
   } catch {
     throw new Error(
-      "COLLABORATION_DEVICE_UNAVAILABLE: This artifact is kept on this computer and Bridge isn't answering. Open Spectra for desktop and it comes straight back.",
+      "COLLABORATION_DEVICE_UNAVAILABLE: This artifact is kept on this computer and Spectra for desktop isn't answering. Open it and it comes straight back.",
     );
   }
   assertAccountStorageRevision(revision);

@@ -67,7 +67,7 @@ export function runOnlyTools(session: HarnessSession): AnyHarnessTool[] {
               throw new ToolInputError(`patch.${key} must be a list of up to 50 patterns.`);
             patch[key] = value;
           } else if (key === "localMirrorGrantId") {
-            throw new ToolInputError("Only the user picks a folder on their computer. Point them to Bridge setup.");
+            throw new ToolInputError("Only the user picks a folder on their computer. Point them to Devices.");
           } else throw new ToolInputError(`patch.${key} is not a sync setting.`);
         }
         if (!Object.keys(patch).length) throw new ToolInputError("patch is empty.");

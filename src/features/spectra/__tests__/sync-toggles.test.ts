@@ -151,7 +151,7 @@ describe("sync toggles (P1.I4)", () => {
     ).toContain("isn't running");
     expect(
       pairingFailureMessage("Failed to fetch", { kind: "port-taken" }),
-    ).toContain("answered in Bridge's place");
+    ).toContain("answered in place of Spectra for desktop");
     expect(pairingFailureMessage("Failed to fetch")).not.toMatch(/Failed to fetch/i);
     expect(
       pairingFailureMessage("Failed to fetch", { kind: "not-running" }, false),
@@ -207,12 +207,12 @@ describe("sync toggles (P1.I4)", () => {
       state: "disconnected",
       discoveryFailed: true,
       reachability: "offline",
-    })).not.toBe("Waiting for Bridge");
+    })).not.toBe("Waiting for Spectra for desktop");
     expect(folderChipLabel({
       state: "disconnected",
       discoveryFailed: false,
       reachability: "not-running",
-    })).toBe("Waiting for Bridge");
+    })).toBe("Waiting for Spectra for desktop");
     expect(folderChipLabel({
       state: "waiting",
       discoveryFailed: false,
@@ -222,7 +222,7 @@ describe("sync toggles (P1.I4)", () => {
       state: "waiting",
       discoveryFailed: false,
       reachability: "connected",
-    })).not.toBe("Waiting for Bridge");
+    })).not.toBe("Waiting for Spectra for desktop");
   });
 
   it("speaks listing failures as unavailable-truth, never Convex jargon", () => {

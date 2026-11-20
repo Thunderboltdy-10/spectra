@@ -41,7 +41,7 @@ const CODE_MESSAGES: Array<{ test: RegExp; message: (app: string) => string }> =
   {
     test: /not-on-this-computer/i,
     message: () =>
-      "This copy is not on the computer running Bridge right now.",
+      "This copy is not on the computer running Spectra for desktop right now.",
   },
   {
     test: /NATIVE_PAYLOAD_UNAVAILABLE/i,
@@ -261,7 +261,7 @@ export function humanizePublicFailure(
   if (worded && !/[A-Z]{3,}_[A-Z0-9_]{3,}/.test(worded[1])) return worded[1].trim();
   if (!raw || /^[A-Z][A-Z0-9_]{4,}$/.test(raw) || /[A-Z]{3,}_[A-Z0-9_]{3,}/.test(raw)) {
     return /BRIDGE|REPLICA|MOUNT|FILE|NATIVE|PAYLOAD|LOCAL|FOLDER|DEVICE/.test(raw)
-      ? "Spectra couldn't reach this file just now. Check that Bridge is running on the computer that has it, then try again."
+      ? "Spectra couldn't reach this file just now. Check that Spectra for desktop is running on the computer that has it, then try again."
       : INTERNAL_FAILURE;
   }
   if (

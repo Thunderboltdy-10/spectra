@@ -89,7 +89,9 @@ Its public WebSocket URL is `wss://spectra-collaboration-gateway.fly.dev`.
 Spectra for desktop is the Tauri app in `bridge/bridge-app`: a window on the web app plus the Bridge that syncs local
 files. Its updater, `/desktop/download/<platform>` and `/desktop/latest` read the latest release of the public repository
 `Thunderboltdy-10/spectra-desktop` (renamed from `spectra-bridge`; GitHub forwards the old name, and the updater and the
-download route try the old name second). Tags stay `bridge-v*`.
+download route try the old name second). Release tags are `desktop-v<version>`; versions continue from the last
+Bridge release (0.1.3), and the first Spectra for desktop release is 0.2.0. `/desktop/latest` reads old `bridge-v*`
+tags too.
 
 1. Rename the repository `Thunderboltdy-10/spectra-bridge` to `spectra-desktop` on GitHub (Settings → General → Repository
    name). Public, with a README so it has a default branch. Nothing else goes in it.
@@ -103,8 +105,8 @@ download route try the old name second). Tags stay `bridge-v*`.
    - Optional, for a notarized Mac build: `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`,
      `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID`.
    - Vercel: `SPECTRA_DESKTOP_RELEASES_REPO` = `Thunderboltdy-10/spectra-desktop` (optional; that is the default).
-4. Release: the tag must equal `bridge-v` + the `version` in `tauri.conf.json`:
-   `git tag bridge-v1.0.0 && git push origin bridge-v1.0.0`. The workflow **Spectra Bridge release** builds the signed
+4. Release: the tag must equal `desktop-v` + the `version` in `tauri.conf.json`:
+   `git tag desktop-v0.2.0 && git push origin desktop-v0.2.0`. The workflow **Spectra for desktop release** builds the signed
    installers and `latest.json` and publishes them.
 5. Check `https://github.com/Thunderboltdy-10/spectra-desktop/releases/latest/download/latest.json` opens, then
    `https://<domain>/desktop/download/windows` downloads the installer.

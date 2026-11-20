@@ -3186,7 +3186,7 @@ function ArtifactStudioEditor({
       return;
     }
     setNativeRecoveryError(
-      "Connect Bridge and add a folder in Spectra Settings before keeping a local copy.",
+      "Connect this computer and add a folder on Devices before keeping a local copy.",
     );
   }, [
     artifact.title,
@@ -5556,7 +5556,7 @@ function ArtifactStudioEditor({
       setStatusActionBusy(true);
       void putBackFile({ workId: artifact._id as never })
         .then(() => toast.success("Putting the file back in its folder."))
-        .catch(() => toast.error("The file couldn't be put back. Check that this computer's Bridge is running."))
+        .catch(() => toast.error("The file couldn't be put back. Check that Spectra for desktop is running on this computer."))
         .finally(() => setStatusActionBusy(false));
       return;
     }

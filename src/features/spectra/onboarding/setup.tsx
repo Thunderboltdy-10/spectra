@@ -355,12 +355,12 @@ function BridgeStep({ platform, ready, onDone, onBack }: { platform: BridgePlatf
       )}
       {!ready && permission === "denied" ? (
         <p className="device-problem mt-3" role="alert">
-          Your browser is blocking Spectra from reaching Bridge. {NETWORK_PERMISSION_FIX}
+          Your browser is blocking Spectra from reaching Spectra for desktop. {NETWORK_PERMISSION_FIX}
         </p>
       ) : null}
       <ConfirmDialog
         open={skipping}
-        title={desktop ? "Connect Bridge later?" : "Set up Spectra for desktop later?"}
+        title={desktop ? "Connect this computer later?" : "Set up Spectra for desktop later?"}
         detail="Without it, Spectra can't reach files on this computer or run Codex and Claude Code. You can set it up any time from Devices."
         confirmLabel="Not now"
         cancelLabel="Set it up"

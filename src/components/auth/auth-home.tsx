@@ -71,7 +71,7 @@ const STORIES: Record<AuthHomeKind, Story> = {
     recap: "Your classes are coming in from your school, with their tasks and deadlines.",
     moves: [
       { title: "Meet your classes", why: "Each one has its own place for notes, files and tasks.", type: "planner_task", action: "Open", done: "Opened" },
-      { title: "Put Bridge on your laptop", why: "The folders you choose stay in step with Spectra.", type: "document", action: "Open", done: "Opened" },
+      { title: "Put Spectra for desktop on your laptop", why: "The folders you choose stay in step with Spectra.", type: "document", action: "Open", done: "Opened" },
       { title: "Ask Spectra anything", why: "About a class, a task, or something you are stuck on.", type: "thread_reference", action: "Ask", done: "Asked" },
     ],
     week: [

@@ -2,7 +2,7 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Spectra",
   "mainBinaryName": "spectra",
-  "version": "1.0.0",
+  "version": "0.2.0",
   "identifier": "com.spectra.bridge",
   "build": {
     "frontendDist": "desktop"

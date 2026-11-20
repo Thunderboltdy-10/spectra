@@ -128,11 +128,11 @@ describe("devices model", () => {
 
   it("tells apart a Bridge that still reports to Spectra but this browser can't reach, from one that stopped", () => {
     const unreachable = devicesModel({ local: { reachability: "not-running", status: status({ paired: false }) }, cloud, now: NOW });
-    expect(unreachable.thisComputer?.detail).toMatch(/connected to Spectra, but this browser can't reach it/);
+    expect(unreachable.thisComputer?.detail).toMatch(/is connected, but this browser can't reach it/);
     const quiet = devicesModel({ local: { reachability: "not-running", status: status({ paired: false }) }, cloud, now: NOW + DEVICE_ONLINE_MS });
-    expect(quiet.thisComputer?.detail).toBe("Bridge isn't running. Open Spectra for desktop on this computer, then try again.");
+    expect(quiet.thisComputer?.detail).toBe("Spectra for desktop isn't running. Open it on this computer, then try again.");
     const running = devicesModel({ local: { reachability: "running", status: status({ paired: false }) }, cloud, now: NOW });
-    expect(running.thisComputer?.detail).toBe("Bridge is running. Try again to reconnect this browser to it.");
+    expect(running.thisComputer?.detail).toBe("Spectra for desktop is running. Try again to reconnect this browser to it.");
   });
 
   it("says out of date when this Bridge is too old", () => {

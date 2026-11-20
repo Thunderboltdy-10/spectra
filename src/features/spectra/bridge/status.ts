@@ -298,7 +298,7 @@ export function isPresentationReady(key: SyncPresentation["key"]): boolean {
 const DEVICE_PROBLEMS: Record<string, { label: string; action?: SyncPresentation["action"] }> = {
   COLLABORATION_DEVICE_MISSING: { label: "Not on this computer", action: { label: "Bring it back", kind: "reconnect" } },
   COLLABORATION_DEVICE_ELSEWHERE: { label: "On another computer" },
-  COLLABORATION_DEVICE_UNAVAILABLE: { label: "Bridge isn't answering", action: { label: "Open Devices", kind: "reconnect" } },
+  COLLABORATION_DEVICE_UNAVAILABLE: { label: "Computer isn't answering", action: { label: "Open Devices", kind: "reconnect" } },
 };
 
 /** A work kept on a computer that can't be opened here says why, in its own words. */

@@ -15,7 +15,7 @@ export class AccountMismatchError extends Error {
 export async function localBridgeRelay(accountId?: string, timeoutMs = 2_500) {
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const unavailable = () => new Error("DEVICE_STORE_UNAVAILABLE: Bridge cannot verify this account's connection on this computer. Update or reconnect your Bridge.");
+  const unavailable = () => new Error("DEVICE_STORE_UNAVAILABLE: Spectra for desktop cannot confirm this account's connection on this computer. Update it, or connect this computer again from Devices.");
   const notRunning = () => new Error("DEVICE_STORE_UNAVAILABLE: Spectra for desktop isn't running on this computer. Open it from the Start menu.");
   // A Bridge paired to someone else is running: say so, so the person reconnects it instead of restarting it.
   const otherAccount = () => new AccountMismatchError();

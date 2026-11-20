@@ -254,10 +254,10 @@ function thisComputerView(local: LocalBridge, cloud: CloudDevice | undefined, mo
         : local.reachability === "port-taken"
           ? "Another app is using Bridge's connection. Close it, then try again."
           : local.reachability === "running"
-            ? "Bridge is running. Try again to reconnect this browser to it."
+            ? "Spectra for desktop is running. Try again to reconnect this browser to it."
             : reporting
-              ? "Bridge is connected to Spectra, but this browser can't reach it. Try again. If that doesn't work, quit Bridge from its icon near the clock and open it again."
-              : "Bridge isn't running. Open Spectra for desktop on this computer, then try again.";
+              ? "Spectra for desktop is connected, but this browser can't reach it. Try again. If that doesn't work, quit Spectra from its icon near the clock and open it again."
+              : "Spectra for desktop isn't running. Open it on this computer, then try again.";
     return { ...common, tone: "offline", label: "Not connected", detail };
   }
   if (allPaused) return { ...common, tone: "paused", label: "Paused", detail: "Syncing is paused on this computer." };
@@ -428,6 +428,6 @@ export function describeDevicesForAi(cloud: CloudOverview | null | undefined, no
   return [
     ...described,
     "Everything synced from these computers is already in Spectra: find it with search. To see what else is on a computer, use devices list_names, and offer to sync what would help.",
-    "Folder, pause, logs and update actions run on the computer where the user has Spectra open with Bridge.",
+    "Folder, pause, logs and update actions run on the computer where the user has Spectra open, in Spectra for desktop or a browser.",
   ].join("\n\n");
 }

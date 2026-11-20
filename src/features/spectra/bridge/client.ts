@@ -250,14 +250,14 @@ export function bridgeReachabilityCopy(kind: BridgeReachability): {
     return {
       label: "Offline",
       detail:
-        "This browser is offline. Spectra cannot check Bridge until you reconnect.",
+        "This browser is offline. Spectra cannot check for Spectra for desktop until you reconnect.",
     };
   }
   if (kind === "not-set-up") {
     return {
       label: "Not connected",
       detail:
-        "Connect Bridge to use files that live on this PC. Spectra looks for Bridge only on devices you have connected.",
+        "Connect this computer to use files that live on this PC. Spectra looks for Spectra for desktop only on devices you have connected.",
     };
   }
   if (kind === "not-running") {
@@ -271,7 +271,7 @@ export function bridgeReachabilityCopy(kind: BridgeReachability): {
     return {
       label: "Not recognised",
       detail:
-        "Something on this PC answered in Bridge's place, but not as Spectra. Restart Spectra from the system tray; if this stays, another app may be using its connection.",
+        "Something else on this PC answered in place of Spectra for desktop. Restart Spectra from the system tray; if this stays, another app may be using its connection.",
     };
   }
   if (kind === "update-required") {
@@ -285,7 +285,7 @@ export function bridgeReachabilityCopy(kind: BridgeReachability): {
     return {
       label: "Not connected",
       detail:
-        "Bridge is running on this PC. Connect this device to use files that live here.",
+        "Spectra for desktop is running on this PC. Connect this device to use files that live here.",
     };
   }
   return {
@@ -303,7 +303,7 @@ export function rememberedFolderDetail(kind: BridgeReachability): string {
     return "This folder is remembered. Connect this device to use it.";
   }
   if (kind === "not-set-up") {
-    return "This folder is remembered. Connect Bridge on this device to use it.";
+    return "This folder is remembered. Connect this computer to use it.";
   }
   if (kind === "port-taken") {
     return "This folder is remembered. Bridge cannot use it until the connection is free.";
@@ -328,9 +328,9 @@ export function folderChipLabel(input: {
   if (input.state === "waiting") {
     return input.reachability === "connected"
       ? "Waiting to retry"
-      : "Waiting for Bridge";
+      : "Waiting for Spectra for desktop";
   }
-  if (input.state === "disconnected") return "Waiting for Bridge";
+  if (input.state === "disconnected") return "Waiting for Spectra for desktop";
   if (input.state === "unavailable") return "Not available";
   if (input.state === "error") return "Needs attention";
   return "Needs attention";
@@ -371,7 +371,7 @@ export function pairingFailureMessage(
     return "This version of Spectra for desktop connects only to spectra.ink. Open Devices there and connect again.";
   }
   if (/PAIRING_CHALLENGE_INVALID/.test(raw)) {
-    return "Spectra could not confirm this computer. Start connecting again from Bridge.";
+    return "Spectra could not confirm this computer. Start connecting again from Devices.";
   }
   return humanizePublicFailure(error);
 }

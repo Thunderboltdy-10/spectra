@@ -7,7 +7,7 @@ import { latestRelease } from "@/lib/desktop-releases";
  */
 export async function GET() {
   const release = await latestRelease();
-  const version = release?.tag_name?.replace(/^bridge-v/, "").replace(/^v/, "");
+  const version = release?.tag_name?.replace(/^(desktop|bridge)-v/, "").replace(/^v/, "");
   if (version && /^\d+\.\d+\.\d+/.test(version)) {
     return NextResponse.json({ version }, { headers: { "cache-control": "public, max-age=600" } });
   }

@@ -185,7 +185,7 @@ const APP_SPECS: readonly AppSpec[] = [
   },
   {
     id: "app.devices.pair",
-    description: "Connect this computer through Bridge; the user confirms the code on the computer.",
+    description: "Connect this computer so Bridge syncs its files; in the app or a browser on the same computer it connects by itself.",
     risk: "confirm",
     availability: "readable",
     choreography: { target: "devices-route", region: "pair" },

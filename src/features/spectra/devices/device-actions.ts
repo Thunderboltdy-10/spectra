@@ -34,7 +34,7 @@ const DONE: Record<LocalDeviceAction, string> = {
   remove_folder: "Stopped syncing the folder. Files stay on this computer.",
   pause_syncing: "Paused syncing on this computer.",
   resume_syncing: "Resumed syncing on this computer.",
-  show_logs: "Opened Bridge's logs on this computer.",
+  show_logs: "Opened the sync log on this computer.",
   update: "Updating Spectra for desktop.",
 };
 

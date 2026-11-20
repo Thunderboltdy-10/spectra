@@ -268,7 +268,7 @@ describe("Devices page", () => {
   it("asks before reconnecting a computer whose Bridge was disconnected on purpose", () => {
     h.local = { ...bridge(false), reachability: "running", discovery: { kind: "running", health: { version: "1", paired: false, protocolVersion: "1.0", disconnectedHere: true } } };
     render(<DevicesPage />);
-    expect(screen.getByText(/This computer was disconnected\. Bridge is still running here/)).toBeTruthy();
+    expect(screen.getByText(/This computer was disconnected\. Spectra for desktop is still running here/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Connect this computer" })).toBeTruthy();
   });
 

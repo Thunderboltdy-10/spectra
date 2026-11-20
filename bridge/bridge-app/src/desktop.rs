@@ -434,8 +434,8 @@ mod tests {
 
     #[test]
     fn the_marker_names_the_version_and_only_trusts_spectra() {
-        let script = marker_script("1.0.0", &site());
-        assert!(script.contains("\"version\":\"1.0.0\""));
+        let script = marker_script("0.2.0", &site());
+        assert!(script.contains("\"version\":\"0.2.0\""));
         assert!(script.contains("[\"https://spectra.ink\"]"));
         assert!(script.contains("spectraDesktop"));
         assert!(script.contains("o.indexOf(here)<0)return"));

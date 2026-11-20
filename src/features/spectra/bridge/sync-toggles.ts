@@ -120,7 +120,7 @@ export function mountCountTruth(input: {
     return {
       kind: "unavailable",
       sentence:
-        "This folder is not available until Bridge is running.",
+        "This folder is not available until Spectra for desktop is running.",
     };
   }
   if (input.total <= 0) return { kind: "hidden" };

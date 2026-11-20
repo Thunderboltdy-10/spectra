@@ -1,7 +1,7 @@
 import type { BridgePlatform } from "../bridge/client";
 
 /*
- * What happens after the download, in order. Said wherever Bridge is fetched
+ * What happens after the download, in order. Said wherever Spectra for desktop is fetched
  * (Devices, the pairing card, setup), because the browser's permission
  * question is easy to dismiss and nothing works without it.
  */
@@ -15,7 +15,7 @@ export function BridgeInstallSteps({ platform }: { platform: BridgePlatform }) {
       </li>
       <li>
         <strong>Allow the browser to talk to it</strong>
-        <span>Your browser asks to let this page reach apps on this device. Choose Allow, or Spectra can&apos;t see Bridge.</span>
+        <span>Your browser asks to let this page reach apps on this device. Choose Allow, or this page can&apos;t reach the app.</span>
       </li>
       <li>
         <strong>That&apos;s it from then on</strong>

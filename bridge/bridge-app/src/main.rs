@@ -1203,7 +1203,7 @@ fn grant_label(grants: &GrantRegistry, grant_id: &str) -> String {
 fn open_sync_log(app: &tauri::AppHandle) -> Result<(), String> {
     let runtime = app
         .try_state::<BridgeRuntime>()
-        .ok_or_else(|| "Bridge is still starting".to_string())?;
+        .ok_or_else(|| "Spectra is still starting".to_string())?;
     let dir = app.path().app_log_dir().map_err(|error| error.to_string())?;
     std::fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
     let path = dir.join("Spectra sync log.txt");
@@ -1502,7 +1502,7 @@ fn mount_root_key(grant: &Grant) -> String {
     hex::encode(sha2::Sha256::digest(normalized.as_bytes()))
 }
 
-const UNKNOWN_DEPLOYMENT: &str = "This Bridge does not know which Spectra to sync with yet. Pair it again from Devices in Spectra.";
+const UNKNOWN_DEPLOYMENT: &str = "Spectra for desktop does not know which Spectra to sync with yet. Connect this computer again from Devices in Spectra.";
 
 fn configured_deployment_url(value: Option<String>) -> Result<String, String> {
     let url = value
@@ -4178,7 +4178,7 @@ async fn complete_pairing_offer(
     let existing = match journal.config("device_id").map_err(|error| error.to_string())? {
         Some(device_id) => {
             HostPlatform.read_credential(&device_id)
-                .map_err(|_| "Bridge cannot read this computer's saved key right now. Try again when your system keyring is available.".to_string())?
+                .map_err(|_| "Spectra cannot read this computer's saved key right now. Try again when your system keyring is available.".to_string())?
         }
         None => None,
     };
@@ -5444,7 +5444,7 @@ fn open_logs_impl(app: &tauri::AppHandle, journal: &Journal) -> Result<(), Strin
     };
     std::fs::write(&path, contents).map_err(|error| error.to_string())?;
     open_with_system(path.as_os_str())
-        .map_err(|error| format!("Could not open the Bridge log: {error}"))
+        .map_err(|error| format!("Could not open the sync log: {error}"))
 }
 
 async fn run_sync_iteration(
@@ -6173,7 +6173,7 @@ fn main() {
                     "disconnect" => {
                         let control = local_control.clone();
                         app.dialog()
-                            .message("Bridge will forget this connection and its selected files and folders. Your files stay on this computer. Choose them again after reconnecting.")
+                            .message("Spectra will forget this computer's connection and its selected files and folders. Your files stay on this computer. Choose them again after reconnecting.")
                             .title("Disconnect this computer?")
                             .buttons(MessageDialogButtons::OkCancelCustom("Disconnect".into(), "Keep connected".into()))
                             .show(move |confirmed| {
@@ -6841,9 +6841,9 @@ mod tests {
     use std::sync::Arc;
 
     #[test]
-    fn bridge_without_a_deployment_asks_to_pair_again() {
+    fn without_a_deployment_it_asks_to_connect_again() {
         let error = configured_deployment_url(None).unwrap_err();
-        assert!(error.contains("Pair it again from Devices"));
+        assert!(error.contains("Connect this computer again from Devices"));
         assert!(configured_deployment_url(Some("   ".into())).is_err());
     }
 

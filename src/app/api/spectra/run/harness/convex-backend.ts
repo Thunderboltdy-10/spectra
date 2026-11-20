@@ -350,7 +350,7 @@ export class ConvexHarnessBackend implements HarnessBackend {
       ? await readLiveArtifactValue({ artifactId: id, timeoutMs: 3_000, signal }).catch(() => null)
       : null;
     if (artifact.storageHome === "device" && !live)
-      throw new Error("This artifact is kept on the person's computer, and Bridge isn't reachable right now. Tell them to open it.");
+      throw new Error("This artifact is kept on the person's computer, and Spectra for desktop isn't reachable right now. Tell them to open it.");
     const current = overlayLiveArtifactRecord(artifact, live);
     const placement = rows(artifact.placements)[0];
     return {

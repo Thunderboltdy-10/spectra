@@ -378,7 +378,7 @@ export function DevicesPage() {
               {alreadySynced ? <AlreadySyncedNotice files={alreadySynced} onDismiss={() => setAlreadySynced(null)} /> : null}
               {permission === "denied" && local.reachability !== "connected" ? (
                 <div className="device-problem" role="alert">
-                  <p className="device-problem-title">Your browser is blocking Spectra from reaching Bridge</p>
+                  <p className="device-problem-title">Your browser is blocking Spectra from reaching Spectra for desktop</p>
                   <p>
                     Spectra talks to Bridge on this computer, and the browser was told not to allow that. {NETWORK_PERMISSION_FIX}
                   </p>
@@ -418,9 +418,9 @@ export function DevicesPage() {
                 <div className="device-connect">
                   <p className="max-w-xl text-ui leading-6 text-[var(--text-secondary)]">
                     {isAuthenticated && local.discovery.kind === "running" && local.discovery.health.disconnectedHere
-                      ? "This computer was disconnected. Bridge is still running here; connect it again to use its files."
+                      ? "This computer was disconnected. Spectra for desktop is still running here; connect it again to use its files."
                       : isAuthenticated && removedHere && local.discovery.kind === "running"
-                      ? "You removed this computer. Bridge is still running here; pair it again to use its files."
+                      ? "You removed this computer. Spectra for desktop is still running here; connect it again to use its files."
                       : isAuthenticated
                       ? // Pairing is per browser: Bridge can be running, even paired, while this browser isn't connected to it.
                         bridgeReachabilityCopy(local.reachability).detail

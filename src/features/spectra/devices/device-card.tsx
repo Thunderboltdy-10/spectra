@@ -196,7 +196,7 @@ export function DeviceCard({
       <footer className="device-card-foot">
         <span className="min-w-0 flex-[1_1_160px] truncate">
           {facts.join(", ")}
-          {device.updateRequired ? ". This Bridge is out of date." : "."}
+          {device.updateRequired ? ". Its Spectra for desktop is out of date." : "."}
         </span>
         {local ? (
           <Button variant="ghost" size="sm" disabled={busy === "show_logs"} onClick={() => onAction({ action: "show_logs" })}>
@@ -217,7 +217,7 @@ export function DeviceCard({
           <Button asChild variant="ghost" size="sm">
             <a href={downloadUrl} rel="noopener">
               <Icon name="download" size={16} />
-              Download the new Bridge
+              Download the new Spectra for desktop
             </a>
           </Button>
         ) : null}
@@ -225,7 +225,7 @@ export function DeviceCard({
           <Button asChild variant="ghost" size="sm">
             <a href={downloadUrl} rel="noopener">
               <Icon name="download" size={16} />
-              Download Bridge
+              Download Spectra for desktop
             </a>
           </Button>
         ) : null}

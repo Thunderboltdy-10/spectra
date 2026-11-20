@@ -240,7 +240,7 @@ export function BridgeConnection() {
   }, [checked, discovery.kind, hasDevice, joined]);
   useEffect(() => {
     if (inSetup || !unjoined || rejoinable || pathname.startsWith("/devices") || offeredRecently()) return;
-    toast.info("Bridge can sync files on this computer.", {
+    toast.info("Spectra for desktop is on this computer. Connect it to sync your files.", {
       id: "bridge-connect-offer",
       action: { label: "Connect", onClick: () => router.push("/devices?connect=1") },
     });
